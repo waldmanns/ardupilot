@@ -28,6 +28,7 @@ public:
         FRAME_TYPE_OMNIX = 2,
         FRAME_TYPE_OMNIPLUS = 3,
         FRAME_TYPE_OMNI3MECANUM = 4,
+        FRAME_TYPE_VSP_2REAR = 90,
     };
 
     // initialise motors
@@ -151,6 +152,10 @@ private:
 
     // setup for frames with omni motors
     void setup_omni();
+
+    void add_vsp_motor(int8_t motor_num, float throttle_factor, float steering_factor, float lateral_factor);
+
+    void add_vsp_motor_num(int8_t motor_num);
 
     // add omni motor using separate throttle, steering and lateral factors
     void add_omni_motor(int8_t motor_num, float throttle_factor, float steering_factor, float lateral_factor);

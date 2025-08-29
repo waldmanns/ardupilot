@@ -638,6 +638,12 @@ void AP_MotorsUGV::setup_omni()
     case FRAME_TYPE_UNDEFINED:
         break;
 
+    case FRAME_TYPE_VSP_2REAR:
+        _motors_num = 5;
+        add_vsp_motor(0, 1.0f, -1.0f, -1.0f);
+
+        break;
+
     case FRAME_TYPE_OMNI3:
         _motors_num = 3;
         add_omni_motor(0, 1.0f, -1.0f, -1.0f);
@@ -670,6 +676,29 @@ void AP_MotorsUGV::setup_omni()
     }
 }
 
+void AP_MotorsUGV::add_vsp_motor(int8_t motor_num, float throttle_factor, float steering_factor, float lateral_factor) {
+    if (motor_num >= 0 && motor_num < AP_MOTORS_NUM_MOTORS_MAX) {
+        _throttle_factor[motor_num] = throttle_factor;
+        _steering_factor[motor_num] = steering_factor;
+        _lateral_factor[motor_num]  = lateral_factor;
+        add_vsp_motor_num(motor_num);
+    }
+}
+
+// add an omni motor and set up default output function
+void AP_MotorsUGV::add_vsp_motor_num(int8_t motor_num)
+{
+    // ensure a valid motor number is provided
+    if (motor_num >= 0 && motor_num < AP_MOTORS_NUM_MOTORS_MAX) {
+        uint8_t chan;
+        SRV_Channel::Function function = SRV_Channels::get_motor_function(motor_num);
+        SRV_Channels::set_aux_channel_default(function, motor_num);
+        if (!SRV_Channels::find_channel(function, chan)) {
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Motors: unable to setup motor %u", motor_num);
+        }
+    }
+}
+
 // add omni motor using separate throttle, steering and lateral factors
 void AP_MotorsUGV::add_omni_motor(int8_t motor_num, float throttle_factor, float steering_factor, float lateral_factor)
 {
@@ -684,6 +713,8 @@ void AP_MotorsUGV::add_omni_motor(int8_t motor_num, float throttle_factor, float
         add_omni_motor_num(motor_num);
     }
 }
+
+
 
 // add an omni motor and set up default output function
 void AP_MotorsUGV::add_omni_motor_num(int8_t motor_num)
