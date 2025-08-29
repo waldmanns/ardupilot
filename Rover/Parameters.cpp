@@ -1,6 +1,7 @@
 #include "Rover.h"
 
 #include <AP_Gripper/AP_Gripper.h>
+#include "vspvessel.h"
 
 /*
   Rover parameter definitions
@@ -338,6 +339,8 @@ const AP_Param::Info Rover::var_info[] = {
     GOBJECT(_gcs,           "MAV",  GCS),
 #endif
 
+    GOBJECT(_vspvessel,           "VSP",  VSPVESSEL),
+
     AP_VAREND
 };
 
@@ -633,6 +636,11 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Path: mode_circle.cpp
     AP_SUBGROUPINFO(mode_circle, "CIRC", 57, ParametersG2, ModeCircle),
 
+
+
+
+    
+
     AP_GROUPEND
 };
 
@@ -697,6 +705,8 @@ ParametersG2::ParametersG2(void)
 {
     AP_Param::setup_object_defaults(this, var_info);
 }
+
+
 
 
 /*

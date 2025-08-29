@@ -153,9 +153,13 @@ Rover::Rover(void) :
     AP_Vehicle(),
     param_loader(var_info),
     modes(&g.mode1),
-    control_mode(&mode_initializing)
+    control_mode(&mode_initializing),
+    evsp(AP_eVSP::get_instance())   // initialize the evsp reference
 {
+
 }
+
+
 
 #if AP_SCRIPTING_ENABLED || AP_EXTERNAL_CONTROL_ENABLED
 // set target location (for use by external control and scripting)
@@ -358,7 +362,7 @@ void Rover::gcs_failsafe_check(void)
     }
 
     // calc time since last gcs update
-    // note: this only looks at the heartbeat from the device ids approved by gcs().sysid_is_gcs()
+    // note: this only looks at the heartbeat from the device id set by gcs().sysid_gcs()
     const uint32_t last_gcs_update_ms = millis() - gcs_last_seen_ms;
     const uint32_t gcs_timeout_ms = uint32_t(constrain_float(g2.fs_gcs_timeout * 1000.0f, 0.0f, UINT32_MAX));
 
