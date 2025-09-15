@@ -114,7 +114,10 @@ public:
     bool is_digital_pwm_type() const;
 
     // returns true if the vehicle is omni
-    bool is_omni() const { return _frame_type != FRAME_TYPE_UNDEFINED && _motors_num > 0; }
+    bool is_omni() const { return _frame_type != FRAME_TYPE_UNDEFINED && _frame_type != FRAME_TYPE_VSP_2REAR && _motors_num > 0; }
+
+    // returns true if the vehicle is VSP
+    bool is_vsp() const { return _frame_type == FRAME_TYPE_VSP_2REAR && _motors_num > 0; }
 
     // Return the relay index that would be used for param conversion to relay functions
     bool get_legacy_relay_index(int8_t &index1, int8_t &index2, int8_t &index3, int8_t &index4) const;
@@ -156,6 +159,8 @@ private:
     void add_vsp_motor(int8_t motor_num, float throttle_factor, float steering_factor, float lateral_factor);
 
     void add_vsp_motor_num(int8_t motor_num);
+
+    void output_vsp(bool armed, float steering, float throttle, float lateral, int vsp_index);
 
     // add omni motor using separate throttle, steering and lateral factors
     void add_omni_motor(int8_t motor_num, float throttle_factor, float steering_factor, float lateral_factor);

@@ -1,6 +1,7 @@
 #include "Rover.h"
 
 #include <AP_Gripper/AP_Gripper.h>
+#include "vspvessel.h"
 
 /*
   Rover parameter definitions
@@ -338,6 +339,8 @@ const AP_Param::Info Rover::var_info[] = {
     GOBJECT(_gcs,           "MAV",  GCS),
 #endif
 
+    GOBJECT(_vspvessel,           "VSP",  VSPVESSEL),
+
     AP_VAREND
 };
 
@@ -464,7 +467,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Param: FRAME_TYPE
     // @DisplayName: Frame Type
     // @Description: Frame Type
-    // @Values: 0:Undefined,1:Omni3,2:OmniX,3:OmniPlus,4:Omni3Mecanum
+    // @Values: 0:Undefined,1:Omni3,2:OmniX,3:OmniPlus,4:Omni3Mecanum,90:VSP_2REAR
     // @User: Standard
     // @RebootRequired: True
     AP_GROUPINFO("FRAME_TYPE", 24, ParametersG2, frame_type, 0),
@@ -633,6 +636,11 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Path: mode_circle.cpp
     AP_SUBGROUPINFO(mode_circle, "CIRC", 57, ParametersG2, ModeCircle),
 
+
+
+
+    
+
     AP_GROUPEND
 };
 
@@ -697,6 +705,8 @@ ParametersG2::ParametersG2(void)
 {
     AP_Param::setup_object_defaults(this, var_info);
 }
+
+
 
 
 /*

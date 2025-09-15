@@ -231,6 +231,7 @@ public:
 
         k_param_vehicle = 257, // vehicle common block of parameters
         k_param__gcs = 258,
+        k_param__vspvessel
         };
 
     AP_Int16    format_version;
@@ -429,5 +430,6 @@ public:
 
     class ModeCircle mode_circle;
 };
+
 
 extern const AP_Param::Info var_info[];

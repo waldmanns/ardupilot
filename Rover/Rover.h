@@ -45,6 +45,8 @@
 #include <AC_PrecLand/AC_PrecLand_config.h>
 #include <AP_Follow/AP_Follow_config.h>
 #include <AP_ExternalControl/AP_ExternalControl_config.h>
+
+
 #if AP_EXTERNAL_CONTROL_ENABLED
 #include "AP_ExternalControl_Rover.h"
 #endif
@@ -60,6 +62,8 @@
 // Local modules
 #include "AP_Arming_Rover.h"
 #include "sailboat.h"
+#include "vspvessel.h"
+
 #if AP_ROVER_ADVANCED_FAILSAFE_ENABLED
 #include "afs_rover.h"
 #endif
@@ -79,6 +83,7 @@ public:
     friend class GCS_MAVLINK_Rover;
     friend class Parameters;
     friend class ParametersG2;
+    friend class VSPVESSEL;
     friend class AP_Rally_Rover;
     friend class AP_Arming_Rover;
 #if AP_ROVER_ADVANCED_FAILSAFE_ENABLED
@@ -125,6 +130,8 @@ private:
     Parameters g;
     ParametersG2 g2;
 
+    
+
     // mapping between input channels
     RCMapper rcmap;
 
@@ -142,6 +149,8 @@ private:
 
     // Arming/Disarming management class
     AP_Arming_Rover arming;
+
+    
 
     // external control implementation
 #if AP_EXTERNAL_CONTROL_ENABLED
@@ -185,6 +194,8 @@ private:
     // There are multiple states defined such as MANUAL, AUTO, ...
     Mode *control_mode;
 
+
+    
     // Used to maintain the state of the previous control switch position
     // This is set to -1 when we need to re-read the switch
     uint8_t oldSwitchPosition;
@@ -289,6 +300,9 @@ private:
     // balance_bot.cpp
     void balancebot_pitch_control(float &throttle);
     bool is_balancebot() const;
+
+    //vsp vessel
+    bool is_vspvessel() const;
 
     // commands.cpp
     bool set_home_to_current_location(bool lock) override WARN_IF_UNUSED;
@@ -439,6 +453,9 @@ public:
     // frame type
     uint8_t get_frame_type() const { return g2.frame_type.get(); }
     AP_WheelRateControl& get_wheel_rate_control() { return g2.wheel_rate_control; }
+
+    VSPVESSEL _vspvessel;
+
 
     // Simple mode
     float simple_sin_yaw;

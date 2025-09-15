@@ -17,8 +17,10 @@
 #include <GCS_MAVLink/GCS.h>
 #include "AP_MotorsUGV.h"
 #include <AP_Relay/AP_Relay.h>
+#include "../../Rover/Rover.h"
+#include "../../Rover/vspvessel.h"
 
-#define SERVO_MAX 4500  // This value represents 45 degrees and is just an arbitrary representation of servo max travel.
+extern Rover rover;
 
 extern const AP_HAL::HAL& hal;
 
@@ -346,6 +348,13 @@ void AP_MotorsUGV::output(bool armed, float ground_speed, float dt)
     // output for omni frames
     output_omni(armed, _steering, _throttle, _lateral);
 
+    // output for VSP frames  
+    if (is_vsp()) {
+        for (uint8_t i = 0; i < _motors_num; i++) {
+            output_vsp(armed, _steering, _throttle, _lateral, i);
+        }
+    }
+
     // output to sails
     output_sail();
 
@@ -639,9 +648,9 @@ void AP_MotorsUGV::setup_omni()
         break;
 
     case FRAME_TYPE_VSP_2REAR:
-        _motors_num = 5;
-        add_vsp_motor(0, 1.0f, -1.0f, -1.0f);
-
+        _motors_num = 2;
+        add_vsp_motor(0, 1.0f, -1.0f, 0.0f);
+        add_vsp_motor(1, 1.0f, 1.0f, 0.0f);
         break;
 
     case FRAME_TYPE_OMNI3:
@@ -652,7 +661,7 @@ void AP_MotorsUGV::setup_omni()
         break;
 
     case FRAME_TYPE_OMNIX:
-        _motors_num = 4,
+        _motors_num = 4;
         add_omni_motor(0, 1.0f, -1.0f, -1.0f);
         add_omni_motor(1, 1.0f, -1.0f, 1.0f);
         add_omni_motor(2, 1.0f, 1.0f, -1.0f);
@@ -954,6 +963,35 @@ void AP_MotorsUGV::output_skid_steering(bool armed, float steering, float thrott
     // send pwm value to each motor
     output_throttle(SRV_Channel::k_throttleLeft, 100.0f * motor_left, dt);
     output_throttle(SRV_Channel::k_throttleRight, 100.0f * motor_right, dt);
+}
+
+void AP_MotorsUGV::output_vsp(bool armed, float steering, float throttle, float lateral, int vsp_index){
+    if (armed && vsp_index >= 0 && vsp_index < _motors_num) {
+        // scale inputs to -1 to 1
+        const float scaled_throttle = throttle * 0.01f;
+        const float scaled_steering = steering / 4500.0f;
+        const float scaled_lateral = lateral * 0.01f;
+
+        // calculate motor output using VSP mixing factors
+        float output = (scaled_throttle * _throttle_factor[vsp_index]) +
+                       (scaled_steering * _steering_factor[vsp_index]) +
+                       (scaled_lateral * _lateral_factor[vsp_index]);
+
+        // constrain output to -1 to 1 and convert to percentage
+        output = constrain_float(output, -1.0f, 1.0f) * 100.0f;
+
+        // send to output channel
+        output_throttle(SRV_Channels::get_motor_function(vsp_index), output);
+    } else {
+        // Handle disarmed case or invalid index
+        if (vsp_index >= 0 && vsp_index < AP_MOTORS_NUM_MOTORS_MAX) {
+            if (_disarm_disable_pwm) {
+                SRV_Channels::set_output_limit(SRV_Channels::get_motor_function(vsp_index), SRV_Channel::Limit::ZERO_PWM);
+            } else {
+                SRV_Channels::set_output_limit(SRV_Channels::get_motor_function(vsp_index), SRV_Channel::Limit::TRIM);
+            }
+        }
+    }
 }
 
 // output for omni frames
