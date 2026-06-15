@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+
+
+def build(bld):
+    if not bld.env.HAS_GTEST:
+        return
+
+    tests = [
+        ('test_minidp_mode', ['test_mode.cpp', '../Mode.cpp']),
+        ('test_minidp_authority', ['test_authority.cpp', '../Authority.cpp']),
+    ]
+    features = ['test'] if bld.cmd == 'check' else []
+    for name, source in tests:
+        bld.ap_program(
+            features=features,
+            includes=['..', bld.srcnode.abspath() + '/tests/'],
+            source=source,
+            use=['ap', 'GTEST'],
+            program_name=name,
+            program_groups='tests',
+            use_legacy_defines=False,
+            vehicle_binary=False,
+            cxxflags=['-Wno-undef'],
+        )

@@ -61,7 +61,7 @@ public:
         SUBMARINE,
     };
 
-    AP_DAL() {}
+    AP_DAL() = default;
 
     static AP_DAL *get_singleton() {
         if (!_singleton) {
@@ -419,4 +419,3 @@ namespace AP {
 
 // replay printf for debugging
 void rprintf(const char *format, ...);
-

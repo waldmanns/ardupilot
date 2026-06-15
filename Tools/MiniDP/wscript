@@ -1,0 +1,29 @@
+# encoding: utf-8
+
+
+def build(bld):
+    bld.recurse('tests')
+
+    board_libraries = bld.env.AP_LIBRARIES[:]
+    platform_libraries = [
+        library
+        for library in board_libraries
+        if library in ('AP_HAL_ChibiOS', 'AP_HAL_SITL')
+    ]
+
+    # Keep the shell on the generic feature set while giving HAL code the
+    # MiniDP build identity needed for storage names and SITL serial handling.
+    bld.env.AP_LIBRARIES = []
+    bld.ap_stlib(
+        name='MiniDP_platform_libs',
+        ap_vehicle='MiniDP',
+        ap_libraries=platform_libraries,
+        dynamic_source=[],
+    )
+    bld.env.AP_LIBRARIES = board_libraries
+
+    bld.ap_program(
+        program_name='MiniDP',
+        program_groups=['bin', 'minidp'],
+        use=['MiniDP_platform_libs', 'ap'],
+    )
