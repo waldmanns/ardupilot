@@ -8,6 +8,11 @@ def build(bld):
     tests = [
         ('test_minidp_mode', ['test_mode.cpp', '../Mode.cpp']),
         ('test_minidp_authority', ['test_authority.cpp', '../Authority.cpp']),
+        ('test_minidp_input', ['test_input.cpp', '../Input.cpp']),
+        ('test_minidp_axis_limiter', ['test_axis_limiter.cpp', '../AxisLimiter.cpp']),
+        ('test_minidp_controller', ['test_controller.cpp', '../Controller.cpp']),
+        ('test_minidp_output', ['test_output.cpp', '../Output.cpp']),
+        ('test_minidp_actuator_test', ['test_actuator_test.cpp', '../ActuatorTest.cpp']),
     ]
     features = ['test'] if bld.cmd == 'check' else []
     for name, source in tests:

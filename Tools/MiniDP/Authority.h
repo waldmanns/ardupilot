@@ -35,6 +35,7 @@ enum class MiniDP_AuthorityReason : uint8_t {
     RC_KILL,
     TEST_REQUEST,
     TEST_AUTH_REVOKED,
+    MAVLINK_MANUAL_TIMEOUT,
 };
 
 enum class MiniDP_AuthorityReject : uint8_t {

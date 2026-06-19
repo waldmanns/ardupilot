@@ -17,11 +17,17 @@
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <GCS_MAVLink/GCS.h>
 #include <RC_Channel/RC_Channel.h>
+#include <SRV_Channel/SRV_Channel.h>
 #include <SITL/SITL.h>
 
+#include "ActuatorTest.h"
+#include "AxisLimiter.h"
 #include "Authority.h"
+#include "Controller.h"
 #include "GCS_MAVLink.h"
+#include "Input.h"
 #include "Mode.h"
+#include "Output.h"
 #include "State.h"
 
 class MiniDP_RC_Channel : public RC_Channel {};
@@ -60,6 +66,7 @@ public:
         k_param_logger,
         k_param_notify,
         k_param_rc_channels,
+        k_param_servo_channels,
         k_param_gcs_backend,
         k_param_barometer,
         k_param_ahrs,
@@ -74,6 +81,32 @@ public:
         k_param_auth_target_loss,
         k_param_auth_rc_timeout,
         k_param_auth_mav_timeout,
+        k_param_frame_type,
+        k_param_in_rc_surge_channel,
+        k_param_in_rc_sway_channel,
+        k_param_in_rc_yaw_channel,
+        k_param_in_rc_kill_channel,
+        k_param_in_rc_kill_pwm,
+        k_param_manual_enable,
+        k_param_manual_deadband,
+        k_param_manual_surge_limit,
+        k_param_manual_sway_limit,
+        k_param_manual_yaw_limit,
+        k_param_manual_mavlink_timeout,
+        k_param_axis_deadband,
+        k_param_axis_surge_limit,
+        k_param_axis_sway_limit,
+        k_param_axis_yaw_limit,
+        k_param_axis_surge_slew,
+        k_param_axis_sway_slew,
+        k_param_axis_yaw_slew,
+        k_param_ctrl_yaw_p,
+        k_param_ctrl_yaw_d,
+        k_param_ctrl_position_p,
+        k_param_ctrl_velocity_d,
+        k_param_ctrl_surge_limit,
+        k_param_ctrl_sway_limit,
+        k_param_ctrl_yaw_limit,
     };
 
     AP_Int16 format_version;
@@ -87,6 +120,38 @@ public:
     AP_Int8 auth_target_loss;
     AP_Float auth_rc_timeout;
     AP_Float auth_mav_timeout;
+    AP_Int16 frame_type;
+    AP_Int8 in_rc_surge_channel;
+    AP_Int8 in_rc_sway_channel;
+    AP_Int8 in_rc_yaw_channel;
+    AP_Int8 in_rc_kill_channel;
+    AP_Int16 in_rc_kill_pwm;
+    AP_Int8 manual_enable;
+    AP_Float manual_deadband;
+    AP_Float manual_surge_limit;
+    AP_Float manual_sway_limit;
+    AP_Float manual_yaw_limit;
+    AP_Float manual_mavlink_timeout;
+    AP_Float axis_deadband;
+    AP_Float axis_surge_limit;
+    AP_Float axis_sway_limit;
+    AP_Float axis_yaw_limit;
+    AP_Float axis_surge_slew;
+    AP_Float axis_sway_slew;
+    AP_Float axis_yaw_slew;
+    AP_Float ctrl_yaw_p;
+    AP_Float ctrl_yaw_d;
+    AP_Float ctrl_position_p;
+    AP_Float ctrl_velocity_d;
+    AP_Float ctrl_surge_limit;
+    AP_Float ctrl_sway_limit;
+    AP_Float ctrl_yaw_limit;
+};
+
+struct MiniDP_ModeCommandResult {
+    bool accepted;
+    MiniDP_ModeReject mode_rejection;
+    MiniDP_AuthorityReject authority_rejection;
 };
 
 class MiniDP {
@@ -101,6 +166,16 @@ public:
     MiniDP_Mode get_mode() const { return mode_manager.mode(); }
     const MiniDP_ModeTarget &get_mode_target() const { return mode_manager.target(); }
     MiniDP_ControlOwner get_control_owner() const { return authority.owner(); }
+    MiniDP_ActuatorTestStartResult request_actuator_test(
+        const MiniDP_ActuatorTestRequest &request);
+    MiniDP_ModeCommandResult request_mode(
+        MiniDP_Mode requested,
+        MiniDP_ModeReason reason);
+    void record_mavlink_manual_control(
+        uint32_t now_ms,
+        int16_t x,
+        int16_t y,
+        int16_t r);
 
     Parameters g;
 
@@ -114,6 +189,7 @@ public:
     AP_Logger logger;
     AP_Notify notify;
     MiniDP_RC_Channels rc_channels;
+    SRV_Channels servo_channels;
 #if HAL_GCS_ENABLED
     GCS_MiniDP gcs_backend;
 #endif
@@ -132,11 +208,29 @@ private:
     MiniDP_StateSource state_source;
     MiniDP_ModeManager mode_manager;
     MiniDP_AuthorityArbiter authority;
+    MiniDP_OutputManager output_manager;
+    MiniDP_InputMapper input_mapper;
+    MiniDP_AxisLimiter axis_limiter;
+    MiniDP_Controller controller;
+    MiniDP_ActuatorTest actuator_test;
     MiniDP_AuthorityStatus authority_status{};
+    MiniDP_RCInputFrame rc_input_frame{};
+    MiniDP_ManualCommand rc_manual_command{};
+    MiniDP_ManualCommand mavlink_manual_command{};
+    MiniDP_ManualCommand active_manual_command{};
 
     void load_parameters();
-    void disable_outputs();
+    MiniDP_InputConfig make_input_config() const;
+    MiniDP_AxisLimiterConfig make_axis_limiter_config() const;
+    MiniDP_ControllerConfig make_controller_config() const;
+    MiniDP_OutputState desired_output_state() const;
+    void setup_motor_output_defaults();
+    uint32_t motor_output_channel_mask() const;
+    void apply_outputs(const MiniDP_OutputFrame &frame);
     void update_authority(uint32_t now_ms);
+    void capture_rc_input_frame(bool rc_healthy);
+    void update_manual_input(uint32_t now_ms);
+    void update_actuator_test(uint32_t now_ms);
     void report_authority_transition();
     void report_mode_transition();
     void report_status();

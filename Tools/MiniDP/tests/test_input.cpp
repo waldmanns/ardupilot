@@ -1,0 +1,126 @@
+#include <AP_gtest.h>
+
+#include "Input.h"
+
+#include <limits.h>
+
+namespace {
+
+MiniDP_RCInputFrame healthy_frame(const uint8_t channel_count = 8U)
+{
+    MiniDP_RCInputFrame frame{};
+    frame.healthy = true;
+    frame.channel_count = channel_count;
+    for (uint8_t i = 0; i < MiniDP_InputMapper::max_rc_channels; i++) {
+        frame.pwm[i] = 1500U;
+    }
+    return frame;
+}
+
+} // namespace
+
+TEST(MiniDPInput, DefaultsMapRcSurgeSwayYawThroughLimits)
+{
+    MiniDP_InputMapper input;
+    input.init();
+
+    MiniDP_RCInputFrame frame = healthy_frame();
+    frame.norm[1] = 0.8f;   // RC2 surge
+    frame.norm[0] = -0.4f;  // RC1 sway
+    frame.norm[3] = 0.3f;   // RC4 yaw
+
+    const MiniDP_ManualCommand command = input.map_rc(frame, 100U);
+
+    ASSERT_TRUE(command.valid);
+    EXPECT_EQ(command.source, MiniDP_ManualSource::RC);
+    EXPECT_FLOAT_EQ(command.axes.surge, 0.4f);
+    EXPECT_FLOAT_EQ(command.axes.sway, -0.2f);
+    EXPECT_FLOAT_EQ(command.axes.yaw, 0.15f);
+}
+
+TEST(MiniDPInput, DeadbandZerosSmallManualInputs)
+{
+    MiniDP_InputMapper input;
+    input.init();
+
+    MiniDP_RCInputFrame frame = healthy_frame();
+    frame.norm[1] = 0.02f;
+    frame.norm[0] = -0.02f;
+    frame.norm[3] = 0.02f;
+
+    const MiniDP_ManualCommand command = input.map_rc(frame, 100U);
+
+    ASSERT_TRUE(command.valid);
+    EXPECT_FLOAT_EQ(command.axes.surge, 0.0f);
+    EXPECT_FLOAT_EQ(command.axes.sway, 0.0f);
+    EXPECT_FLOAT_EQ(command.axes.yaw, 0.0f);
+}
+
+TEST(MiniDPInput, RejectsRcWhenMappedChannelMissing)
+{
+    MiniDP_InputMapper input;
+    input.init();
+
+    MiniDP_RCInputFrame frame = healthy_frame(3U);
+    frame.norm[1] = 0.8f;
+
+    const MiniDP_ManualCommand command = input.map_rc(frame, 100U);
+
+    EXPECT_FALSE(command.valid);
+}
+
+TEST(MiniDPInput, ConfiguredRcKillBlocksCommand)
+{
+    MiniDP_InputMapper input;
+    input.init();
+
+    MiniDP_InputConfig config = input.config();
+    config.rc_kill_channel = 5U;
+    config.rc_kill_pwm = 1700U;
+    input.set_config(config);
+
+    MiniDP_RCInputFrame frame = healthy_frame();
+    frame.pwm[4] = 1800U;
+    frame.norm[1] = 0.8f;
+
+    const MiniDP_ManualCommand command = input.map_rc(frame, 100U);
+
+    EXPECT_TRUE(input.rc_kill_active(frame));
+    EXPECT_TRUE(command.kill);
+    EXPECT_FALSE(command.valid);
+}
+
+TEST(MiniDPInput, MavlinkManualMapsAxesAndTimesOut)
+{
+    MiniDP_InputMapper input;
+    input.init();
+
+    input.record_mavlink_manual_control(100U, 600, -1000, 250);
+
+    MiniDP_ManualCommand command = input.mavlink_manual_command(500U);
+    ASSERT_TRUE(command.valid);
+    EXPECT_EQ(command.source, MiniDP_ManualSource::MAVLINK);
+    EXPECT_FLOAT_EQ(command.axes.surge, 0.3f);
+    EXPECT_FLOAT_EQ(command.axes.sway, -0.5f);
+    EXPECT_FLOAT_EQ(command.axes.yaw, 0.125f);
+
+    command = input.mavlink_manual_command(601U);
+    EXPECT_FALSE(command.valid);
+}
+
+TEST(MiniDPInput, MavlinkManualClampsAndIgnoresInvalidAxis)
+{
+    MiniDP_InputMapper input;
+    input.init();
+
+    input.record_mavlink_manual_control(100U, 1500, INT16_MAX, -1500);
+
+    const MiniDP_ManualCommand command = input.mavlink_manual_command(100U);
+
+    ASSERT_TRUE(command.valid);
+    EXPECT_FLOAT_EQ(command.axes.surge, 0.5f);
+    EXPECT_FLOAT_EQ(command.axes.sway, 0.0f);
+    EXPECT_FLOAT_EQ(command.axes.yaw, -0.5f);
+}
+
+AP_GTEST_MAIN()

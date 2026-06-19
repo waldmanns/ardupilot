@@ -57,6 +57,8 @@ const char *MiniDP_AuthorityArbiter::reason_name(
         return "test-request";
     case MiniDP_AuthorityReason::TEST_AUTH_REVOKED:
         return "test-auth-revoked";
+    case MiniDP_AuthorityReason::MAVLINK_MANUAL_TIMEOUT:
+        return "mavlink-manual-timeout";
     }
     return "unknown";
 }
