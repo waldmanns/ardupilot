@@ -109,6 +109,44 @@ TEST(MiniDPMode, DPFallsBackToHeadingOnEstimatorReset)
     EXPECT_FALSE(manager.target().position_valid);
 }
 
+TEST(MiniDPMode, DPHoldCanRelatchCurrentPositionOnRequest)
+{
+    MiniDP_ModeManager manager;
+    manager.init(0);
+    MiniDP_State state = valid_state();
+    ASSERT_TRUE(manager.request_mode(
+        MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::USER_REQUEST,
+        state).accepted);
+
+    const uint32_t first_target_id = manager.target().target_id;
+    state.time_us++;
+    state.pos_n_m = 20.0f;
+    state.pos_e_m = 30.0f;
+    const auto unchanged = manager.request_mode(
+        MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::MAVLINK_REQUEST,
+        state);
+    EXPECT_TRUE(unchanged.accepted);
+    EXPECT_FALSE(unchanged.changed);
+    EXPECT_EQ(manager.target().target_id, first_target_id);
+    EXPECT_FLOAT_EQ(manager.target().pos_n_m, 12.0f);
+    EXPECT_FLOAT_EQ(manager.target().pos_e_m, -4.0f);
+
+    state.time_us++;
+    const auto retargeted = manager.request_mode(
+        MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::MAVLINK_REQUEST,
+        state,
+        false,
+        true);
+    EXPECT_TRUE(retargeted.accepted);
+    EXPECT_TRUE(retargeted.changed);
+    EXPECT_GT(manager.target().target_id, first_target_id);
+    EXPECT_FLOAT_EQ(manager.target().pos_n_m, 20.0f);
+    EXPECT_FLOAT_EQ(manager.target().pos_e_m, 30.0f);
+}
+
 TEST(MiniDPMode, HeadingHoldRelatchesYawOnEstimatorReset)
 {
     MiniDP_ModeManager manager;

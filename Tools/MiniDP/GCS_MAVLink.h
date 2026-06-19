@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Config.h"
+
 #include <GCS_MAVLink/GCS.h>
 
 #if HAL_GCS_ENABLED
@@ -27,6 +29,7 @@ protected:
 
 private:
     void send_minidp_sys_status() const;
+    void send_minidp_firmware_identity() const;
     MAV_RESULT handle_mav_cmd_do_motor_test(
         const mavlink_command_int_t &packet);
     MAV_RESULT handle_mav_cmd_do_set_mode(

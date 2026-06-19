@@ -170,7 +170,8 @@ MiniDP_ModeRequestResult MiniDP_ModeManager::request_mode(
     const MiniDP_Mode requested,
     const MiniDP_ModeReason reason,
     const MiniDP_State &state,
-    const bool actuator_test_authorized)
+    const bool actuator_test_authorized,
+    const bool force_target_update)
 {
     if (!is_initialised) {
         init(state.time_us);
@@ -193,6 +194,11 @@ MiniDP_ModeRequestResult MiniDP_ModeManager::request_mode(
     }
 
     if (requested == current_mode) {
+        if (force_target_update &&
+            requested == MiniDP_Mode::DP_HOLD) {
+            transition_to(requested, reason, state);
+            return {true, true, MiniDP_ModeReject::NONE};
+        }
         return {true, false, MiniDP_ModeReject::NONE};
     }
 

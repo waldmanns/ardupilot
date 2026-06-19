@@ -127,13 +127,13 @@ MiniDP_AxisLimiterConfig MiniDP::make_axis_limiter_config() const
 MiniDP_ControllerConfig MiniDP::make_controller_config() const
 {
     MiniDP_ControllerConfig config{};
-    config.yaw_p = g.ctrl_yaw_p.get();
-    config.yaw_d = g.ctrl_yaw_d.get();
-    config.position_p = g.ctrl_position_p.get();
-    config.velocity_d = g.ctrl_velocity_d.get();
-    config.surge_limit = g.ctrl_surge_limit.get();
-    config.sway_limit = g.ctrl_sway_limit.get();
-    config.yaw_limit = g.ctrl_yaw_limit.get();
+    config.yaw_p = g.dp_yaw_p.get();
+    config.yaw_d = g.dp_yaw_d.get();
+    config.position_p = g.dp_position_p.get();
+    config.velocity_d = g.dp_velocity_d.get();
+    config.surge_limit = g.dp_surge_limit.get();
+    config.sway_limit = g.dp_sway_limit.get();
+    config.yaw_limit = g.dp_yaw_limit.get();
     return config;
 }
 
@@ -281,11 +281,15 @@ void MiniDP::setup()
 
     ins.init(100);
     printf("MiniDP IMU frontend ready\n");
+#if MINIDP_BARO_ENABLED
     barometer.init();
     if (barometer.num_instances() > 0) {
         barometer.calibrate(false);
     }
     printf("MiniDP barometer frontend ready\n");
+#else
+    printf("MiniDP barometer frontend disabled\n");
+#endif
     compass.init();
     printf("MiniDP compass frontend ready\n");
     gps.init();
@@ -467,8 +471,16 @@ MiniDP_ModeCommandResult MiniDP::request_mode(
             };
         }
 
+        const bool force_target_update =
+            requested == MiniDP_Mode::DP_HOLD &&
+            g.dp_retarget != 0;
         const MiniDP_ModeRequestResult mode_result =
-            mode_manager.request_mode(requested, reason, get_state());
+            mode_manager.request_mode(
+                requested,
+                reason,
+                get_state(),
+                false,
+                force_target_update);
         if (!mode_result.accepted &&
             previous_owner != MiniDP_ControlOwner::MAVLINK_TARGET &&
             authority.owner() == MiniDP_ControlOwner::MAVLINK_TARGET) {
@@ -736,7 +748,9 @@ void MiniDP::loop()
     const uint32_t now_ms = AP_HAL::millis();
 
     ins.update();
+#if MINIDP_BARO_ENABLED
     barometer.update();
+#endif
     compass.read();
     gps.update();
     ahrs.update(true);

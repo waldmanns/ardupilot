@@ -71,7 +71,8 @@ public:
         MiniDP_Mode requested,
         MiniDP_ModeReason reason,
         const MiniDP_State &state,
-        bool actuator_test_authorized = false);
+        bool actuator_test_authorized = false,
+        bool force_target_update = false);
 
     MiniDP_ModeRequestResult manual_override(const MiniDP_State &state);
 

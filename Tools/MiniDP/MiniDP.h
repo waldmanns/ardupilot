@@ -2,6 +2,8 @@
 
 #define AP_PARAM_VEHICLE_NAME minidp
 
+#include "Config.h"
+
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
@@ -100,13 +102,14 @@ public:
         k_param_axis_surge_slew,
         k_param_axis_sway_slew,
         k_param_axis_yaw_slew,
-        k_param_ctrl_yaw_p,
-        k_param_ctrl_yaw_d,
-        k_param_ctrl_position_p,
-        k_param_ctrl_velocity_d,
-        k_param_ctrl_surge_limit,
-        k_param_ctrl_sway_limit,
-        k_param_ctrl_yaw_limit,
+        k_param_dp_yaw_p,
+        k_param_dp_yaw_d,
+        k_param_dp_position_p,
+        k_param_dp_velocity_d,
+        k_param_dp_surge_limit,
+        k_param_dp_sway_limit,
+        k_param_dp_yaw_limit,
+        k_param_dp_retarget,
     };
 
     AP_Int16 format_version;
@@ -139,13 +142,14 @@ public:
     AP_Float axis_surge_slew;
     AP_Float axis_sway_slew;
     AP_Float axis_yaw_slew;
-    AP_Float ctrl_yaw_p;
-    AP_Float ctrl_yaw_d;
-    AP_Float ctrl_position_p;
-    AP_Float ctrl_velocity_d;
-    AP_Float ctrl_surge_limit;
-    AP_Float ctrl_sway_limit;
-    AP_Float ctrl_yaw_limit;
+    AP_Float dp_yaw_p;
+    AP_Float dp_yaw_d;
+    AP_Float dp_position_p;
+    AP_Float dp_velocity_d;
+    AP_Float dp_surge_limit;
+    AP_Float dp_sway_limit;
+    AP_Float dp_yaw_limit;
+    AP_Int8 dp_retarget;
 };
 
 struct MiniDP_ModeCommandResult {

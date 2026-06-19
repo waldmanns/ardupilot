@@ -16,7 +16,9 @@ const AP_Param::Info MiniDP::var_info[] = {
 #if HAL_GCS_ENABLED
     GOBJECT(gcs_backend, "MAV", GCS),
 #endif
+#if MINIDP_BARO_ENABLED
     GOBJECT(barometer, "BARO", AP_Baro),
+#endif
     GOBJECT(ahrs, "AHRS_", AP_AHRS),
 #if HAL_NAVEKF2_AVAILABLE
     GOBJECTN(ahrs.EKF2, NavEKF2, "EK2_", NavEKF2),
@@ -52,13 +54,14 @@ const AP_Param::Info MiniDP::var_info[] = {
     GSCALAR(axis_surge_slew, "AXIS_SRG_SLW", 0.0f),
     GSCALAR(axis_sway_slew, "AXIS_SWY_SLW", 0.0f),
     GSCALAR(axis_yaw_slew, "AXIS_YAW_SLW", 0.0f),
-    GSCALAR(ctrl_yaw_p, "CTRL_YAW_P", 0.0f),
-    GSCALAR(ctrl_yaw_d, "CTRL_YAW_D", 0.0f),
-    GSCALAR(ctrl_position_p, "CTRL_POS_P", 0.0f),
-    GSCALAR(ctrl_velocity_d, "CTRL_VEL_D", 0.0f),
-    GSCALAR(ctrl_surge_limit, "CTRL_SRG_MAX", 0.5f),
-    GSCALAR(ctrl_sway_limit, "CTRL_SWY_MAX", 0.5f),
-    GSCALAR(ctrl_yaw_limit, "CTRL_YAW_MAX", 0.5f),
+    GSCALAR(dp_yaw_p, "DP_YAW_P", 0.0f),
+    GSCALAR(dp_yaw_d, "DP_YAW_D", 0.0f),
+    GSCALAR(dp_position_p, "DP_POS_P", 0.0f),
+    GSCALAR(dp_velocity_d, "DP_VEL_D", 0.0f),
+    GSCALAR(dp_surge_limit, "DP_SRG_MAX", 0.5f),
+    GSCALAR(dp_sway_limit, "DP_SWY_MAX", 0.5f),
+    GSCALAR(dp_yaw_limit, "DP_YAW_MAX", 0.5f),
+    GSCALAR(dp_retarget, "DP_RETARGET", 1),
 
     AP_VAREND
 };

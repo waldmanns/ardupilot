@@ -1,0 +1,9 @@
+#pragma once
+
+#ifndef MINIDP_BARO_ENABLED
+#define MINIDP_BARO_ENABLED 0
+#endif
+
+#ifndef AP_BARO_ENABLED
+#define AP_BARO_ENABLED MINIDP_BARO_ENABLED
+#endif

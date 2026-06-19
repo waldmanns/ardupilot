@@ -1,6 +1,8 @@
 #include "GCS_MAVLink.h"
 #include "MiniDP.h"
 
+#include <AP_Common/AP_FWVersion.h>
+
 #if HAL_GCS_ENABLED
 
 namespace {
@@ -55,6 +57,22 @@ void GCS_MiniDP::send_minidp_text(MAV_SEVERITY severity, const char *text) const
             backend->send_minidp_text(severity, text);
         }
     }
+}
+
+void GCS_MAVLINK_MiniDP::send_minidp_firmware_identity() const
+{
+    const char *firmware = AP::fwversion().fw_short_string;
+    if (firmware == nullptr) {
+        firmware = "MiniDP";
+    }
+
+    char text[50];
+    AP_HAL::get_HAL().util->snprintf(
+        text,
+        sizeof(text),
+        "Firmware: %s",
+        firmware);
+    send_minidp_text(MAV_SEVERITY_INFO, text);
 }
 
 void GCS_MiniDP::send_minidp_heartbeat() const
@@ -145,6 +163,12 @@ bool GCS_MAVLINK_MiniDP::try_send_message(const enum ap_message id)
 #endif
     case MSG_WIND:
         return true;
+    case MSG_AUTOPILOT_VERSION:
+        if (GCS_MAVLINK::try_send_message(id)) {
+            send_minidp_firmware_identity();
+            return true;
+        }
+        return false;
     default:
         return GCS_MAVLINK::try_send_message(id);
     }
