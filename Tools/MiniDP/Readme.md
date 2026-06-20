@@ -166,6 +166,16 @@ set the flight-controller UART connected to the ELRS receiver to
 standard MAVLink-radio RC data, which MiniDP feeds into the normal ArduPilot RC
 frontend used by Mission Planner radio calibration.
 
+Mission Planner's Radio Calibration page shows MiniDP's outgoing `RC_CHANNELS`
+MAVLink stream. If telemetry connects but the bars stay blank, set the
+`MAVx_RC_CHAN` stream rate for the Mission Planner link to `1` or higher
+(`MAV0_RC_CHAN` is typical for USB, `MAV1_RC_CHAN` is typical for the first
+telemetry UART). Also confirm that both ELRS transmitter and receiver are in
+MAVLink mode, the receiver UART protocol is MAVLink, the hardware is ESP-based,
+and `SERIALx_PROTOCOL`/`SERIALx_BAUD` were followed by a reboot. MiniDP sends
+`RC_OK`, `RC_CH`, and `RC_AGE` named values once per second to show whether
+fresh RC frames are reaching the firmware.
+
 In Mission Planner, connect telemetry, open the normal RTK/NTRIP injection
 tool, enter the caster credentials and mountpoint, and start injection. Watch
 the standard GPS status: fix type `5` is RTK Float and fix type `6` is RTK
@@ -354,9 +364,9 @@ When `DP_HOLD` has a valid latched position target, MiniDP also sends
 and MAVLink tools can use these as the DP target position marker.
 
 Once per second MiniDP sends `NAMED_VALUE_FLOAT` status values:
-`DP_MODE`, `DP_OWN`, `DP_SAT`, `DP_OUT`, `GPS_FIX`, `GPS_SATS`, `RTK_FIX`,
-`DP_ERR_M`, `DP_YERR`, `DP_HACC`, and `DP_SACC` when the underlying values are
-valid.
+`DP_MODE`, `DP_OWN`, `DP_SAT`, `DP_OUT`, `GPS_FIX`, `GPS_SATS`, `RC_OK`,
+`RC_CH`, `RC_AGE`, `RTK_FIX`, `DP_ERR_M`, `DP_YERR`, `DP_HACC`, and
+`DP_SACC` when the underlying values are valid.
 
 MiniDP accepts the standard `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` command for
 Mission Planner board reboot and reboot-to-bootloader actions. The shared

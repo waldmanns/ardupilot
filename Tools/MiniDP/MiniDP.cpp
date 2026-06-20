@@ -636,11 +636,14 @@ void MiniDP::update_authority(const uint32_t now_ms)
 {
     input_mapper.set_config(make_input_config());
 
-    const bool have_rc_backend = (hal.rcin != nullptr) && (hal.rcin->num_channels() > 0);
-    const bool new_rc_input = have_rc_backend && rc_channels.read_input();
+    const bool have_rc_driver = hal.rcin != nullptr;
+    const bool new_rc_input = have_rc_driver && rc_channels.read_input();
     if (new_rc_input) {
         last_rc_input_ms = now_ms;
     }
+    const bool have_rc_backend =
+        have_rc_driver &&
+        RC_Channels::get_valid_channel_count() > 0;
 
     bool rc_protocol_failsafe = false;
 #if AP_RCPROTOCOL_ENABLED
@@ -664,6 +667,7 @@ void MiniDP::update_authority(const uint32_t now_ms)
         last_rc_input_ms != 0 &&
         now_ms - last_rc_input_ms <= rc_timeout_ms &&
         !rc_protocol_failsafe;
+    rc_channels.set_input_valid(authority_status.rc_healthy);
     authority_status.mavlink_healthy =
         mavlink_last_seen_ms != 0 &&
         now_ms - mavlink_last_seen_ms <= mavlink_timeout_ms;
@@ -695,7 +699,6 @@ void MiniDP::update_authority(const uint32_t now_ms)
 
     authority.set_policy(policy);
     authority.update(authority_status);
-    rc_channels.set_input_valid(authority_status.rc_healthy);
 
     if (authority.owner() == MiniDP_ControlOwner::FAILSAFE &&
         mode_manager.mode() != MiniDP_Mode::FAILSAFE) {
@@ -1228,6 +1231,17 @@ void MiniDP::send_named_status_values()
     gcs().send_named_float("DP_OUT", float(frame.active_pwm_count));
     gcs().send_named_float("GPS_FIX", float(state.gps_fix_type));
     gcs().send_named_float("GPS_SATS", float(state.gps_num_sats));
+    gcs().send_named_float(
+        "RC_OK",
+        authority_status.rc_healthy ? 1.0f : 0.0f);
+    gcs().send_named_float(
+        "RC_CH",
+        hal.rcin != nullptr ? float(RC_Channels::get_valid_channel_count()) : 0.0f);
+    if (last_rc_input_ms != 0) {
+        gcs().send_named_float(
+            "RC_AGE",
+            float(AP_HAL::millis() - last_rc_input_ms) * 0.001f);
+    }
 
     float rtk_fix = 0.0f;
     if (state.gps_fix_type >= uint8_t(AP_GPS::GPS_OK_FIX_3D_RTK_FIXED)) {
