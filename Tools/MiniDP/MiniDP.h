@@ -16,6 +16,7 @@
 #include <AP_Notify/AP_Notify.h>
 #include <AP_Param/AP_Param.h>
 #include <AP_RCProtocol/AP_RCProtocol.h>
+#include <AP_RSSI/AP_RSSI.h>
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <GCS_MAVLink/GCS.h>
@@ -131,6 +132,7 @@ public:
         k_param_in_rc_disarm_channel,
         k_param_in_rc_disarm_pwm,
         k_param_battery,
+        k_param_rssi,
     };
 
     AP_Int16 format_version;
@@ -248,6 +250,9 @@ public:
         log_power_bit,
         FUNCTOR_BIND_MEMBER(&MiniDP::handle_battery_failsafe, void, const char*, const int8_t),
         battery_failsafe_priorities};
+#endif
+#if AP_RSSI_ENABLED
+    AP_RSSI rssi;
 #endif
     MiniDP_RC_Channels rc_channels;
     SRV_Channels servo_channels;

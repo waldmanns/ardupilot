@@ -12951,6 +12951,171 @@ DroneCAN sensor ID to assign to this backend
 
 
 
+.. _parameters_RSSI_:
+
+RSSI\_ Parameters
+-----------------
+
+
+.. _RSSI_TYPE:
+
+RSSI\_TYPE: RSSI Type
+~~~~~~~~~~~~~~~~~~~~~
+
+
+Radio Receiver RSSI type\. If your radio receiver supports RSSI of some kind\, set it here\, then set its associated RSSI\_XXXXX parameters\, if any\.
+
+
++-------+--------------------+
+| Value | Meaning            |
++=======+====================+
+| 0     | Disabled           |
++-------+--------------------+
+| 1     | AnalogPin          |
++-------+--------------------+
+| 2     | RCChannelPwmValue  |
++-------+--------------------+
+| 3     | ReceiverProtocol   |
++-------+--------------------+
+| 4     | PWMInputPin        |
++-------+--------------------+
+| 5     | TelemetryRadioRSSI |
++-------+--------------------+
+
+
+
+
+.. _RSSI_ANA_PIN:
+
+RSSI\_ANA\_PIN: Receiver RSSI sensing pin
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+Pin used to read the RSSI voltage or PWM value\. Analog Airspeed ports can be used for Analog inputs \(some autopilots provide others also\)\, Non\-IOMCU Servo\/MotorOutputs can be used for PWM input when configured as \"GPIOs\"\. Values for some autopilots are given as examples\. Search wiki for \"Analog pins\" for analog pin or \"GPIOs\"\, if PWM input type\, to determine pin number\.
+
+
++-------+---------------------------+
+| Value | Meaning                   |
++=======+===========================+
+| 8     | V5 Nano                   |
++-------+---------------------------+
+| 11    | Pixracer                  |
++-------+---------------------------+
+| 13    | Pixhawk ADC4              |
++-------+---------------------------+
+| 14    | Pixhawk ADC3              |
++-------+---------------------------+
+| 15    | Pixhawk ADC6/Pixhawk2 ADC |
++-------+---------------------------+
+| 50    | AUX1                      |
++-------+---------------------------+
+| 51    | AUX2                      |
++-------+---------------------------+
+| 52    | AUX3                      |
++-------+---------------------------+
+| 53    | AUX4                      |
++-------+---------------------------+
+| 54    | AUX5                      |
++-------+---------------------------+
+| 55    | AUX6                      |
++-------+---------------------------+
+| 103   | Pixhawk SBUS              |
++-------+---------------------------+
+
+
+
+
+.. _RSSI_PIN_LOW:
+
+RSSI\_PIN\_LOW: RSSI pin\'s lowest voltage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+RSSI pin\'s voltage received on the RSSI\_ANA\_PIN when the signal strength is the weakest\. Some radio receivers put out inverted values so this value may be higher than RSSI\_PIN\_HIGH\. When using pin 103\, the maximum value of the parameter is 3\.3V\.
+
+
++-----------+----------+-------+
+| Increment | Range    | Units |
++===========+==========+=======+
+| 0.01      | 0 to 5.0 | volt  |
++-----------+----------+-------+
+
+
+
+
+.. _RSSI_PIN_HIGH:
+
+RSSI\_PIN\_HIGH: RSSI pin\'s highest voltage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+RSSI pin\'s voltage received on the RSSI\_ANA\_PIN when the signal strength is the strongest\. Some radio receivers put out inverted values so this value may be lower than RSSI\_PIN\_LOW\. When using pin 103\, the maximum value of the parameter is 3\.3V\.
+
+
++-----------+----------+-------+
+| Increment | Range    | Units |
++===========+==========+=======+
+| 0.01      | 0 to 5.0 | volt  |
++-----------+----------+-------+
+
+
+
+
+.. _RSSI_CHANNEL:
+
+RSSI\_CHANNEL: Receiver RSSI channel number
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+The channel number where RSSI will be output by the radio receiver \(5 and above\)\.
+
+
++---------+
+| Range   |
++=========+
+| 0 to 16 |
++---------+
+
+
+
+
+.. _RSSI_CHAN_LOW:
+
+RSSI\_CHAN\_LOW: RSSI PWM low value
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+PWM value that the radio receiver will put on the RSSI\_CHANNEL or RSSI\_ANA\_PIN when the signal strength is the weakest\. Some radio receivers output inverted values so this value may be lower than RSSI\_CHAN\_HIGH
+
+
++-----------+---------------------+
+| Range     | Units               |
++===========+=====================+
+| 0 to 2000 | PWM in microseconds |
++-----------+---------------------+
+
+
+
+
+.. _RSSI_CHAN_HIGH:
+
+RSSI\_CHAN\_HIGH: Receiver RSSI PWM high value
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+PWM value that the radio receiver will put on the RSSI\_CHANNEL or RSSI\_ANA\_PIN when the signal strength is the strongest\. Some radio receivers output inverted values so this value may be higher than RSSI\_CHAN\_LOW
+
+
++-----------+---------------------+
+| Range     | Units               |
++===========+=====================+
+| 0 to 2000 | PWM in microseconds |
++-----------+---------------------+
+
+
+
+
+
 .. _parameters_SCR_:
 
 SCR\_ Parameters

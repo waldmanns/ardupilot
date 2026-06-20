@@ -22,6 +22,11 @@ const AP_Param::Info MiniDP::var_info[] = {
 #if AP_BATTERY_ENABLED
     GOBJECT(battery, "BATT", AP_BattMonitor),
 #endif
+#if AP_RSSI_ENABLED
+    // @Group: RSSI_
+    // @Path: ../libraries/AP_RSSI/AP_RSSI.cpp
+    GOBJECT(rssi, "RSSI_", AP_RSSI),
+#endif
     GOBJECT(logger, "LOG", AP_Logger),
     GOBJECT(notify, "NTF_", AP_Notify),
     GOBJECT(rc_channels, "RC", RC_Channels),

@@ -159,6 +159,13 @@ Use the same receiver setup as Rover or Copter:
 | `GPS_INJECT_TO=127` | Default; inject RTCM corrections to all eligible GPS receivers. |
 | `GPS_DRV_OPTIONS` | Standard backend options, including RTCM parser options where compiled in. |
 
+For ExpressLRS MAVLink mode, one UART can carry both RC uplink and MAVLink
+telemetry. Configure the ELRS transmitter and receiver for MAVLink mode, then
+set the flight-controller UART connected to the ELRS receiver to
+`SERIALx_PROTOCOL=2`, `SERIALx_BAUD=460`, and `RSSI_TYPE=5`. ELRS sends RC as
+standard MAVLink-radio RC data, which MiniDP feeds into the normal ArduPilot RC
+frontend used by Mission Planner radio calibration.
+
 In Mission Planner, connect telemetry, open the normal RTK/NTRIP injection
 tool, enter the caster credentials and mountpoint, and start injection. Watch
 the standard GPS status: fix type `5` is RTK Float and fix type `6` is RTK
@@ -183,6 +190,7 @@ accept for hold. If you require GPS before arming, tune `ARM_HACC_MAX` and
 | `COMPASS_*` | Board defaults | Compass setup. |
 | `GPS*` | Board defaults | GPS setup. |
 | `BATT*` | ArduPilot defaults | Standard ArduPilot battery monitor setup and failsafe thresholds. |
+| `RSSI_*` | ArduPilot defaults | Standard ArduPilot RSSI setup. Use `RSSI_TYPE=5` for ELRS MAVLink mode. |
 | `LOG*` | Board defaults | Logger setup. |
 | `NTF_*` | Board defaults | Notify/LED/buzzer setup. |
 | `RC*` | Board defaults | RC input calibration and behavior. |

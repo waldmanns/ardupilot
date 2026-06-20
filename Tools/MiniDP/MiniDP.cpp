@@ -527,6 +527,10 @@ void MiniDP::setup()
     battery.init();
     printf("MiniDP battery monitor ready\n");
 #endif
+#if AP_RSSI_ENABLED
+    rssi.init();
+    printf("MiniDP RSSI frontend ready\n");
+#endif
     rc_channels.init();
     printf("MiniDP RC frontend ready\n");
     input_mapper.init();
@@ -1289,6 +1293,11 @@ void MiniDP::log_useful_data(const uint32_t now_ms)
         if (logger.should_log(minidp_log_rc)) {
             logger.Write_RCIN();
             logger.Write_RCOUT();
+#if AP_RSSI_ENABLED
+            if (rssi.enabled()) {
+                logger.Write_RSSI();
+            }
+#endif
         }
     }
 
