@@ -90,6 +90,29 @@ TEST(MiniDPInput, ConfiguredRcKillBlocksCommand)
     EXPECT_FALSE(command.valid);
 }
 
+TEST(MiniDPInput, ConfiguredRcArmAndDisarmSwitchesReportActive)
+{
+    MiniDP_InputMapper input;
+    input.init();
+
+    MiniDP_InputConfig config = input.config();
+    config.rc_arm_channel = 6U;
+    config.rc_arm_pwm = 1700U;
+    config.rc_disarm_channel = 7U;
+    config.rc_disarm_pwm = 1300U;
+    input.set_config(config);
+
+    MiniDP_RCInputFrame frame = healthy_frame();
+    EXPECT_FALSE(input.rc_arm_active(frame));
+    EXPECT_FALSE(input.rc_disarm_active(frame));
+
+    frame.pwm[5] = 1800U;
+    EXPECT_TRUE(input.rc_arm_active(frame));
+
+    frame.pwm[6] = 1200U;
+    EXPECT_TRUE(input.rc_disarm_active(frame));
+}
+
 TEST(MiniDPInput, MavlinkManualMapsAxesAndTimesOut)
 {
     MiniDP_InputMapper input;

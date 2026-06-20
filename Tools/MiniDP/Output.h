@@ -21,6 +21,17 @@ enum class MiniDP_FrameType : int16_t {
     OMNI_PLUS = 901,
 };
 
+enum class MiniDP_ScrewPosition : int8_t {
+    AFT = -1,
+    CENTER = 0,
+    FORWARD = 1,
+};
+
+struct MiniDP_FrameGeometryConfig {
+    MiniDP_ScrewPosition screw_position;
+    float screw_yaw_scale;
+};
+
 struct MiniDP_AxisCommand {
     float surge;
     float sway;
@@ -84,6 +95,7 @@ public:
 
     void init(int16_t frame_type = default_frame_type);
     bool set_frame_type(int16_t frame_type);
+    void set_frame_geometry(const MiniDP_FrameGeometryConfig &new_config);
 
     const MiniDP_OutputFrame &update(
         MiniDP_OutputState state,
@@ -100,7 +112,9 @@ public:
     int16_t frame_type() const { return configured_frame_type; }
 
     static MiniDP_ActuatorConfig default_actuator_config(uint8_t index);
+    static MiniDP_FrameGeometryConfig default_frame_geometry_config();
     static const char *frame_type_name(int16_t frame_type);
+    static const char *screw_position_name(MiniDP_ScrewPosition position);
     static const char *motor_name(uint8_t index);
     static const char *state_name(MiniDP_OutputState state);
     static const char *safe_action_name(MiniDP_OutputSafeAction action);
@@ -108,6 +122,7 @@ public:
 private:
     MiniDP_ActuatorConfig configs[max_actuators];
     MiniDP_OutputFrame output_frame{};
+    MiniDP_FrameGeometryConfig frame_geometry{};
     int16_t configured_frame_type = default_frame_type;
 
     void reset_frame_configs();
@@ -117,6 +132,7 @@ private:
         float k_sway,
         float k_yaw);
     void configure_omni_plus_frame();
+    void apply_omni_plus_geometry();
     void apply_safe_outputs(MiniDP_OutputState state);
     void apply_active_outputs(MiniDP_OutputState state, const MiniDP_AxisCommand &command);
     void apply_actuator_test_output(const MiniDP_ActuatorTestCommand &command);

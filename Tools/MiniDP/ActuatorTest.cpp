@@ -111,6 +111,8 @@ const char *MiniDP_ActuatorTest::reject_name(
         return "none";
     case MiniDP_ActuatorTestReject::NOT_AUTHORIZED:
         return "not-authorized";
+    case MiniDP_ActuatorTestReject::NOT_ARMED:
+        return "not-armed";
     case MiniDP_ActuatorTestReject::AUTHORITY_REJECTED:
         return "authority-rejected";
     case MiniDP_ActuatorTestReject::MODE_REJECTED:

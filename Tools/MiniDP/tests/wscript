@@ -13,6 +13,7 @@ def build(bld):
         ('test_minidp_controller', ['test_controller.cpp', '../Controller.cpp']),
         ('test_minidp_output', ['test_output.cpp', '../Output.cpp']),
         ('test_minidp_actuator_test', ['test_actuator_test.cpp', '../ActuatorTest.cpp']),
+        ('test_minidp_arming', ['test_arming.cpp', '../Arming.cpp']),
     ]
     features = ['test'] if bld.cmd == 'check' else []
     for name, source in tests:

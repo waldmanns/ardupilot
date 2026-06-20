@@ -66,6 +66,28 @@ float constrain_axis(const float value, const float limit)
     return constrained;
 }
 
+void apply_position_shaping(
+    float &error_n,
+    float &error_e,
+    const float deadband_m,
+    const float radius_m)
+{
+    const float magnitude = sqrtf((error_n * error_n) + (error_e * error_e));
+    if (magnitude <= deadband_m || magnitude <= 0.0f) {
+        error_n = 0.0f;
+        error_e = 0.0f;
+        return;
+    }
+
+    if (radius_m <= deadband_m || magnitude >= radius_m) {
+        return;
+    }
+
+    const float scale = (magnitude - deadband_m) / (radius_m - deadband_m);
+    error_n *= scale;
+    error_e *= scale;
+}
+
 } // namespace
 
 MiniDP_ControllerConfig MiniDP_Controller::default_config()
@@ -75,6 +97,8 @@ MiniDP_ControllerConfig MiniDP_Controller::default_config()
     config.yaw_d = 0.0f;
     config.position_p = 0.0f;
     config.velocity_d = 0.0f;
+    config.position_radius_m = 2.0f;
+    config.position_deadband_m = 0.5f;
     config.surge_limit = 0.5f;
     config.sway_limit = 0.5f;
     config.yaw_limit = 0.5f;
@@ -94,6 +118,11 @@ void MiniDP_Controller::set_config(
     cfg.yaw_d = sanitize_non_negative(cfg.yaw_d);
     cfg.position_p = sanitize_non_negative(cfg.position_p);
     cfg.velocity_d = sanitize_non_negative(cfg.velocity_d);
+    cfg.position_radius_m = sanitize_non_negative(cfg.position_radius_m);
+    cfg.position_deadband_m = sanitize_non_negative(cfg.position_deadband_m);
+    if (cfg.position_radius_m < cfg.position_deadband_m) {
+        cfg.position_radius_m = cfg.position_deadband_m;
+    }
     cfg.surge_limit = sanitize_unit_positive(cfg.surge_limit, 0.5f);
     cfg.sway_limit = sanitize_unit_positive(cfg.sway_limit, 0.5f);
     cfg.yaw_limit = sanitize_unit_positive(cfg.yaw_limit, 0.5f);
@@ -147,8 +176,14 @@ MiniDP_AxisCommand MiniDP_Controller::update_dp_hold(
         return command;
     }
 
-    const float error_n = target.pos_n_m - state.pos_n_m;
-    const float error_e = target.pos_e_m - state.pos_e_m;
+    float error_n = target.pos_n_m - state.pos_n_m;
+    float error_e = target.pos_e_m - state.pos_e_m;
+    apply_position_shaping(
+        error_n,
+        error_e,
+        cfg.position_deadband_m,
+        cfg.position_radius_m);
+
     const float yaw_cos = cosf(state.yaw_rad);
     const float yaw_sin = sinf(state.yaw_rad);
 

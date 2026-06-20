@@ -1,5 +1,7 @@
 #include "Output.h"
 
+#include <math.h>
+
 namespace {
 
 float constrain_unit(const float value)
@@ -21,6 +23,41 @@ float absf(const float value)
 float sanitized_scale(const float scale)
 {
     return scale > 0.0f ? scale : 1.0f;
+}
+
+float sanitize_screw_yaw_scale(const float scale)
+{
+    if (!isfinite(scale) || scale < 0.0f) {
+        return 1.0f;
+    }
+    if (scale > 2.0f) {
+        return 2.0f;
+    }
+    return scale;
+}
+
+MiniDP_ScrewPosition sanitize_screw_position(const MiniDP_ScrewPosition position)
+{
+    switch (position) {
+    case MiniDP_ScrewPosition::AFT:
+    case MiniDP_ScrewPosition::CENTER:
+    case MiniDP_ScrewPosition::FORWARD:
+        return position;
+    }
+    return MiniDP_ScrewPosition::AFT;
+}
+
+float screw_position_yaw_sign(const MiniDP_ScrewPosition position)
+{
+    switch (position) {
+    case MiniDP_ScrewPosition::AFT:
+        return 1.0f;
+    case MiniDP_ScrewPosition::CENTER:
+        return 0.0f;
+    case MiniDP_ScrewPosition::FORWARD:
+        return -1.0f;
+    }
+    return 1.0f;
 }
 
 uint16_t sane_pwm(const uint16_t pwm, const uint16_t fallback)
@@ -50,6 +87,14 @@ MiniDP_ActuatorConfig MiniDP_OutputManager::default_actuator_config(
     config.disarmed_action = MiniDP_OutputSafeAction::DISABLE_PWM;
     config.failsafe_action = MiniDP_OutputSafeAction::SEND_NEUTRAL;
     config.kill_action = MiniDP_OutputSafeAction::DISABLE_PWM;
+    return config;
+}
+
+MiniDP_FrameGeometryConfig MiniDP_OutputManager::default_frame_geometry_config()
+{
+    MiniDP_FrameGeometryConfig config{};
+    config.screw_position = MiniDP_ScrewPosition::AFT;
+    config.screw_yaw_scale = 1.0f;
     return config;
 }
 
@@ -84,6 +129,17 @@ void MiniDP_OutputManager::configure_omni_plus_frame()
     configure_motor(1U, 1.0f, 0.0f, -1.0f);  // Motor2: starboard propulsion screw
     configure_motor(2U, 0.0f, 1.0f, 1.0f);   // Motor3: bow tunnel thruster
     configure_motor(3U, 0.0f, 1.0f, -1.0f);  // Motor4: stern tunnel thruster
+    apply_omni_plus_geometry();
+}
+
+void MiniDP_OutputManager::apply_omni_plus_geometry()
+{
+    const float screw_yaw =
+        screw_position_yaw_sign(frame_geometry.screw_position) *
+        frame_geometry.screw_yaw_scale;
+
+    configs[0].k_yaw = screw_yaw;
+    configs[1].k_yaw = -screw_yaw;
 }
 
 bool MiniDP_OutputManager::set_frame_type(const int16_t frame_type)
@@ -100,10 +156,29 @@ bool MiniDP_OutputManager::set_frame_type(const int16_t frame_type)
 
 void MiniDP_OutputManager::init(const int16_t frame_type)
 {
+    frame_geometry = default_frame_geometry_config();
     if (!set_frame_type(frame_type)) {
         (void)set_frame_type(default_frame_type);
     }
     apply_safe_outputs(MiniDP_OutputState::DISARMED);
+}
+
+void MiniDP_OutputManager::set_frame_geometry(
+    const MiniDP_FrameGeometryConfig &new_config)
+{
+    frame_geometry = new_config;
+    frame_geometry.screw_position =
+        sanitize_screw_position(frame_geometry.screw_position);
+    frame_geometry.screw_yaw_scale =
+        sanitize_screw_yaw_scale(frame_geometry.screw_yaw_scale);
+
+    switch (configured_frame_type) {
+    case int16_t(MiniDP_FrameType::OMNI_PLUS):
+        apply_omni_plus_geometry();
+        break;
+    default:
+        break;
+    }
 }
 
 bool MiniDP_OutputManager::set_actuator_config(
@@ -403,6 +478,20 @@ const char *MiniDP_OutputManager::frame_type_name(const int16_t frame_type)
         return "OMNI_PLUS";
     }
     return "UNKNOWN";
+}
+
+const char *MiniDP_OutputManager::screw_position_name(
+    const MiniDP_ScrewPosition position)
+{
+    switch (position) {
+    case MiniDP_ScrewPosition::AFT:
+        return "aft";
+    case MiniDP_ScrewPosition::CENTER:
+        return "center";
+    case MiniDP_ScrewPosition::FORWARD:
+        return "forward";
+    }
+    return "unknown";
 }
 
 const char *MiniDP_OutputManager::motor_name(const uint8_t index)

@@ -103,6 +103,44 @@ TEST(MiniDPOutput, Frame901OmniPlusMapsMotor1ToMotor4)
     EXPECT_EQ(frame.actuator[3].pwm_us, 1300U);
 }
 
+TEST(MiniDPOutput, Frame901ScrewPositionAdjustsDifferentialYaw)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::OMNI_PLUS));
+
+    MiniDP_AxisCommand command{};
+    command.yaw = 0.5f;
+
+    const MiniDP_OutputFrame &aft =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+    EXPECT_FLOAT_EQ(aft.actuator[0].demand, 0.5f);
+    EXPECT_FLOAT_EQ(aft.actuator[1].demand, -0.5f);
+
+    MiniDP_FrameGeometryConfig geometry =
+        MiniDP_OutputManager::default_frame_geometry_config();
+    geometry.screw_position = MiniDP_ScrewPosition::FORWARD;
+    output.set_frame_geometry(geometry);
+    const MiniDP_OutputFrame &forward =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+    EXPECT_FLOAT_EQ(forward.actuator[0].demand, -0.5f);
+    EXPECT_FLOAT_EQ(forward.actuator[1].demand, 0.5f);
+
+    geometry.screw_position = MiniDP_ScrewPosition::CENTER;
+    output.set_frame_geometry(geometry);
+    const MiniDP_OutputFrame &center =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+    EXPECT_FLOAT_EQ(center.actuator[0].demand, 0.0f);
+    EXPECT_FLOAT_EQ(center.actuator[1].demand, 0.0f);
+
+    geometry.screw_position = MiniDP_ScrewPosition::AFT;
+    geometry.screw_yaw_scale = 0.5f;
+    output.set_frame_geometry(geometry);
+    const MiniDP_OutputFrame &scaled =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+    EXPECT_FLOAT_EQ(scaled.actuator[0].demand, 0.25f);
+    EXPECT_FLOAT_EQ(scaled.actuator[1].demand, -0.25f);
+}
+
 TEST(MiniDPOutput, SaturationScalesAllActuatorsTogether)
 {
     MiniDP_OutputManager output;

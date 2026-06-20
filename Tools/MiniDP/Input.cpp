@@ -83,6 +83,36 @@ float mavlink_axis_to_unit(const int16_t value)
     return float(value) * 0.001f;
 }
 
+bool rc_switch_high(
+    const MiniDP_RCInputFrame &frame,
+    const uint8_t channel,
+    const uint16_t threshold_pwm)
+{
+    if (!frame.healthy ||
+        channel == 0U ||
+        channel > frame.channel_count ||
+        channel > MiniDP_InputMapper::max_rc_channels) {
+        return false;
+    }
+
+    return frame.pwm[channel - 1U] >= threshold_pwm;
+}
+
+bool rc_switch_low(
+    const MiniDP_RCInputFrame &frame,
+    const uint8_t channel,
+    const uint16_t threshold_pwm)
+{
+    if (!frame.healthy ||
+        channel == 0U ||
+        channel > frame.channel_count ||
+        channel > MiniDP_InputMapper::max_rc_channels) {
+        return false;
+    }
+
+    return frame.pwm[channel - 1U] <= threshold_pwm;
+}
+
 } // namespace
 
 MiniDP_InputConfig MiniDP_InputMapper::default_config()
@@ -93,6 +123,10 @@ MiniDP_InputConfig MiniDP_InputMapper::default_config()
     config.rc_yaw_channel = 4U;
     config.rc_kill_channel = 0U;
     config.rc_kill_pwm = 1800U;
+    config.rc_arm_channel = 0U;
+    config.rc_arm_pwm = 1800U;
+    config.rc_disarm_channel = 0U;
+    config.rc_disarm_pwm = 1200U;
     config.manual_deadband = 0.03f;
     config.manual_surge_limit = 0.5f;
     config.manual_sway_limit = 0.5f;
@@ -116,8 +150,16 @@ void MiniDP_InputMapper::set_config(const MiniDP_InputConfig &new_config)
     cfg.rc_sway_channel = sanitize_channel(cfg.rc_sway_channel);
     cfg.rc_yaw_channel = sanitize_channel(cfg.rc_yaw_channel);
     cfg.rc_kill_channel = sanitize_channel(cfg.rc_kill_channel);
+    cfg.rc_arm_channel = sanitize_channel(cfg.rc_arm_channel);
+    cfg.rc_disarm_channel = sanitize_channel(cfg.rc_disarm_channel);
     if (cfg.rc_kill_pwm < 800U || cfg.rc_kill_pwm > 2200U) {
         cfg.rc_kill_pwm = 1800U;
+    }
+    if (cfg.rc_arm_pwm < 800U || cfg.rc_arm_pwm > 2200U) {
+        cfg.rc_arm_pwm = 1800U;
+    }
+    if (cfg.rc_disarm_pwm < 800U || cfg.rc_disarm_pwm > 2200U) {
+        cfg.rc_disarm_pwm = 1200U;
     }
 
     cfg.manual_deadband =
@@ -158,14 +200,19 @@ MiniDP_AxisCommand MiniDP_InputMapper::apply_manual_limits(
 bool MiniDP_InputMapper::rc_kill_active(
     const MiniDP_RCInputFrame &frame) const
 {
-    if (!frame.healthy ||
-        cfg.rc_kill_channel == 0U ||
-        cfg.rc_kill_channel > frame.channel_count ||
-        cfg.rc_kill_channel > max_rc_channels) {
-        return false;
-    }
+    return rc_switch_high(frame, cfg.rc_kill_channel, cfg.rc_kill_pwm);
+}
 
-    return frame.pwm[cfg.rc_kill_channel - 1U] >= cfg.rc_kill_pwm;
+bool MiniDP_InputMapper::rc_arm_active(
+    const MiniDP_RCInputFrame &frame) const
+{
+    return rc_switch_high(frame, cfg.rc_arm_channel, cfg.rc_arm_pwm);
+}
+
+bool MiniDP_InputMapper::rc_disarm_active(
+    const MiniDP_RCInputFrame &frame) const
+{
+    return rc_switch_low(frame, cfg.rc_disarm_channel, cfg.rc_disarm_pwm);
 }
 
 MiniDP_ManualCommand MiniDP_InputMapper::map_rc(

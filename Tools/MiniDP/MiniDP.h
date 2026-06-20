@@ -5,6 +5,7 @@
 #include "Config.h"
 
 #include <AP_AHRS/AP_AHRS.h>
+#include <AP_BattMonitor/AP_BattMonitor.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include <AP_Compass/AP_Compass.h>
@@ -23,6 +24,7 @@
 #include <SITL/SITL.h>
 
 #include "ActuatorTest.h"
+#include "Arming.h"
 #include "AxisLimiter.h"
 #include "Authority.h"
 #include "Controller.h"
@@ -110,6 +112,25 @@ public:
         k_param_dp_sway_limit,
         k_param_dp_yaw_limit,
         k_param_dp_retarget,
+        k_param_dp_position_radius,
+        k_param_dp_position_deadband,
+        k_param_dp_hacc_max,
+        k_param_dp_sacc_max,
+        k_param_arm_require,
+        k_param_arm_gps_require,
+        k_param_arm_hacc_max,
+        k_param_arm_sacc_max,
+        k_param_out_disarmed_action,
+        k_param_out_failsafe_action,
+        k_param_out_kill_action,
+        k_param_out_failsafe_pwm,
+        k_param_frame_screw_position,
+        k_param_frame_screw_yaw_scale,
+        k_param_in_rc_arm_channel,
+        k_param_in_rc_arm_pwm,
+        k_param_in_rc_disarm_channel,
+        k_param_in_rc_disarm_pwm,
+        k_param_battery,
     };
 
     AP_Int16 format_version;
@@ -124,11 +145,17 @@ public:
     AP_Float auth_rc_timeout;
     AP_Float auth_mav_timeout;
     AP_Int16 frame_type;
+    AP_Int8 frame_screw_position;
+    AP_Float frame_screw_yaw_scale;
     AP_Int8 in_rc_surge_channel;
     AP_Int8 in_rc_sway_channel;
     AP_Int8 in_rc_yaw_channel;
     AP_Int8 in_rc_kill_channel;
     AP_Int16 in_rc_kill_pwm;
+    AP_Int8 in_rc_arm_channel;
+    AP_Int16 in_rc_arm_pwm;
+    AP_Int8 in_rc_disarm_channel;
+    AP_Int16 in_rc_disarm_pwm;
     AP_Int8 manual_enable;
     AP_Float manual_deadband;
     AP_Float manual_surge_limit;
@@ -146,10 +173,22 @@ public:
     AP_Float dp_yaw_d;
     AP_Float dp_position_p;
     AP_Float dp_velocity_d;
+    AP_Float dp_position_radius;
+    AP_Float dp_position_deadband;
+    AP_Float dp_hacc_max;
+    AP_Float dp_sacc_max;
     AP_Float dp_surge_limit;
     AP_Float dp_sway_limit;
     AP_Float dp_yaw_limit;
     AP_Int8 dp_retarget;
+    AP_Int8 arm_require;
+    AP_Int8 arm_gps_require;
+    AP_Float arm_hacc_max;
+    AP_Float arm_sacc_max;
+    AP_Int8 out_disarmed_action;
+    AP_Int8 out_failsafe_action;
+    AP_Int8 out_kill_action;
+    AP_Int16 out_failsafe_pwm;
 };
 
 struct MiniDP_ModeCommandResult {
@@ -162,6 +201,7 @@ class MiniDP {
 public:
     static constexpr uint16_t k_format_version = 1;
     static constexpr uint8_t output_count = 6;
+    static constexpr uint32_t log_power_bit = 1U << 2;
 
     void setup();
     void loop();
@@ -170,8 +210,12 @@ public:
     MiniDP_Mode get_mode() const { return mode_manager.mode(); }
     const MiniDP_ModeTarget &get_mode_target() const { return mode_manager.target(); }
     MiniDP_ControlOwner get_control_owner() const { return authority.owner(); }
+    bool is_armed() const { return arming.armed(); }
+    bool outputs_armed() const;
+    MiniDP_ArmResult request_arm(bool arm, bool force);
     MiniDP_ActuatorTestStartResult request_actuator_test(
         const MiniDP_ActuatorTestRequest &request);
+    void handle_battery_failsafe(const char *type_str, const int8_t action);
     MiniDP_ModeCommandResult request_mode(
         MiniDP_Mode requested,
         MiniDP_ModeReason reason);
@@ -183,6 +227,13 @@ public:
 
     Parameters g;
 
+    static constexpr int8_t battery_failsafe_priorities[] = {
+        2,
+        1,
+        0,
+        -1,
+    };
+
     AP_BoardConfig board_config;
     AP_SerialManager serial_manager;
     AP_InertialSensor ins;
@@ -192,6 +243,12 @@ public:
     AP_AHRS ahrs{AP_AHRS::FLAG_ALWAYS_USE_EKF};
     AP_Logger logger;
     AP_Notify notify;
+#if AP_BATTERY_ENABLED
+    AP_BattMonitor battery{
+        log_power_bit,
+        FUNCTOR_BIND_MEMBER(&MiniDP::handle_battery_failsafe, void, const char*, const int8_t),
+        battery_failsafe_priorities};
+#endif
     MiniDP_RC_Channels rc_channels;
     SRV_Channels servo_channels;
 #if HAL_GCS_ENABLED
@@ -209,7 +266,19 @@ private:
     uint32_t last_mode_transition_sequence = 0;
     uint32_t last_authority_transition_sequence = 0;
     uint32_t last_rc_input_ms = 0;
+    uint32_t last_battery_read_ms = 0;
+    bool last_rc_arm_switch = false;
+    bool last_rc_disarm_switch = false;
+    bool rc_arm_switches_initialised = false;
+    bool battery_failsafe_latched = false;
+    int8_t last_battery_failsafe_action = 0;
+#if HAL_LOGGING_ENABLED
+    uint32_t last_control_log_ms = 0;
+    uint32_t last_standard_log_ms = 0;
+    uint32_t last_slow_log_ms = 0;
+#endif
     MiniDP_StateSource state_source;
+    MiniDP_Arming arming;
     MiniDP_ModeManager mode_manager;
     MiniDP_AuthorityArbiter authority;
     MiniDP_OutputManager output_manager;
@@ -224,20 +293,38 @@ private:
     MiniDP_ManualCommand active_manual_command{};
 
     void load_parameters();
+    MiniDP_ArmingConfig make_arming_config() const;
     MiniDP_InputConfig make_input_config() const;
+    MiniDP_ModeConfig make_mode_config() const;
+    MiniDP_FrameGeometryConfig make_frame_geometry_config() const;
     MiniDP_AxisLimiterConfig make_axis_limiter_config() const;
     MiniDP_ControllerConfig make_controller_config() const;
     MiniDP_OutputState desired_output_state() const;
+    void sync_frame_config_from_params();
     void setup_motor_output_defaults();
+    void sync_output_config_from_servo_params();
     uint32_t motor_output_channel_mask() const;
     void apply_outputs(const MiniDP_OutputFrame &frame);
+    void update_battery(uint32_t now_ms);
     void update_authority(uint32_t now_ms);
     void capture_rc_input_frame(bool rc_healthy);
+    void update_rc_arm_switches();
     void update_manual_input(uint32_t now_ms);
     void update_actuator_test(uint32_t now_ms);
     void report_authority_transition();
     void report_mode_transition();
     void report_status();
+    void send_named_status_values();
+    void sync_soft_armed();
+#if HAL_LOGGING_ENABLED
+    void write_startup_log_messages();
+    void log_control_frame(
+        uint32_t now_ms,
+        const MiniDP_AxisCommand &raw_command,
+        const MiniDP_AxisCommand &limited_command,
+        const MiniDP_OutputFrame &frame);
+    void log_useful_data(uint32_t now_ms);
+#endif
 };
 
 extern MiniDP minidp;

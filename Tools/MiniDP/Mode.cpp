@@ -1,5 +1,27 @@
 #include "Mode.h"
 
+#include <math.h>
+
+namespace {
+
+float sanitize_non_negative(const float value)
+{
+    if (!isfinite(value) || value < 0.0f) {
+        return 0.0f;
+    }
+    return value;
+}
+
+bool above_configured_limit(const float value, const float limit)
+{
+    if (limit <= 0.0f) {
+        return false;
+    }
+    return !isfinite(value) || value > limit;
+}
+
+} // namespace
+
 const char *MiniDP_ModeManager::mode_name(const MiniDP_Mode mode)
 {
     switch (mode) {
@@ -59,6 +81,8 @@ const char *MiniDP_ModeManager::reject_name(const MiniDP_ModeReject rejection)
         return "origin-invalid";
     case MiniDP_ModeReject::EKF_UNHEALTHY:
         return "ekf-unhealthy";
+    case MiniDP_ModeReject::GPS_QUALITY_INVALID:
+        return "gps-quality-invalid";
     case MiniDP_ModeReject::ACTUATOR_TEST_NOT_AUTHORIZED:
         return "actuator-test-not-authorized";
     case MiniDP_ModeReject::FAILSAFE_LATCHED:
@@ -83,6 +107,23 @@ void MiniDP_ModeManager::init(const uint64_t time_us)
         MiniDP_ModeReason::STARTUP,
     };
     is_initialised = true;
+}
+
+void MiniDP_ModeManager::set_config(const MiniDP_ModeConfig &new_config)
+{
+    cfg = new_config;
+    cfg.dp_hacc_max_m = sanitize_non_negative(cfg.dp_hacc_max_m);
+    cfg.dp_sacc_max_m = sanitize_non_negative(cfg.dp_sacc_max_m);
+}
+
+MiniDP_ModeReject MiniDP_ModeManager::gps_quality_rejection(
+    const MiniDP_State &state) const
+{
+    if (above_configured_limit(state.gps_hacc_m, cfg.dp_hacc_max_m) ||
+        above_configured_limit(state.gps_sacc_m, cfg.dp_sacc_max_m)) {
+        return MiniDP_ModeReject::GPS_QUALITY_INVALID;
+    }
+    return MiniDP_ModeReject::NONE;
 }
 
 MiniDP_ModeReject MiniDP_ModeManager::entry_rejection(
@@ -116,7 +157,7 @@ MiniDP_ModeReject MiniDP_ModeManager::entry_rejection(
         if (!state.velocity_valid) {
             return MiniDP_ModeReject::VELOCITY_INVALID;
         }
-        return MiniDP_ModeReject::NONE;
+        return gps_quality_rejection(state);
 
     case MiniDP_Mode::ACTUATOR_TEST:
         return actuator_test_authorized ?
@@ -262,7 +303,8 @@ void MiniDP_ModeManager::update(const MiniDP_State &state)
         if (!state.ekf_healthy ||
             !state.origin_valid ||
             !state.position_valid ||
-            !state.velocity_valid) {
+            !state.velocity_valid ||
+            gps_quality_rejection(state) != MiniDP_ModeReject::NONE) {
             transition_to(
                 MiniDP_Mode::HEADING_HOLD,
                 MiniDP_ModeReason::STATE_INVALID,

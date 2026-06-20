@@ -2,6 +2,9 @@
 #include "MiniDP.h"
 
 #include <AP_Common/AP_FWVersion.h>
+#include <AP_Math/AP_Math.h>
+
+#include <limits.h>
 
 #if HAL_GCS_ENABLED
 
@@ -88,6 +91,9 @@ void GCS_MiniDP::send_minidp_heartbeat() const
 uint8_t GCS_MAVLINK_MiniDP::base_mode() const
 {
     uint8_t base_mode = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
+    if (minidp.is_armed()) {
+        base_mode |= MAV_MODE_FLAG_SAFETY_ARMED;
+    }
     if (minidp.get_mode() == MiniDP_Mode::MANUAL) {
         base_mode |= MAV_MODE_FLAG_MANUAL_INPUT_ENABLED;
     }
@@ -96,9 +102,10 @@ uint8_t GCS_MAVLINK_MiniDP::base_mode() const
 
 MAV_STATE GCS_MAVLINK_MiniDP::vehicle_system_status() const
 {
-    return minidp.get_mode() == MiniDP_Mode::FAILSAFE ?
-        MAV_STATE_CRITICAL :
-        MAV_STATE_STANDBY;
+    if (minidp.get_mode() == MiniDP_Mode::FAILSAFE) {
+        return MAV_STATE_CRITICAL;
+    }
+    return minidp.is_armed() ? MAV_STATE_ACTIVE : MAV_STATE_STANDBY;
 }
 
 void GCS_MAVLINK_MiniDP::send_minidp_sys_status() const
@@ -109,9 +116,17 @@ void GCS_MAVLINK_MiniDP::send_minidp_sys_status() const
         MAV_SYS_STATUS_SENSOR_3D_GYRO |
         MAV_SYS_STATUS_SENSOR_3D_ACCEL |
         MAV_SYS_STATUS_SENSOR_3D_MAG |
-        MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE |
         MAV_SYS_STATUS_SENSOR_GPS |
         MAV_SYS_STATUS_AHRS;
+#if MINIDP_BARO_ENABLED
+    present |= MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE;
+#endif
+#if AP_BATTERY_ENABLED
+    const AP_BattMonitor &battery = AP::battery();
+    if (battery.num_instances() > 0) {
+        present |= MAV_SYS_STATUS_SENSOR_BATTERY;
+    }
+#endif
     uint32_t enabled = present;
     uint32_t healthy = 0;
 
@@ -128,6 +143,40 @@ void GCS_MAVLINK_MiniDP::send_minidp_sys_status() const
     if (state.ekf_healthy) {
         healthy |= MAV_SYS_STATUS_AHRS;
     }
+#if AP_BATTERY_ENABLED
+    uint16_t battery_voltage_mv = UINT16_MAX;
+    int16_t battery_current_ca = -1;
+    int8_t battery_remaining_pct = -1;
+    if (battery.num_instances() > 0) {
+        enabled |= MAV_SYS_STATUS_SENSOR_BATTERY;
+        if (battery.healthy() && !battery.has_failsafed()) {
+            healthy |= MAV_SYS_STATUS_SENSOR_BATTERY;
+
+            battery_voltage_mv = uint16_t(constrain_float(
+                battery.gcs_voltage() * 1000.0f,
+                0.0f,
+                float(UINT16_MAX)));
+
+            float current_amps = 0.0f;
+            if (battery.current_amps(current_amps)) {
+                battery_current_ca = int16_t(constrain_float(
+                    current_amps * 100.0f,
+                    -float(INT16_MAX),
+                    float(INT16_MAX)));
+            }
+
+            uint8_t percentage = 0;
+            if (battery.capacity_remaining_pct(percentage)) {
+                battery_remaining_pct =
+                    int8_t(MIN(percentage, uint8_t(INT8_MAX)));
+            }
+        }
+    }
+#else
+    constexpr uint16_t battery_voltage_mv = UINT16_MAX;
+    constexpr int16_t battery_current_ca = -1;
+    constexpr int8_t battery_remaining_pct = -1;
+#endif
 
     mavlink_msg_sys_status_send(
         chan,
@@ -135,9 +184,9 @@ void GCS_MAVLINK_MiniDP::send_minidp_sys_status() const
         enabled,
         healthy,
         0,
-        UINT16_MAX,
-        -1,
-        -1,
+        battery_voltage_mv,
+        battery_current_ca,
+        battery_remaining_pct,
         0,
         0,
         0,
@@ -155,7 +204,7 @@ bool GCS_MAVLINK_MiniDP::try_send_message(const enum ap_message id)
         return true;
 #if AP_BATTERY_ENABLED
     case MSG_BATTERY_STATUS:
-        return true;
+        return send_battery_status();
 #endif
 #if HAL_WITH_ESC_TELEM
     case MSG_ESC_TELEMETRY:
@@ -183,6 +232,114 @@ void GCS_MAVLINK_MiniDP::handle_manual_control_axes(
         packet.x,
         packet.y,
         packet.r);
+}
+
+void GCS_MAVLINK_MiniDP::send_nav_controller_output() const
+{
+    const MiniDP_ModeTarget &target = minidp.get_mode_target();
+    if (!target.yaw_valid) {
+        return;
+    }
+
+    const float target_heading_deg = wrap_360(degrees(target.yaw_rad));
+
+    mavlink_msg_nav_controller_output_send(
+        chan,
+        0.0f,
+        0.0f,
+        target_heading_deg,
+        target_heading_deg,
+        0,
+        0.0f,
+        0.0f,
+        0.0f);
+}
+
+void GCS_MAVLINK_MiniDP::send_position_target_global_int()
+{
+    const MiniDP_State &state = minidp.get_state();
+    const MiniDP_ModeTarget &target = minidp.get_mode_target();
+    if (!target.position_valid ||
+        !state.origin_valid ||
+        target.origin_id != state.origin_id) {
+        return;
+    }
+
+    Location target_location;
+    if (!minidp.ahrs.get_origin(target_location)) {
+        return;
+    }
+    target_location.offset(target.pos_n_m, target.pos_e_m);
+
+    static constexpr uint16_t POSITION_TARGET_TYPEMASK_LAST_BYTE = 0xF000;
+    uint16_t type_mask =
+        POSITION_TARGET_TYPEMASK_VX_IGNORE |
+        POSITION_TARGET_TYPEMASK_VY_IGNORE |
+        POSITION_TARGET_TYPEMASK_VZ_IGNORE |
+        POSITION_TARGET_TYPEMASK_AX_IGNORE |
+        POSITION_TARGET_TYPEMASK_AY_IGNORE |
+        POSITION_TARGET_TYPEMASK_AZ_IGNORE |
+        POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE |
+        POSITION_TARGET_TYPEMASK_LAST_BYTE;
+    if (!target.yaw_valid) {
+        type_mask |= POSITION_TARGET_TYPEMASK_YAW_IGNORE;
+    }
+
+    mavlink_msg_position_target_global_int_send(
+        chan,
+        AP_HAL::millis(),
+        MAV_FRAME_GLOBAL,
+        type_mask,
+        target_location.lat,
+        target_location.lng,
+        target_location.alt * 0.01f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        target.yaw_valid ? target.yaw_rad : 0.0f,
+        0.0f);
+}
+
+void GCS_MAVLINK_MiniDP::send_position_target_local_ned()
+{
+    const MiniDP_ModeTarget &target = minidp.get_mode_target();
+    if (!target.position_valid) {
+        return;
+    }
+
+    static constexpr uint16_t POSITION_TARGET_TYPEMASK_LAST_BYTE = 0xF000;
+    uint16_t type_mask =
+        POSITION_TARGET_TYPEMASK_VX_IGNORE |
+        POSITION_TARGET_TYPEMASK_VY_IGNORE |
+        POSITION_TARGET_TYPEMASK_VZ_IGNORE |
+        POSITION_TARGET_TYPEMASK_AX_IGNORE |
+        POSITION_TARGET_TYPEMASK_AY_IGNORE |
+        POSITION_TARGET_TYPEMASK_AZ_IGNORE |
+        POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE |
+        POSITION_TARGET_TYPEMASK_LAST_BYTE;
+    if (!target.yaw_valid) {
+        type_mask |= POSITION_TARGET_TYPEMASK_YAW_IGNORE;
+    }
+
+    mavlink_msg_position_target_local_ned_send(
+        chan,
+        AP_HAL::millis(),
+        MAV_FRAME_LOCAL_NED,
+        type_mask,
+        target.pos_n_m,
+        target.pos_e_m,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        target.yaw_valid ? target.yaw_rad : 0.0f,
+        0.0f);
 }
 
 uint8_t GCS_MAVLINK_MiniDP::send_available_mode(const uint8_t index) const
@@ -333,11 +490,51 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_motor_test(
     return MAV_RESULT_ACCEPTED;
 }
 
+MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_component_arm_disarm(
+    const mavlink_command_int_t &packet)
+{
+    const bool force = is_equal(packet.param2, 21196.0f);
+
+    if (is_equal(packet.param1, 1.0f)) {
+        const MiniDP_ArmResult result = minidp.request_arm(true, force);
+        if (!result.accepted) {
+            char text[50];
+            AP_HAL::get_HAL().util->snprintf(
+                text,
+                sizeof(text),
+                "Arm rejected: %s",
+                MiniDP_Arming::reject_name(result.rejection));
+            send_minidp_text(MAV_SEVERITY_WARNING, text);
+            return MAV_RESULT_DENIED;
+        }
+        send_minidp_text(
+            MAV_SEVERITY_INFO,
+            force ? "Armed (force)" : "Armed");
+        return MAV_RESULT_ACCEPTED;
+    }
+
+    if (is_zero(packet.param1)) {
+        const MiniDP_ArmResult result = minidp.request_arm(false, force);
+        if (!result.accepted) {
+            return MAV_RESULT_DENIED;
+        }
+        send_minidp_text(MAV_SEVERITY_INFO, "Disarmed");
+        return MAV_RESULT_ACCEPTED;
+    }
+
+    send_minidp_text(
+        MAV_SEVERITY_WARNING,
+        "Arm rejected: unsupported command");
+    return MAV_RESULT_DENIED;
+}
+
 MAV_RESULT GCS_MAVLINK_MiniDP::handle_command_int_packet(
     const mavlink_command_int_t &packet,
     const mavlink_message_t &msg)
 {
     switch (packet.command) {
+    case MAV_CMD_COMPONENT_ARM_DISARM:
+        return handle_mav_cmd_component_arm_disarm(packet);
     case MAV_CMD_DO_SET_MODE:
         return handle_mav_cmd_do_set_mode(packet);
     case MAV_CMD_DO_MOTOR_TEST:

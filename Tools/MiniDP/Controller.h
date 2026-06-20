@@ -9,6 +9,8 @@ struct MiniDP_ControllerConfig {
     float yaw_d;
     float position_p;
     float velocity_d;
+    float position_radius_m;
+    float position_deadband_m;
     float surge_limit;
     float sway_limit;
     float yaw_limit;

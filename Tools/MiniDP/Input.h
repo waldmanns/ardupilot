@@ -16,6 +16,10 @@ struct MiniDP_InputConfig {
     uint8_t rc_yaw_channel;
     uint8_t rc_kill_channel;
     uint16_t rc_kill_pwm;
+    uint8_t rc_arm_channel;
+    uint16_t rc_arm_pwm;
+    uint8_t rc_disarm_channel;
+    uint16_t rc_disarm_pwm;
 
     float manual_deadband;
     float manual_surge_limit;
@@ -52,6 +56,8 @@ public:
         const MiniDP_RCInputFrame &frame,
         uint32_t now_ms) const;
     bool rc_kill_active(const MiniDP_RCInputFrame &frame) const;
+    bool rc_arm_active(const MiniDP_RCInputFrame &frame) const;
+    bool rc_disarm_active(const MiniDP_RCInputFrame &frame) const;
 
     void record_mavlink_manual_control(
         uint32_t now_ms,

@@ -14,6 +14,8 @@ static MiniDP_State valid_state()
     state.yaw_rad = 1.25f;
     state.pos_n_m = 12.0f;
     state.pos_e_m = -4.0f;
+    state.gps_hacc_m = 1.0f;
+    state.gps_sacc_m = 0.2f;
     state.origin_id = 3;
     state.reset_counter = 7;
     return state;
@@ -84,6 +86,48 @@ TEST(MiniDPMode, DPHoldRequiresCompleteStateAndLatchesTarget)
     EXPECT_FLOAT_EQ(manager.target().pos_e_m, state.pos_e_m);
     EXPECT_EQ(manager.target().origin_id, state.origin_id);
     EXPECT_EQ(manager.target().reset_counter, state.reset_counter);
+}
+
+TEST(MiniDPMode, DPHoldRequiresConfiguredGpsQuality)
+{
+    MiniDP_ModeManager manager;
+    manager.init(0);
+    MiniDP_ModeConfig config{};
+    config.dp_hacc_max_m = 3.0f;
+    config.dp_sacc_max_m = 1.0f;
+    manager.set_config(config);
+
+    MiniDP_State state = valid_state();
+    state.gps_hacc_m = 4.0f;
+
+    const auto rejected_hacc = manager.request_mode(
+        MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::USER_REQUEST,
+        state);
+    EXPECT_FALSE(rejected_hacc.accepted);
+    EXPECT_EQ(
+        rejected_hacc.rejection,
+        MiniDP_ModeReject::GPS_QUALITY_INVALID);
+
+    state.gps_hacc_m = 2.0f;
+    state.gps_sacc_m = NAN;
+    const auto rejected_unknown_sacc = manager.request_mode(
+        MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::USER_REQUEST,
+        state);
+    EXPECT_FALSE(rejected_unknown_sacc.accepted);
+    EXPECT_EQ(
+        rejected_unknown_sacc.rejection,
+        MiniDP_ModeReject::GPS_QUALITY_INVALID);
+
+    config.dp_sacc_max_m = 0.0f;
+    manager.set_config(config);
+    const auto accepted = manager.request_mode(
+        MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::USER_REQUEST,
+        state);
+    EXPECT_TRUE(accepted.accepted);
+    EXPECT_EQ(manager.mode(), MiniDP_Mode::DP_HOLD);
 }
 
 TEST(MiniDPMode, DPFallsBackToHeadingOnEstimatorReset)
@@ -183,6 +227,31 @@ TEST(MiniDPMode, DPFallsBackToHeadingWhenPositionIsLost)
 
     state.time_us++;
     state.position_valid = false;
+    manager.update(state);
+
+    EXPECT_EQ(manager.mode(), MiniDP_Mode::HEADING_HOLD);
+    EXPECT_EQ(
+        manager.last_transition().reason,
+        MiniDP_ModeReason::STATE_INVALID);
+}
+
+TEST(MiniDPMode, DPFallsBackToHeadingWhenGpsQualityDegrades)
+{
+    MiniDP_ModeManager manager;
+    manager.init(0);
+    MiniDP_ModeConfig config{};
+    config.dp_hacc_max_m = 3.0f;
+    config.dp_sacc_max_m = 1.0f;
+    manager.set_config(config);
+
+    MiniDP_State state = valid_state();
+    ASSERT_TRUE(manager.request_mode(
+        MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::USER_REQUEST,
+        state).accepted);
+
+    state.time_us++;
+    state.gps_sacc_m = 1.5f;
     manager.update(state);
 
     EXPECT_EQ(manager.mode(), MiniDP_Mode::HEADING_HOLD);

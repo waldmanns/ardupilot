@@ -32,9 +32,15 @@ enum class MiniDP_ModeReject : uint8_t {
     VELOCITY_INVALID,
     ORIGIN_INVALID,
     EKF_UNHEALTHY,
+    GPS_QUALITY_INVALID,
     ACTUATOR_TEST_NOT_AUTHORIZED,
     FAILSAFE_LATCHED,
     UNSUPPORTED_MODE,
+};
+
+struct MiniDP_ModeConfig {
+    float dp_hacc_max_m;
+    float dp_sacc_max_m;
 };
 
 struct MiniDP_ModeRequestResult {
@@ -65,6 +71,7 @@ struct MiniDP_ModeTransition {
 class MiniDP_ModeManager {
 public:
     void init(uint64_t time_us);
+    void set_config(const MiniDP_ModeConfig &new_config);
     void update(const MiniDP_State &state);
 
     MiniDP_ModeRequestResult request_mode(
@@ -87,12 +94,14 @@ public:
 
 private:
     MiniDP_Mode current_mode = MiniDP_Mode::MANUAL;
+    MiniDP_ModeConfig cfg{10.0f, 2.0f};
     MiniDP_ModeTarget current_target{};
     MiniDP_ModeTransition transition_record{};
     uint32_t transition_sequence = 0;
     uint32_t target_sequence = 0;
     bool is_initialised = false;
 
+    MiniDP_ModeReject gps_quality_rejection(const MiniDP_State &state) const;
     MiniDP_ModeReject entry_rejection(
         MiniDP_Mode requested,
         const MiniDP_State &state,

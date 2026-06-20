@@ -119,6 +119,39 @@ TEST(MiniDPController, DPHoldTransformsPositionAndVelocityToBodyAxes)
     EXPECT_NEAR(command.sway, -0.2f, 1.0e-6f);
 }
 
+TEST(MiniDPController, DPHoldSoftensPositionInsideConfiguredRadius)
+{
+    MiniDP_Controller controller;
+    controller.init();
+
+    MiniDP_ControllerConfig config = controller.config();
+    config.position_p = 1.0f;
+    config.velocity_d = 0.0f;
+    config.position_radius_m = 2.0f;
+    config.position_deadband_m = 0.5f;
+    config.surge_limit = 1.0f;
+    config.sway_limit = 1.0f;
+    controller.set_config(config);
+
+    MiniDP_State state = valid_state();
+    state.pos_n_m = 0.0f;
+    state.pos_e_m = 0.0f;
+    state.vel_n_m_s = 0.0f;
+    state.vel_e_m_s = 0.0f;
+
+    MiniDP_ModeTarget target = valid_target();
+    target.pos_n_m = 1.0f;
+
+    const MiniDP_AxisCommand softened =
+        controller.update(MiniDP_Mode::DP_HOLD, target, state);
+    EXPECT_NEAR(softened.surge, 0.33333334f, 1.0e-6f);
+
+    target.pos_n_m = 0.25f;
+    const MiniDP_AxisCommand deadbanded =
+        controller.update(MiniDP_Mode::DP_HOLD, target, state);
+    EXPECT_FLOAT_EQ(deadbanded.surge, 0.0f);
+}
+
 TEST(MiniDPController, MissingStateZerosOnlyUnavailableAxes)
 {
     MiniDP_Controller controller;
@@ -153,6 +186,8 @@ TEST(MiniDPController, SanitizesInvalidConfig)
     config.yaw_d = -2.0f;
     config.position_p = -3.0f;
     config.velocity_d = -4.0f;
+    config.position_radius_m = -5.0f;
+    config.position_deadband_m = 3.0f;
     config.surge_limit = -1.0f;
     config.sway_limit = 2.0f;
     config.yaw_limit = 0.25f;
@@ -162,6 +197,8 @@ TEST(MiniDPController, SanitizesInvalidConfig)
     EXPECT_FLOAT_EQ(controller.config().yaw_d, 0.0f);
     EXPECT_FLOAT_EQ(controller.config().position_p, 0.0f);
     EXPECT_FLOAT_EQ(controller.config().velocity_d, 0.0f);
+    EXPECT_FLOAT_EQ(controller.config().position_radius_m, 3.0f);
+    EXPECT_FLOAT_EQ(controller.config().position_deadband_m, 3.0f);
     EXPECT_FLOAT_EQ(controller.config().surge_limit, 0.0f);
     EXPECT_FLOAT_EQ(controller.config().sway_limit, 1.0f);
     EXPECT_FLOAT_EQ(controller.config().yaw_limit, 0.25f);

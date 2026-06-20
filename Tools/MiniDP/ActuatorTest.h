@@ -12,6 +12,7 @@ enum class MiniDP_ActuatorTestThrottleType : uint8_t {
 enum class MiniDP_ActuatorTestReject : uint8_t {
     NONE = 0,
     NOT_AUTHORIZED,
+    NOT_ARMED,
     AUTHORITY_REJECTED,
     MODE_REJECTED,
     INVALID_MOTOR_COUNT,

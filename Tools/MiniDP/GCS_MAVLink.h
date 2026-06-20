@@ -23,7 +23,9 @@ protected:
         const mavlink_manual_control_t &packet,
         uint32_t tnow) override;
 
-    void send_nav_controller_output() const override {}
+    void send_nav_controller_output() const override;
+    void send_position_target_global_int() override;
+    void send_position_target_local_ned() override;
     void send_pid_tuning() override {}
     uint8_t send_available_mode(uint8_t index) const override;
 
@@ -33,6 +35,8 @@ private:
     MAV_RESULT handle_mav_cmd_do_motor_test(
         const mavlink_command_int_t &packet);
     MAV_RESULT handle_mav_cmd_do_set_mode(
+        const mavlink_command_int_t &packet);
+    MAV_RESULT handle_mav_cmd_component_arm_disarm(
         const mavlink_command_int_t &packet);
 };
 

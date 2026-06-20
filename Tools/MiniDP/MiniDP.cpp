@@ -11,12 +11,97 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Logger/LogStructure.h>
+#include <AP_Math/AP_Math.h>
 #include <StorageManager/StorageManager.h>
+#include <math.h>
 #include <stdio.h>
 
 const AP_HAL::HAL &hal = AP_HAL::get_HAL();
 
 namespace {
+
+enum MiniDP_LogMessage : uint8_t {
+    LOG_MINIDP_TARGET_MSG,
+    LOG_MINIDP_AXIS_MSG,
+    LOG_MINIDP_OUTPUT_MSG,
+    LOG_MINIDP_STATUS_MSG,
+};
+
+static_assert(
+    LOG_MINIDP_STATUS_MSG < 32,
+    "MiniDP log messages must stay in vehicle-specific ID range");
+
+struct PACKED log_MiniDP_Target {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t mode;
+    uint32_t target_id;
+    uint16_t flags;
+    float target_yaw_rad;
+    float yaw_rad;
+    float error_n_m;
+    float error_e_m;
+    float velocity_n_m_s;
+    float velocity_e_m_s;
+    float gps_hacc_m;
+    float gps_sacc_m_s;
+};
+
+struct PACKED log_MiniDP_Axis {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t mode;
+    uint8_t owner;
+    uint8_t output_state;
+    float raw_surge;
+    float raw_sway;
+    float raw_yaw;
+    float limited_surge;
+    float limited_sway;
+    float limited_yaw;
+};
+
+struct PACKED log_MiniDP_Output {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t output_state;
+    uint8_t saturated;
+    float motor1_demand;
+    float motor2_demand;
+    float motor3_demand;
+    float motor4_demand;
+    uint16_t motor1_pwm_us;
+    uint16_t motor2_pwm_us;
+    uint16_t motor3_pwm_us;
+    uint16_t motor4_pwm_us;
+    uint8_t active_pwm_count;
+};
+
+struct PACKED log_MiniDP_Status {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t armed;
+    uint8_t soft_armed;
+    uint8_t arm_required;
+    uint8_t arm_gps_requirement;
+    uint8_t last_arm_reject;
+    uint8_t mode;
+    uint8_t owner;
+    uint8_t output_state;
+    uint8_t rc_healthy;
+    uint8_t mavlink_healthy;
+    uint8_t rc_kill;
+    uint8_t gps_fix;
+    uint8_t gps_sats;
+};
+
+constexpr uint32_t minidp_log_attitude = 1U << 0;
+constexpr uint32_t minidp_log_gps = 1U << 1;
+constexpr uint32_t minidp_log_power = MiniDP::log_power_bit;
+constexpr uint32_t minidp_log_imu = 1U << 3;
+constexpr uint32_t minidp_log_compass = 1U << 4;
+constexpr uint32_t minidp_log_rc = 1U << 5;
+constexpr uint32_t minidp_log_dp = 1U << 6;
 
 void set_channel_enabled_by_mask(const uint32_t mask, const bool enabled)
 {
@@ -59,6 +144,22 @@ uint32_t auxiliary_output_channel_mask(
     return mask;
 }
 
+MiniDP_OutputSafeAction safe_action_from_param(
+    const int8_t value,
+    const MiniDP_OutputSafeAction fallback)
+{
+    switch (value) {
+    case int8_t(MiniDP_OutputSafeAction::DISABLE_PWM):
+        return MiniDP_OutputSafeAction::DISABLE_PWM;
+    case int8_t(MiniDP_OutputSafeAction::SEND_NEUTRAL):
+        return MiniDP_OutputSafeAction::SEND_NEUTRAL;
+    case int8_t(MiniDP_OutputSafeAction::SEND_FAILSAFE):
+        return MiniDP_OutputSafeAction::SEND_FAILSAFE;
+    default:
+        return fallback;
+    }
+}
+
 } // namespace
 
 MiniDP minidp;
@@ -71,8 +172,26 @@ AP_ExternalAHRS external_ahrs;
 #endif
 AP_Scheduler scheduler;
 
+constexpr int8_t MiniDP::battery_failsafe_priorities[4];
+
 const LogStructure MiniDP::log_structure[] = {
     LOG_COMMON_STRUCTURES,
+    { LOG_MINIDP_TARGET_MSG, sizeof(log_MiniDP_Target),
+      "MDTG", "QBIHffffffff",
+      "TimeUS,Mode,TId,Flags,TYaw,Yaw,ErrN,ErrE,VelN,VelE,HAcc,SAcc",
+      "s---rrmmnnmn", "F---00000000", true },
+    { LOG_MINIDP_AXIS_MSG, sizeof(log_MiniDP_Axis),
+      "MDAX", "QBBBffffff",
+      "TimeUS,Mode,Own,Out,RSrg,RSw,RYaw,LSrg,LSw,LYaw",
+      "s---------", "F---------", true },
+    { LOG_MINIDP_OUTPUT_MSG, sizeof(log_MiniDP_Output),
+      "MDOT", "QBBffffHHHHB",
+      "TimeUS,State,Sat,M1,M2,M3,M4,P1,P2,P3,P4,Act",
+      "s------YYYY-", "F-----------", true },
+    { LOG_MINIDP_STATUS_MSG, sizeof(log_MiniDP_Status),
+      "MDST", "QBBBBBBBBBBBBBB",
+      "TimeUS,Arm,SArm,Req,GReq,Rej,Mode,Own,Out,RC,Mav,Kill,GPS,Sats",
+      "s-------------S", "F--------------", true },
 };
 
 void MiniDP::load_parameters()
@@ -89,6 +208,27 @@ void MiniDP::load_parameters()
     AP_Param::load_all();
 }
 
+MiniDP_ArmingConfig MiniDP::make_arming_config() const
+{
+    MiniDP_ArmingConfig config{};
+    config.arming_required = g.arm_require != 0;
+    switch (g.arm_gps_require.get()) {
+    case 1:
+        config.gps_requirement = MiniDP_ArmGpsRequirement::FIX;
+        break;
+    case 2:
+        config.gps_requirement = MiniDP_ArmGpsRequirement::DP_READY;
+        break;
+    case 0:
+    default:
+        config.gps_requirement = MiniDP_ArmGpsRequirement::NONE;
+        break;
+    }
+    config.gps_hacc_max_m = g.arm_hacc_max.get();
+    config.gps_sacc_max_m_s = g.arm_sacc_max.get();
+    return config;
+}
+
 MiniDP_InputConfig MiniDP::make_input_config() const
 {
     MiniDP_InputConfig config{};
@@ -102,12 +242,47 @@ MiniDP_InputConfig MiniDP::make_input_config() const
         uint8_t(MAX(int16_t(g.in_rc_kill_channel.get()), int16_t(0)));
     config.rc_kill_pwm =
         uint16_t(MAX(int16_t(g.in_rc_kill_pwm.get()), int16_t(0)));
+    config.rc_arm_channel =
+        uint8_t(MAX(int16_t(g.in_rc_arm_channel.get()), int16_t(0)));
+    config.rc_arm_pwm =
+        uint16_t(MAX(int16_t(g.in_rc_arm_pwm.get()), int16_t(0)));
+    config.rc_disarm_channel =
+        uint8_t(MAX(int16_t(g.in_rc_disarm_channel.get()), int16_t(0)));
+    config.rc_disarm_pwm =
+        uint16_t(MAX(int16_t(g.in_rc_disarm_pwm.get()), int16_t(0)));
     config.manual_deadband = g.manual_deadband.get();
     config.manual_surge_limit = g.manual_surge_limit.get();
     config.manual_sway_limit = g.manual_sway_limit.get();
     config.manual_yaw_limit = g.manual_yaw_limit.get();
     config.mavlink_manual_timeout_ms =
         uint32_t(MAX(g.manual_mavlink_timeout.get(), 0.0f) * 1000.0f);
+    return config;
+}
+
+MiniDP_FrameGeometryConfig MiniDP::make_frame_geometry_config() const
+{
+    MiniDP_FrameGeometryConfig config{};
+    switch (g.frame_screw_position.get()) {
+    case int8_t(MiniDP_ScrewPosition::FORWARD):
+        config.screw_position = MiniDP_ScrewPosition::FORWARD;
+        break;
+    case int8_t(MiniDP_ScrewPosition::CENTER):
+        config.screw_position = MiniDP_ScrewPosition::CENTER;
+        break;
+    case int8_t(MiniDP_ScrewPosition::AFT):
+    default:
+        config.screw_position = MiniDP_ScrewPosition::AFT;
+        break;
+    }
+    config.screw_yaw_scale = g.frame_screw_yaw_scale.get();
+    return config;
+}
+
+MiniDP_ModeConfig MiniDP::make_mode_config() const
+{
+    MiniDP_ModeConfig config{};
+    config.dp_hacc_max_m = g.dp_hacc_max.get();
+    config.dp_sacc_max_m = g.dp_sacc_max.get();
     return config;
 }
 
@@ -131,16 +306,29 @@ MiniDP_ControllerConfig MiniDP::make_controller_config() const
     config.yaw_d = g.dp_yaw_d.get();
     config.position_p = g.dp_position_p.get();
     config.velocity_d = g.dp_velocity_d.get();
+    config.position_radius_m = g.dp_position_radius.get();
+    config.position_deadband_m = g.dp_position_deadband.get();
     config.surge_limit = g.dp_surge_limit.get();
     config.sway_limit = g.dp_sway_limit.get();
     config.yaw_limit = g.dp_yaw_limit.get();
     return config;
 }
 
+bool MiniDP::outputs_armed() const
+{
+    if (!arming.outputs_allowed()) {
+        return false;
+    }
+    return hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_DISARMED;
+}
+
 MiniDP_OutputState MiniDP::desired_output_state() const
 {
     if (authority_status.rc_kill) {
         return MiniDP_OutputState::KILL;
+    }
+    if (!outputs_armed()) {
+        return MiniDP_OutputState::DISARMED;
     }
     if (mode_manager.mode() == MiniDP_Mode::FAILSAFE ||
         authority.owner() == MiniDP_ControlOwner::FAILSAFE) {
@@ -189,6 +377,69 @@ void MiniDP::setup_motor_output_defaults()
     }
 
     SRV_Channels::update_aux_servo_function();
+}
+
+void MiniDP::sync_frame_config_from_params()
+{
+    if (output_manager.frame_type() != g.frame_type.get()) {
+        if (!output_manager.set_frame_type(g.frame_type.get())) {
+            (void)output_manager.set_frame_type(
+                MiniDP_OutputManager::default_frame_type);
+        }
+    }
+    output_manager.set_frame_geometry(make_frame_geometry_config());
+}
+
+void MiniDP::sync_output_config_from_servo_params()
+{
+    SRV_Channels::update_aux_servo_function();
+
+    const MiniDP_OutputSafeAction disarmed_action =
+        safe_action_from_param(
+            g.out_disarmed_action.get(),
+            MiniDP_OutputSafeAction::DISABLE_PWM);
+    const MiniDP_OutputSafeAction failsafe_action =
+        safe_action_from_param(
+            g.out_failsafe_action.get(),
+            MiniDP_OutputSafeAction::SEND_NEUTRAL);
+    const MiniDP_OutputSafeAction kill_action =
+        safe_action_from_param(
+            g.out_kill_action.get(),
+            MiniDP_OutputSafeAction::DISABLE_PWM);
+    const uint16_t configured_failsafe_pwm =
+        uint16_t(MAX(int16_t(g.out_failsafe_pwm.get()), int16_t(0)));
+
+    for (uint8_t i = 0; i < MiniDP_OutputManager::max_actuators; i++) {
+        MiniDP_ActuatorConfig config = output_manager.actuator_config(i);
+        if (!config.enabled) {
+            continue;
+        }
+
+        config.disarmed_action = disarmed_action;
+        config.failsafe_action = failsafe_action;
+        config.kill_action = kill_action;
+        config.pwm_failsafe = configured_failsafe_pwm;
+
+        const SRV_Channel::Function function =
+            SRV_Channels::get_motor_function(i);
+        uint8_t channel = 0;
+        if (SRV_Channels::find_channel(function, channel)) {
+            config.pwm_channel = channel;
+        }
+        const SRV_Channel *srv_channel =
+            SRV_Channels::get_channel_for(function);
+        if (srv_channel != nullptr) {
+            config.pwm_min = srv_channel->get_output_min();
+            config.pwm_trim = srv_channel->get_trim();
+            config.pwm_max = srv_channel->get_output_max();
+            config.reversed = srv_channel->get_reversed();
+            if (configured_failsafe_pwm == 0U) {
+                config.pwm_failsafe = config.pwm_trim;
+            }
+        }
+
+        (void)output_manager.set_actuator_config(i, config);
+    }
 }
 
 uint32_t MiniDP::motor_output_channel_mask() const
@@ -244,6 +495,24 @@ void MiniDP::apply_outputs(const MiniDP_OutputFrame &frame)
     servo_channels.push();
 }
 
+void MiniDP::update_battery(const uint32_t now_ms)
+{
+#if AP_BATTERY_ENABLED
+    if (now_ms - last_battery_read_ms < 100U) {
+        return;
+    }
+    last_battery_read_ms = now_ms;
+
+    battery.read();
+    if (!battery.has_failsafed()) {
+        battery_failsafe_latched = false;
+        last_battery_failsafe_action = 0;
+    }
+#else
+    (void)now_ms;
+#endif
+}
+
 void MiniDP::setup()
 {
     printf("MiniDP basic firmware shell\n");
@@ -254,6 +523,10 @@ void MiniDP::setup()
     printf("MiniDP board config ready\n");
     serial_manager.init();
     printf("MiniDP serial manager ready\n");
+#if AP_BATTERY_ENABLED
+    battery.init();
+    printf("MiniDP battery monitor ready\n");
+#endif
     rc_channels.init();
     printf("MiniDP RC frontend ready\n");
     input_mapper.init();
@@ -262,10 +535,16 @@ void MiniDP::setup()
     axis_limiter.set_config(make_axis_limiter_config());
     controller.init();
     controller.set_config(make_controller_config());
+    arming.init();
+    arming.set_config(make_arming_config());
+    sync_soft_armed();
 
     output_manager.init(g.frame_type.get());
+    sync_frame_config_from_params();
     setup_motor_output_defaults();
     servo_channels.init(motor_output_channel_mask());
+    sync_output_config_from_servo_params();
+    (void)output_manager.update(MiniDP_OutputState::DISARMED, {});
     apply_outputs(output_manager.frame());
     printf(
         "MiniDP frame type %d (%s) ready\n",
@@ -292,6 +571,10 @@ void MiniDP::setup()
 #endif
     compass.init();
     printf("MiniDP compass frontend ready\n");
+#if HAL_LOGGING_ENABLED
+    gps.set_log_gps_bit(minidp_log_gps);
+    ins.set_log_raw_bit(minidp_log_imu);
+#endif
     gps.init();
     printf("MiniDP GPS frontend ready\n");
     ahrs.init();
@@ -299,7 +582,11 @@ void MiniDP::setup()
     ahrs.set_vehicle_class(AP_AHRS::VehicleClass::GROUND);
     ahrs.reset();
     printf("MiniDP AHRS frontend ready\n");
+#if HAL_LOGGING_ENABLED
+    write_startup_log_messages();
+#endif
     mode_manager.init(AP_HAL::micros64());
+    mode_manager.set_config(make_mode_config());
     authority.init(AP_HAL::micros64());
 
     notify.init();
@@ -380,6 +667,7 @@ void MiniDP::update_authority(const uint32_t now_ms)
     authority_status.mavlink_target_authorized = g.auth_mav_target != 0;
     authority_status.actuator_test_authorized = g.auth_test != 0;
     authority_status.failsafe_active =
+        battery_failsafe_latched ||
         mode_manager.mode() == MiniDP_Mode::FAILSAFE;
     capture_rc_input_frame(authority_status.rc_healthy);
     authority_status.rc_kill = input_mapper.rc_kill_active(rc_input_frame);
@@ -423,6 +711,154 @@ void MiniDP::record_mavlink_manual_control(
     input_mapper.record_mavlink_manual_control(now_ms, x, y, r);
 }
 
+void MiniDP::sync_soft_armed()
+{
+    const bool soft_armed = outputs_armed();
+    hal.util->set_soft_armed(soft_armed);
+    AP_Notify::flags.armed = arming.armed();
+    AP_Notify::flags.flying = soft_armed;
+#if HAL_LOGGING_ENABLED
+    logger.set_vehicle_armed(soft_armed);
+#endif
+}
+
+MiniDP_ArmResult MiniDP::request_arm(const bool arm, const bool force)
+{
+    arming.set_config(make_arming_config());
+
+    MiniDP_ArmResult result{};
+    if (arm) {
+        const bool failsafe =
+            mode_manager.mode() == MiniDP_Mode::FAILSAFE ||
+            authority.owner() == MiniDP_ControlOwner::FAILSAFE;
+        result = arming.arm(
+            get_state(),
+            authority_status.rc_kill,
+            failsafe,
+            force);
+    } else {
+        result = arming.disarm();
+        if (authority.owner() != MiniDP_ControlOwner::FAILSAFE) {
+            (void)authority.request_owner(
+                MiniDP_ControlOwner::NONE,
+                MiniDP_AuthorityReason::RELEASED,
+                authority_status);
+        }
+        if (mode_manager.mode() != MiniDP_Mode::FAILSAFE &&
+            mode_manager.mode() != MiniDP_Mode::MANUAL) {
+            (void)mode_manager.manual_override(get_state());
+        }
+    }
+
+    sync_soft_armed();
+
+#if HAL_LOGGING_ENABLED
+    if (result.accepted) {
+        logger.Write_MessageF(
+            "%s%s",
+            arm ? "Armed" : "Disarmed",
+            force ? " force" : "");
+    } else {
+        logger.Write_MessageF(
+            "Arm rejected: %s",
+            MiniDP_Arming::reject_name(result.rejection));
+    }
+#endif
+
+    return result;
+}
+
+void MiniDP::update_rc_arm_switches()
+{
+    if (!rc_input_frame.healthy) {
+        last_rc_arm_switch = false;
+        last_rc_disarm_switch = false;
+        rc_arm_switches_initialised = false;
+        return;
+    }
+
+    const bool arm_switch = input_mapper.rc_arm_active(rc_input_frame);
+    const bool disarm_switch = input_mapper.rc_disarm_active(rc_input_frame);
+
+    if (!rc_arm_switches_initialised) {
+        last_rc_arm_switch = arm_switch;
+        last_rc_disarm_switch = disarm_switch;
+        rc_arm_switches_initialised = true;
+        return;
+    }
+
+    if (disarm_switch && !last_rc_disarm_switch) {
+        const MiniDP_ArmResult result = request_arm(false, false);
+#if HAL_GCS_ENABLED
+        gcs_backend.send_minidp_text(
+            result.accepted ? MAV_SEVERITY_INFO : MAV_SEVERITY_WARNING,
+            result.accepted ? "RC disarm accepted" : "RC disarm rejected");
+#endif
+    } else if (arm_switch && !last_rc_arm_switch && !disarm_switch) {
+        const MiniDP_ArmResult result = request_arm(true, false);
+#if HAL_GCS_ENABLED
+        if (result.accepted) {
+            gcs_backend.send_minidp_text(
+                MAV_SEVERITY_INFO,
+                "RC arm accepted");
+        } else {
+            char text[50];
+            AP_HAL::get_HAL().util->snprintf(
+                text,
+                sizeof(text),
+                "RC arm rejected: %s",
+                MiniDP_Arming::reject_name(result.rejection));
+            gcs_backend.send_minidp_text(MAV_SEVERITY_WARNING, text);
+        }
+#endif
+    }
+
+    last_rc_arm_switch = arm_switch;
+    last_rc_disarm_switch = disarm_switch;
+}
+
+void MiniDP::handle_battery_failsafe(
+    const char *type_str,
+    const int8_t action)
+{
+    last_battery_failsafe_action = action;
+
+    char text[50];
+    AP_HAL::get_HAL().util->snprintf(
+        text,
+        sizeof(text),
+        "Battery %s action=%d",
+        type_str == nullptr ? "failsafe" : type_str,
+        int(action));
+
+#if HAL_LOGGING_ENABLED
+    logger.Write_Message(text);
+#endif
+#if HAL_GCS_ENABLED
+    gcs_backend.send_minidp_text(MAV_SEVERITY_WARNING, text);
+#endif
+
+    if (action <= 0) {
+        return;
+    }
+
+    battery_failsafe_latched = true;
+    authority_status.failsafe_active = true;
+    authority_status.time_us = AP_HAL::micros64();
+    (void)authority.request_owner(
+        MiniDP_ControlOwner::FAILSAFE,
+        MiniDP_AuthorityReason::FAILSAFE_TRIGGERED,
+        authority_status);
+    (void)mode_manager.request_mode(
+        MiniDP_Mode::FAILSAFE,
+        MiniDP_ModeReason::FAILSAFE_TRIGGERED,
+        get_state());
+
+    if (action >= 2) {
+        (void)request_arm(false, false);
+    }
+}
+
 MiniDP_ModeCommandResult MiniDP::request_mode(
     const MiniDP_Mode requested,
     const MiniDP_ModeReason reason)
@@ -435,7 +871,9 @@ MiniDP_ModeCommandResult MiniDP::request_mode(
     request_status.actuator_test_authorized = g.auth_test != 0;
     request_status.rc_kill = input_mapper.rc_kill_active(rc_input_frame);
     request_status.failsafe_active =
+        battery_failsafe_latched ||
         mode_manager.mode() == MiniDP_Mode::FAILSAFE;
+    mode_manager.set_config(make_mode_config());
 
     switch (requested) {
     case MiniDP_Mode::MANUAL: {
@@ -585,10 +1023,14 @@ MiniDP_ActuatorTestStartResult MiniDP::request_actuator_test(
     authority_status.time_us = AP_HAL::micros64();
     authority_status.actuator_test_authorized = g.auth_test != 0;
     authority_status.failsafe_active =
+        battery_failsafe_latched ||
         mode_manager.mode() == MiniDP_Mode::FAILSAFE;
 
     if (!authority_status.actuator_test_authorized) {
         return {false, MiniDP_ActuatorTestReject::NOT_AUTHORIZED};
+    }
+    if (!outputs_armed()) {
+        return {false, MiniDP_ActuatorTestReject::NOT_ARMED};
     }
 
     const MiniDP_AuthorityRequestResult authority_result =
@@ -644,6 +1086,7 @@ void MiniDP::update_actuator_test(const uint32_t now_ms)
         authority.owner() == MiniDP_ControlOwner::TEST &&
         authority_status.actuator_test_authorized &&
         !authority_status.rc_kill &&
+        outputs_armed() &&
         authority.owner() != MiniDP_ControlOwner::FAILSAFE;
 
     const bool was_active = actuator_test.active();
@@ -687,9 +1130,15 @@ void MiniDP::report_authority_transition()
     logger.Write_MessageF("Owner %s->%s (%s)", from, to, reason);
 #endif
 #if HAL_GCS_ENABLED
-    (void)from;
-    (void)to;
-    (void)reason;
+    char text[50];
+    AP_HAL::get_HAL().util->snprintf(
+        text,
+        sizeof(text),
+        "Owner %s->%s (%s)",
+        from,
+        to,
+        reason);
+    gcs_backend.send_minidp_text(MAV_SEVERITY_INFO, text);
 #endif
 }
 
@@ -710,9 +1159,15 @@ void MiniDP::report_mode_transition()
     logger.Write_MessageF("Mode %s->%s (%s)", from, to, reason);
 #endif
 #if HAL_GCS_ENABLED
-    (void)from;
-    (void)to;
-    (void)reason;
+    char text[50];
+    AP_HAL::get_HAL().util->snprintf(
+        text,
+        sizeof(text),
+        "Mode %s->%s (%s)",
+        from,
+        to,
+        reason);
+    gcs_backend.send_minidp_text(MAV_SEVERITY_INFO, text);
 #endif
 }
 
@@ -720,9 +1175,13 @@ void MiniDP::report_status()
 {
     const MiniDP_State &state = get_state();
     printf(
-        "MiniDP state: mode=%s owner=%s IMU=%s compass=%s EKF=%s att=%s yaw=%s "
+        "MiniDP state: armed=%s soft=%s arm_gps=%s mode=%s owner=%s "
+        "IMU=%s compass=%s EKF=%s att=%s yaw=%s "
         "pos=%s vel=%s GPS=%u sats=%u RC=%s MAV=%s origin=%lu resets=%lu "
-        "frame=%s outputs=%s pwm=%u\n",
+        "frame=%s screw=%s batt_fs=%d outputs=%s pwm=%u\n",
+        arming.armed() ? "yes" : "no",
+        outputs_armed() ? "yes" : "no",
+        MiniDP_Arming::gps_requirement_name(arming.config().gps_requirement),
         MiniDP_ModeManager::mode_name(get_mode()),
         MiniDP_AuthorityArbiter::owner_name(get_control_owner()),
         state.imu_healthy ? "healthy" : "unhealthy",
@@ -739,9 +1198,227 @@ void MiniDP::report_status()
         (unsigned long)state.origin_id,
         (unsigned long)state.reset_counter,
         MiniDP_OutputManager::frame_type_name(output_manager.frame_type()),
+        MiniDP_OutputManager::screw_position_name(
+            make_frame_geometry_config().screw_position),
+        int(last_battery_failsafe_action),
         MiniDP_OutputManager::state_name(output_manager.frame().state),
         unsigned(output_manager.frame().active_pwm_count));
+
+    send_named_status_values();
 }
+
+void MiniDP::send_named_status_values()
+{
+#if HAL_GCS_ENABLED
+    if (gcs().num_gcs() == 0) {
+        return;
+    }
+
+    const MiniDP_State &state = get_state();
+    const MiniDP_ModeTarget &target = mode_manager.target();
+    const MiniDP_OutputFrame &frame = output_manager.frame();
+
+    gcs().send_named_float("DP_MODE", float(uint8_t(mode_manager.mode())));
+    gcs().send_named_float("DP_OWN", float(uint8_t(authority.owner())));
+    gcs().send_named_float("DP_SAT", frame.saturated ? 1.0f : 0.0f);
+    gcs().send_named_float("DP_OUT", float(frame.active_pwm_count));
+
+    if (target.position_valid &&
+        state.position_valid &&
+        target.origin_id == state.origin_id) {
+        const float err_n = target.pos_n_m - state.pos_n_m;
+        const float err_e = target.pos_e_m - state.pos_e_m;
+        gcs().send_named_float(
+            "DP_ERR_M",
+            sqrtf((err_n * err_n) + (err_e * err_e)));
+    }
+
+    if (target.yaw_valid && state.yaw_valid) {
+        gcs().send_named_float(
+            "DP_YERR",
+            degrees(wrap_PI(target.yaw_rad - state.yaw_rad)));
+    }
+
+    if (isfinite(state.gps_hacc_m)) {
+        gcs().send_named_float("DP_HACC", state.gps_hacc_m);
+    }
+    if (isfinite(state.gps_sacc_m)) {
+        gcs().send_named_float("DP_SACC", state.gps_sacc_m);
+    }
+#endif
+}
+
+#if HAL_LOGGING_ENABLED
+void MiniDP::write_startup_log_messages()
+{
+    logger.Write_Message("MiniDP startup logging ready");
+    ahrs.Log_Write_Home_And_Origin();
+    gps.Write_AP_Logger_Log_Startup_messages();
+}
+
+void MiniDP::log_useful_data(const uint32_t now_ms)
+{
+    if (now_ms - last_standard_log_ms >= 100U) {
+        last_standard_log_ms = now_ms;
+
+        if (logger.should_log(minidp_log_attitude)) {
+            const MiniDP_ModeTarget &target = mode_manager.target();
+            const float target_yaw_deg = target.yaw_valid ?
+                degrees(target.yaw_rad) :
+                0.0f;
+            const Vector3f targets(0.0f, 0.0f, target_yaw_deg);
+            ahrs.Write_Attitude(targets);
+            ahrs.Log_Write();
+        }
+
+        if (logger.should_log(minidp_log_imu)) {
+            ins.Write_IMU();
+            ins.Write_Vibration();
+        }
+
+        if (logger.should_log(minidp_log_rc)) {
+            logger.Write_RCIN();
+            logger.Write_RCOUT();
+        }
+    }
+
+    if (now_ms - last_slow_log_ms >= 1000U) {
+        last_slow_log_ms = now_ms;
+
+        if (logger.should_log(minidp_log_power)) {
+            logger.Write_Power();
+        }
+        if (logger.should_log(minidp_log_compass)) {
+            logger.Write_Compass();
+        }
+
+        if (logger.should_log(minidp_log_dp)) {
+            const MiniDP_OutputFrame &frame = output_manager.frame();
+            const struct log_MiniDP_Status status_pkt = {
+                LOG_PACKET_HEADER_INIT(LOG_MINIDP_STATUS_MSG),
+                time_us             : AP_HAL::micros64(),
+                armed               : arming.armed() ? uint8_t(1) : uint8_t(0),
+                soft_armed          : outputs_armed() ? uint8_t(1) : uint8_t(0),
+                arm_required        : arming.config().arming_required ? uint8_t(1) : uint8_t(0),
+                arm_gps_requirement : uint8_t(arming.config().gps_requirement),
+                last_arm_reject     : uint8_t(arming.last_rejection()),
+                mode                : uint8_t(mode_manager.mode()),
+                owner               : uint8_t(authority.owner()),
+                output_state        : uint8_t(frame.state),
+                rc_healthy          : authority_status.rc_healthy ? uint8_t(1) : uint8_t(0),
+                mavlink_healthy     : authority_status.mavlink_healthy ? uint8_t(1) : uint8_t(0),
+                rc_kill             : authority_status.rc_kill ? uint8_t(1) : uint8_t(0),
+                gps_fix             : get_state().gps_fix_type,
+                gps_sats            : get_state().gps_num_sats,
+            };
+            logger.WriteBlock(&status_pkt, sizeof(status_pkt));
+        }
+    }
+}
+
+void MiniDP::log_control_frame(
+    const uint32_t now_ms,
+    const MiniDP_AxisCommand &raw_command,
+    const MiniDP_AxisCommand &limited_command,
+    const MiniDP_OutputFrame &frame)
+{
+    if (now_ms - last_control_log_ms < 100U) {
+        return;
+    }
+    if (!logger.should_log(minidp_log_dp)) {
+        return;
+    }
+    last_control_log_ms = now_ms;
+
+    const MiniDP_State &state = get_state();
+    const MiniDP_ModeTarget &target = mode_manager.target();
+    const float nan = logger.quiet_nanf();
+    const bool position_error_valid =
+        target.position_valid &&
+        state.position_valid &&
+        target.origin_id == state.origin_id;
+
+    uint16_t flags = 0;
+    if (target.yaw_valid) {
+        flags |= 1U << 0;
+    }
+    if (target.position_valid) {
+        flags |= 1U << 1;
+    }
+    if (state.yaw_valid) {
+        flags |= 1U << 2;
+    }
+    if (state.position_valid) {
+        flags |= 1U << 3;
+    }
+    if (state.velocity_valid) {
+        flags |= 1U << 4;
+    }
+    if (state.origin_valid) {
+        flags |= 1U << 5;
+    }
+    if (state.ekf_healthy) {
+        flags |= 1U << 6;
+    }
+
+    const struct log_MiniDP_Target target_pkt = {
+        LOG_PACKET_HEADER_INIT(LOG_MINIDP_TARGET_MSG),
+        time_us         : AP_HAL::micros64(),
+        mode            : uint8_t(mode_manager.mode()),
+        target_id       : target.target_id,
+        flags           : flags,
+        target_yaw_rad  : target.yaw_valid ? target.yaw_rad : nan,
+        yaw_rad         : state.yaw_valid ? state.yaw_rad : nan,
+        error_n_m       : position_error_valid ?
+            target.pos_n_m - state.pos_n_m :
+            nan,
+        error_e_m       : position_error_valid ?
+            target.pos_e_m - state.pos_e_m :
+            nan,
+        velocity_n_m_s  : state.velocity_valid ? state.vel_n_m_s : nan,
+        velocity_e_m_s  : state.velocity_valid ? state.vel_e_m_s : nan,
+        gps_hacc_m      : state.gps_hacc_m,
+        gps_sacc_m_s    : state.gps_sacc_m,
+    };
+    logger.WriteBlock(&target_pkt, sizeof(target_pkt));
+
+    const struct log_MiniDP_Axis axis_pkt = {
+        LOG_PACKET_HEADER_INIT(LOG_MINIDP_AXIS_MSG),
+        time_us         : AP_HAL::micros64(),
+        mode            : uint8_t(mode_manager.mode()),
+        owner           : uint8_t(authority.owner()),
+        output_state    : uint8_t(frame.state),
+        raw_surge       : raw_command.surge,
+        raw_sway        : raw_command.sway,
+        raw_yaw         : raw_command.yaw,
+        limited_surge   : limited_command.surge,
+        limited_sway    : limited_command.sway,
+        limited_yaw     : limited_command.yaw,
+    };
+    logger.WriteBlock(&axis_pkt, sizeof(axis_pkt));
+
+    const MiniDP_ActuatorOutput &motor1 = frame.actuator[0];
+    const MiniDP_ActuatorOutput &motor2 = frame.actuator[1];
+    const MiniDP_ActuatorOutput &motor3 = frame.actuator[2];
+    const MiniDP_ActuatorOutput &motor4 = frame.actuator[3];
+    const struct log_MiniDP_Output output_pkt = {
+        LOG_PACKET_HEADER_INIT(LOG_MINIDP_OUTPUT_MSG),
+        time_us             : AP_HAL::micros64(),
+        output_state        : uint8_t(frame.state),
+        saturated           : frame.saturated ? uint8_t(1) : uint8_t(0),
+        motor1_demand       : motor1.configured ? motor1.demand : nan,
+        motor2_demand       : motor2.configured ? motor2.demand : nan,
+        motor3_demand       : motor3.configured ? motor3.demand : nan,
+        motor4_demand       : motor4.configured ? motor4.demand : nan,
+        motor1_pwm_us       : motor1.pwm_enabled ? motor1.pwm_us : uint16_t(0),
+        motor2_pwm_us       : motor2.pwm_enabled ? motor2.pwm_us : uint16_t(0),
+        motor3_pwm_us       : motor3.pwm_enabled ? motor3.pwm_us : uint16_t(0),
+        motor4_pwm_us       : motor4.pwm_enabled ? motor4.pwm_us : uint16_t(0),
+        active_pwm_count    : frame.active_pwm_count,
+    };
+    logger.WriteBlock(&output_pkt, sizeof(output_pkt));
+}
+#endif
 
 void MiniDP::loop()
 {
@@ -763,11 +1440,18 @@ void MiniDP::loop()
 #if HAL_GCS_ENABLED
     gcs().update_receive();
 #endif
+    mode_manager.set_config(make_mode_config());
     mode_manager.update(get_state());
     update_authority(now_ms);
+    arming.set_config(make_arming_config());
+    update_rc_arm_switches();
+    sync_soft_armed();
+    update_battery(now_ms);
     update_actuator_test(now_ms);
     update_manual_input(now_ms);
 
+    sync_frame_config_from_params();
+    sync_output_config_from_servo_params();
     const MiniDP_OutputState output_state = desired_output_state();
     MiniDP_AxisCommand output_command{};
     axis_limiter.set_config(make_axis_limiter_config());
@@ -795,9 +1479,15 @@ void MiniDP::loop()
         output_state == MiniDP_OutputState::ACTUATOR_TEST ?
             output_manager.update_actuator_test(actuator_test.command()) :
             output_manager.update(output_state, output_command);
+#if HAL_LOGGING_ENABLED
+    log_control_frame(now_ms, active_command, output_command, output_frame);
+#endif
     apply_outputs(output_frame);
     report_authority_transition();
     report_mode_transition();
+#if HAL_LOGGING_ENABLED
+    log_useful_data(now_ms);
+#endif
 #if HAL_GCS_ENABLED
     if (gcs().num_gcs() > 0) {
         gcs().update_send();
