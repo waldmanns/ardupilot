@@ -7092,6 +7092,12 @@ bool GCS_MAVLINK::accept_packet(const mavlink_status_t &status,
         return true;
     }
 
+#if AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+    if (msg.msgid == MAVLINK_MSG_ID_RADIO_RC_CHANNELS) {
+        return true;
+    }
+#endif
+
     if (!gcs().option_is_enabled(GCS::Option::GCS_SYSID_ENFORCE)) {
         return true;
     }

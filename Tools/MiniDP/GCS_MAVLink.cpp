@@ -43,6 +43,45 @@ bool mode_from_custom_mode(const uint32_t custom_mode, MiniDP_Mode &mode)
     return false;
 }
 
+int16_t radio_rc_channel_to_pwm(const int16_t channel)
+{
+    // RADIO_RC_CHANNELS uses centered 13-bit values: -4096..4096 around zero.
+    return int16_t(((int32_t(channel) * 5) / 32) + 1500);
+}
+
+uint8_t rc_override_count(const mavlink_rc_channels_override_t &packet)
+{
+    const uint16_t override_data[] = {
+        packet.chan1_raw,
+        packet.chan2_raw,
+        packet.chan3_raw,
+        packet.chan4_raw,
+        packet.chan5_raw,
+        packet.chan6_raw,
+        packet.chan7_raw,
+        packet.chan8_raw,
+        packet.chan9_raw,
+        packet.chan10_raw,
+        packet.chan11_raw,
+        packet.chan12_raw,
+        packet.chan13_raw,
+        packet.chan14_raw,
+        packet.chan15_raw,
+        packet.chan16_raw
+    };
+
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < ARRAY_SIZE(override_data); i++) {
+        const uint16_t value = override_data[i];
+        if (value != 0 &&
+            value != UINT16_MAX &&
+            value != uint16_t(UINT16_MAX - 1)) {
+            count = i + 1;
+        }
+    }
+    return count;
+}
+
 } // namespace
 
 void GCS_MAVLINK_MiniDP::send_minidp_text(MAV_SEVERITY severity, const char *text) const
@@ -106,6 +145,38 @@ MAV_STATE GCS_MAVLINK_MiniDP::vehicle_system_status() const
         return MAV_STATE_CRITICAL;
     }
     return minidp.is_armed() ? MAV_STATE_ACTIVE : MAV_STATE_STANDBY;
+}
+
+void GCS_MAVLINK_MiniDP::handle_message(const mavlink_message_t &msg)
+{
+#if AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+    if (msg.msgid == MAVLINK_MSG_ID_RADIO_RC_CHANNELS) {
+        mavlink_radio_rc_channels_t packet;
+        mavlink_msg_radio_rc_channels_decode(&msg, &packet);
+        minidp.record_mavlink_radio_rc_channels(
+            msg.sysid,
+            msg.compid,
+            packet.count,
+            packet.flags,
+            packet.count > 0 ? radio_rc_channel_to_pwm(packet.channels[0]) : 0);
+        AP::RC().handle_radio_rc_channels(&packet);
+        return;
+    }
+#endif
+
+#if AP_RC_CHANNEL_ENABLED
+    if (msg.msgid == MAVLINK_MSG_ID_RC_CHANNELS_OVERRIDE) {
+        mavlink_rc_channels_override_t packet;
+        mavlink_msg_rc_channels_override_decode(&msg, &packet);
+        minidp.record_mavlink_rc_override(
+            msg.sysid,
+            msg.compid,
+            rc_override_count(packet),
+            packet.chan1_raw);
+    }
+#endif
+
+    GCS_MAVLINK::handle_message(msg);
 }
 
 void GCS_MAVLINK_MiniDP::send_minidp_sys_status() const

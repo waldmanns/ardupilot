@@ -173,8 +173,21 @@ MAVLink stream. If telemetry connects but the bars stay blank, set the
 telemetry UART). Also confirm that both ELRS transmitter and receiver are in
 MAVLink mode, the receiver UART protocol is MAVLink, the hardware is ESP-based,
 and `SERIALx_PROTOCOL`/`SERIALx_BAUD` were followed by a reboot. MiniDP sends
-`RC_OK`, `RC_CH`, and `RC_AGE` named values once per second to show whether
-fresh RC frames are reaching the firmware.
+RC diagnostic named values once per second:
+
+| Value | Meaning |
+| --- | --- |
+| `RC_OK` | `1` when MiniDP has fresh, non-failsafe RC input. |
+| `RC_CH` | Current ArduPilot RC input channel count. |
+| `RC_PROT` | Detected ArduPilot RC protocol number. `15` is MAVLink radio. |
+| `RC_AGE` | Seconds since MiniDP last read fresh RC input. |
+| `RRC_CNT` | Count of accepted MAVLink `RADIO_RC_CHANNELS` packets. |
+| `RRC_CH` | Channel count field from the last `RADIO_RC_CHANNELS` packet. |
+| `RRC_C1` | Channel 1 from the last `RADIO_RC_CHANNELS` packet, converted to PWM. |
+| `RRC_FLG` | Flags from the last `RADIO_RC_CHANNELS` packet. |
+| `RCO_CNT` | Count of accepted MAVLink `RC_CHANNELS_OVERRIDE` packets. |
+| `RCO_CH` | Highest non-empty override channel in the last override packet. |
+| `RCO_C1` | Channel 1 raw PWM from the last override packet. |
 
 In Mission Planner, connect telemetry, open the normal RTK/NTRIP injection
 tool, enter the caster credentials and mountpoint, and start injection. Watch
@@ -365,8 +378,10 @@ and MAVLink tools can use these as the DP target position marker.
 
 Once per second MiniDP sends `NAMED_VALUE_FLOAT` status values:
 `DP_MODE`, `DP_OWN`, `DP_SAT`, `DP_OUT`, `GPS_FIX`, `GPS_SATS`, `RC_OK`,
-`RC_CH`, `RC_AGE`, `RTK_FIX`, `DP_ERR_M`, `DP_YERR`, `DP_HACC`, and
-`DP_SACC` when the underlying values are valid.
+`RC_CH`, `RC_PROT`, `RC_AGE`, `RRC_CNT`, `RRC_AGE`, `RRC_CH`, `RRC_FLG`,
+`RRC_C1`, `RRC_SYS`, `RCO_CNT`, `RCO_AGE`, `RCO_CH`, `RCO_C1`, `RCO_SYS`,
+`RTK_FIX`, `DP_ERR_M`, `DP_YERR`, `DP_HACC`, and `DP_SACC` when the underlying
+values are valid.
 
 MiniDP accepts the standard `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` command for
 Mission Planner board reboot and reboot-to-bootloader actions. The shared

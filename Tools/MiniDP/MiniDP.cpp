@@ -718,6 +718,36 @@ void MiniDP::record_mavlink_manual_control(
     input_mapper.record_mavlink_manual_control(now_ms, x, y, r);
 }
 
+void MiniDP::record_mavlink_radio_rc_channels(
+    const uint8_t sysid,
+    const uint8_t compid,
+    const uint8_t count,
+    const uint8_t flags,
+    const int16_t channel1_pwm)
+{
+    radio_rc_packet_count++;
+    last_radio_rc_ms = AP_HAL::millis();
+    last_radio_rc_sysid = sysid;
+    last_radio_rc_compid = compid;
+    last_radio_rc_count = count;
+    last_radio_rc_flags = flags;
+    last_radio_rc_channel1_pwm = channel1_pwm;
+}
+
+void MiniDP::record_mavlink_rc_override(
+    const uint8_t sysid,
+    const uint8_t compid,
+    const uint8_t count,
+    const uint16_t channel1_pwm)
+{
+    rc_override_packet_count++;
+    last_rc_override_ms = AP_HAL::millis();
+    last_rc_override_sysid = sysid;
+    last_rc_override_compid = compid;
+    last_rc_override_count = count;
+    last_rc_override_channel1_pwm = channel1_pwm;
+}
+
 void MiniDP::sync_soft_armed()
 {
     const bool soft_armed = outputs_armed();
@@ -1237,10 +1267,34 @@ void MiniDP::send_named_status_values()
     gcs().send_named_float(
         "RC_CH",
         hal.rcin != nullptr ? float(RC_Channels::get_valid_channel_count()) : 0.0f);
+#if AP_RCPROTOCOL_ENABLED
+    gcs().send_named_float(
+        "RC_PROT",
+        float(uint8_t(AP::RC().protocol_detected())));
+#endif
     if (last_rc_input_ms != 0) {
         gcs().send_named_float(
             "RC_AGE",
             float(AP_HAL::millis() - last_rc_input_ms) * 0.001f);
+    }
+    gcs().send_named_float("RRC_CNT", float(radio_rc_packet_count));
+    if (last_radio_rc_ms != 0) {
+        gcs().send_named_float(
+            "RRC_AGE",
+            float(AP_HAL::millis() - last_radio_rc_ms) * 0.001f);
+        gcs().send_named_float("RRC_CH", float(last_radio_rc_count));
+        gcs().send_named_float("RRC_FLG", float(last_radio_rc_flags));
+        gcs().send_named_float("RRC_C1", float(last_radio_rc_channel1_pwm));
+        gcs().send_named_float("RRC_SYS", float(last_radio_rc_sysid));
+    }
+    gcs().send_named_float("RCO_CNT", float(rc_override_packet_count));
+    if (last_rc_override_ms != 0) {
+        gcs().send_named_float(
+            "RCO_AGE",
+            float(AP_HAL::millis() - last_rc_override_ms) * 0.001f);
+        gcs().send_named_float("RCO_CH", float(last_rc_override_count));
+        gcs().send_named_float("RCO_C1", float(last_rc_override_channel1_pwm));
+        gcs().send_named_float("RCO_SYS", float(last_rc_override_sysid));
     }
 
     float rtk_fix = 0.0f;

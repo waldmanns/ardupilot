@@ -226,6 +226,17 @@ public:
         int16_t x,
         int16_t y,
         int16_t r);
+    void record_mavlink_radio_rc_channels(
+        uint8_t sysid,
+        uint8_t compid,
+        uint8_t count,
+        uint8_t flags,
+        int16_t channel1_pwm);
+    void record_mavlink_rc_override(
+        uint8_t sysid,
+        uint8_t compid,
+        uint8_t count,
+        uint16_t channel1_pwm);
 
     Parameters g;
 
@@ -271,7 +282,20 @@ private:
     uint32_t last_mode_transition_sequence = 0;
     uint32_t last_authority_transition_sequence = 0;
     uint32_t last_rc_input_ms = 0;
+    uint32_t radio_rc_packet_count = 0;
+    uint32_t last_radio_rc_ms = 0;
+    uint32_t rc_override_packet_count = 0;
+    uint32_t last_rc_override_ms = 0;
     uint32_t last_battery_read_ms = 0;
+    int16_t last_radio_rc_channel1_pwm = 0;
+    uint16_t last_rc_override_channel1_pwm = 0;
+    uint8_t last_radio_rc_sysid = 0;
+    uint8_t last_radio_rc_compid = 0;
+    uint8_t last_radio_rc_count = 0;
+    uint8_t last_radio_rc_flags = 0;
+    uint8_t last_rc_override_sysid = 0;
+    uint8_t last_rc_override_compid = 0;
+    uint8_t last_rc_override_count = 0;
     bool last_rc_arm_switch = false;
     bool last_rc_disarm_switch = false;
     bool rc_arm_switches_initialised = false;

@@ -15,6 +15,7 @@ public:
 protected:
     uint8_t base_mode() const override;
     MAV_STATE vehicle_system_status() const override;
+    void handle_message(const mavlink_message_t &msg) override;
     bool try_send_message(enum ap_message id) override;
     MAV_RESULT handle_command_int_packet(
         const mavlink_command_int_t &packet,
