@@ -539,6 +539,8 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_command_int_packet(
         return handle_mav_cmd_do_set_mode(packet);
     case MAV_CMD_DO_MOTOR_TEST:
         return handle_mav_cmd_do_motor_test(packet);
+    case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:
+        return handle_preflight_reboot(packet, msg);
     default:
         return GCS_MAVLINK::handle_command_int_packet(packet, msg);
     }

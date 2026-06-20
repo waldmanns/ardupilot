@@ -1222,6 +1222,16 @@ void MiniDP::send_named_status_values()
     gcs().send_named_float("DP_OWN", float(uint8_t(authority.owner())));
     gcs().send_named_float("DP_SAT", frame.saturated ? 1.0f : 0.0f);
     gcs().send_named_float("DP_OUT", float(frame.active_pwm_count));
+    gcs().send_named_float("GPS_FIX", float(state.gps_fix_type));
+    gcs().send_named_float("GPS_SATS", float(state.gps_num_sats));
+
+    float rtk_fix = 0.0f;
+    if (state.gps_fix_type >= uint8_t(AP_GPS::GPS_OK_FIX_3D_RTK_FIXED)) {
+        rtk_fix = 2.0f;
+    } else if (state.gps_fix_type >= uint8_t(AP_GPS::GPS_OK_FIX_3D_RTK_FLOAT)) {
+        rtk_fix = 1.0f;
+    }
+    gcs().send_named_float("RTK_FIX", rtk_fix);
 
     if (target.position_valid &&
         state.position_valid &&

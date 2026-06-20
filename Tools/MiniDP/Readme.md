@@ -135,7 +135,39 @@ or heading until gains are set.
    actions.
 9. Set `MAN_ENABLE=1` only after the output mapping is safe.
 10. Set MAVLink authority parameters for the control source you intend to use.
-11. Tune manual limits first, then `AXIS_*`, then DP gains.
+11. For RTK, leave GPS autoconfiguration enabled and use Mission Planner's
+    standard NTRIP/RTK injection tools.
+12. Tune manual limits first, then `AXIS_*`, then DP gains.
+
+## RTK And NTRIP
+
+MiniDP uses the standard ArduPilot `AP_GPS` frontend for RTK. Mission Planner's
+NTRIP client sends RTCM corrections as MAVLink `GPS_RTCM_DATA`; the shared
+ArduPilot GCS layer forwards those messages to `AP_GPS`, which handles RTCM
+fragment reassembly, `GPS_INJECT_TO`, and receiver injection. MiniDP does not
+add a separate NTRIP client or receiver configurator.
+
+Use the same receiver setup as Rover or Copter:
+
+| Parameter | Typical use |
+| --- | --- |
+| `SERIALx_PROTOCOL=5` | GPS on the serial port connected to the receiver. |
+| `SERIALx_BAUD` | Auto or the receiver baud rate. |
+| `GPS_TYPE` | Auto/u-blox/etc. for the connected receiver. |
+| `GPS_AUTO_CONFIG=1` | Let ArduPilot configure serial GPS receivers. |
+| `GPS_SAVE_CFG=2` | Save receiver configuration only when needed. |
+| `GPS_INJECT_TO=127` | Default; inject RTCM corrections to all eligible GPS receivers. |
+| `GPS_DRV_OPTIONS` | Standard backend options, including RTCM parser options where compiled in. |
+
+In Mission Planner, connect telemetry, open the normal RTK/NTRIP injection
+tool, enter the caster credentials and mountpoint, and start injection. Watch
+the standard GPS status: fix type `5` is RTK Float and fix type `6` is RTK
+Fixed. MiniDP also sends `GPS_FIX`, `GPS_SATS`, and `RTK_FIX` named values once
+per second; `RTK_FIX` is `0` for no RTK, `1` for Float, and `2` for Fixed.
+
+For DP, tune `DP_HACC_MAX` and `DP_SACC_MAX` to the accuracy you want MiniDP to
+accept for hold. If you require GPS before arming, tune `ARM_HACC_MAX` and
+`ARM_SACC_MAX` the same way.
 
 ## MiniDP Parameters
 
@@ -314,8 +346,14 @@ When `DP_HOLD` has a valid latched position target, MiniDP also sends
 and MAVLink tools can use these as the DP target position marker.
 
 Once per second MiniDP sends `NAMED_VALUE_FLOAT` status values:
-`DP_MODE`, `DP_OWN`, `DP_SAT`, `DP_OUT`, `DP_ERR_M`, `DP_YERR`, `DP_HACC`, and
-`DP_SACC` when the underlying values are valid.
+`DP_MODE`, `DP_OWN`, `DP_SAT`, `DP_OUT`, `GPS_FIX`, `GPS_SATS`, `RTK_FIX`,
+`DP_ERR_M`, `DP_YERR`, `DP_HACC`, and `DP_SACC` when the underlying values are
+valid.
+
+MiniDP accepts the standard `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` command for
+Mission Planner board reboot and reboot-to-bootloader actions. The shared
+ArduPilot reboot handler rejects reboot while soft-armed unless the command uses
+the standard force value.
 
 Use Mission Planner's servo output view to verify `Motor1` through `Motor4`.
 For passthrough outputs, assign an unused output to `RCIN1` through `RCIN16`
@@ -327,6 +365,8 @@ For passthrough outputs, assign an unused output to `RCIN1` through `RCIN16`
 MiniDP writes compact vehicle-specific logs at about 10 Hz when logging is
 enabled. Standard battery monitor records are logged as `BAT` and `BCL` when
 `LOG_BITMASK` bit 2 is enabled.
+Standard GPS records are logged as `GPS` and `GPA` when `LOG_BITMASK` bit 1 is
+enabled; `GPA.RTCMFU` and `GPA.RTCMFD` show RTCM fragments used and discarded.
 
 | Log | Use |
 | --- | --- |
