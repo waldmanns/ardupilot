@@ -8,6 +8,8 @@
 
 #if HAL_GCS_ENABLED
 
+extern const AP_HAL::HAL &hal;
+
 namespace {
 
 bool parse_uint8_param(
@@ -597,6 +599,18 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_component_arm_disarm(
         MAV_SEVERITY_WARNING,
         "Arm rejected: unsupported command");
     return MAV_RESULT_DENIED;
+}
+
+MAV_RESULT GCS_MAVLINK_MiniDP::handle_preflight_reboot(
+    const mavlink_command_int_t &packet,
+    const mavlink_message_t &msg)
+{
+    if (is_equal(packet.param1, 1.0f) ||
+        is_equal(packet.param1, 3.0f)) {
+        AP_Param::flush();
+        hal.scheduler->delay(50);
+    }
+    return GCS_MAVLINK::handle_preflight_reboot(packet, msg);
 }
 
 MAV_RESULT GCS_MAVLINK_MiniDP::handle_command_int_packet(

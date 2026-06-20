@@ -199,10 +199,15 @@ void MiniDP::load_parameters()
     AP_Param::setup_sketch_defaults();
     AP_Param::check_var_info();
 
-    if (!g.format_version.load() || g.format_version != k_format_version) {
+    const bool format_version_loaded = g.format_version.load();
+    if (!format_version_loaded) {
+        g.format_version.set(k_format_version);
+        g.format_version.save_sync(true, false);
+    } else if (g.format_version != k_format_version) {
         StorageManager::erase();
         AP_Param::erase_all();
-        g.format_version.set_and_save(k_format_version);
+        g.format_version.set(k_format_version);
+        g.format_version.save_sync(true, false);
     }
     g.format_version.set_default(k_format_version);
     AP_Param::load_all();

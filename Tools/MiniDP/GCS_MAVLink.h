@@ -20,6 +20,9 @@ protected:
     MAV_RESULT handle_command_int_packet(
         const mavlink_command_int_t &packet,
         const mavlink_message_t &msg) override;
+    MAV_RESULT handle_preflight_reboot(
+        const mavlink_command_int_t &packet,
+        const mavlink_message_t &msg) override;
     void handle_manual_control_axes(
         const mavlink_manual_control_t &packet,
         uint32_t tnow) override;

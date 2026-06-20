@@ -139,6 +139,14 @@ or heading until gains are set.
     standard NTRIP/RTK injection tools.
 12. Tune manual limits first, then `AXIS_*`, then DP gains.
 
+## Parameter Storage
+
+MiniDP uses the standard ArduPilot parameter storage area for the board. The
+internal `FORMAT_VERSION` marker is force-saved during startup if it is missing,
+so normal parameters such as `SERIAL*`, `MAV*`, `RC*`, `SERVO*`, `RSSI_*`, and
+`DP_*` persist across reboot. MiniDP also flushes pending parameter writes before
+honoring Mission Planner's reboot command.
+
 ## RTK And NTRIP
 
 MiniDP uses the standard ArduPilot `AP_GPS` frontend for RTK. Mission Planner's
