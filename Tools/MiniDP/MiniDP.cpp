@@ -170,9 +170,38 @@ SITL::SIM sitl;
 #if AP_EXTERNAL_AHRS_ENABLED
 AP_ExternalAHRS external_ahrs;
 #endif
-AP_Scheduler scheduler;
 
 constexpr int8_t MiniDP::battery_failsafe_priorities[4];
+
+#define SCHED_TASK(func, rate_hz, _max_time_micros, _priority) SCHED_TASK_CLASS(MiniDP, &minidp, func, rate_hz, _max_time_micros, _priority)
+
+const AP_Scheduler::Task MiniDP::scheduler_tasks[] = {
+    SCHED_TASK(read_radio,             50,    200,   3),
+    SCHED_TASK(update_ahrs,           400,    400,   6),
+    SCHED_TASK(update_current_mode,   400,    250,  12),
+    SCHED_TASK(set_servos,            400,    300,  15),
+    SCHED_TASK_CLASS(AP_GPS,              &minidp.gps,              update,         50,  300,  18),
+#if MINIDP_BARO_ENABLED
+    SCHED_TASK_CLASS(AP_Baro,             &minidp.barometer,        update,         10,  200,  21),
+#endif
+    SCHED_TASK(update_compass,         10,    200,  39),
+#if HAL_LOGGING_ENABLED
+    SCHED_TASK(ten_hz_logging_loop,    10,    500,  45),
+#endif
+#if HAL_GCS_ENABLED
+    SCHED_TASK_CLASS(GCS,                 (GCS*)&minidp.gcs_backend, update_receive, 400, 500,  51),
+    SCHED_TASK_CLASS(GCS,                 (GCS*)&minidp.gcs_backend, update_send,    400, 1000, 54),
+#endif
+    SCHED_TASK_CLASS(RC_Channels,         (RC_Channels*)&minidp.rc_channels, read_mode_switch, 7, 200, 57),
+    SCHED_TASK_CLASS(RC_Channels,         (RC_Channels*)&minidp.rc_channels, read_aux_all,    10, 200, 60),
+    SCHED_TASK_CLASS(AP_Notify,           &minidp.notify,           update,         50,  300,  78),
+    SCHED_TASK(one_hz_loop,             1,   1500,  96),
+#if HAL_LOGGING_ENABLED
+    SCHED_TASK_CLASS(AP_Logger,           &minidp.logger,           periodic_tasks, 50,  300, 108),
+#endif
+    SCHED_TASK_CLASS(AP_InertialSensor,   &minidp.ins,              periodic,      400,  200, 111),
+    SCHED_TASK_CLASS(AP_Scheduler,        &minidp.scheduler,        update_logging, 0.1, 200, 114),
+};
 
 const LogStructure MiniDP::log_structure[] = {
     LOG_COMMON_STRUCTURES,
@@ -197,6 +226,8 @@ const LogStructure MiniDP::log_structure[] = {
 void MiniDP::load_parameters()
 {
     AP_Param::setup_sketch_defaults();
+    serial_manager.init_console();
+    AP_Param::set_default_by_name("SCHED_LOOP_RATE", 400);
     AP_Param::check_var_info();
 
     const bool format_version_loaded = g.format_version.load();
@@ -524,6 +555,8 @@ void MiniDP::setup()
 
     load_parameters();
     printf("MiniDP parameters ready\n");
+    scheduler.init(scheduler_tasks, ARRAY_SIZE(scheduler_tasks), uint32_t(-1));
+    printf("MiniDP scheduler ready\n");
 #if HAL_GCS_ENABLED
     gcs().init();
 #endif
@@ -576,7 +609,7 @@ void MiniDP::setup()
     printf("MiniDP logger ready\n");
 #endif
 
-    ins.init(100);
+    ins.init(scheduler.get_loop_rate_hz());
     printf("MiniDP IMU frontend ready\n");
 #if MINIDP_BARO_ENABLED
     barometer.init();
@@ -641,15 +674,22 @@ void MiniDP::capture_rc_input_frame(const bool rc_healthy)
     }
 }
 
+void MiniDP::read_radio()
+{
+    if (hal.rcin == nullptr) {
+        return;
+    }
+
+    if (rc_channels.read_input()) {
+        last_rc_input_ms = AP_HAL::millis();
+    }
+}
+
 void MiniDP::update_authority(const uint32_t now_ms)
 {
     input_mapper.set_config(make_input_config());
 
     const bool have_rc_driver = hal.rcin != nullptr;
-    const bool new_rc_input = have_rc_driver && rc_channels.read_input();
-    if (new_rc_input) {
-        last_rc_input_ms = now_ms;
-    }
     const bool have_rc_backend =
         have_rc_driver &&
         RC_Channels::get_valid_channel_count() > 0;
@@ -1516,26 +1556,17 @@ void MiniDP::log_control_frame(
 }
 #endif
 
-void MiniDP::loop()
+void MiniDP::update_ahrs()
 {
-    const uint32_t now_ms = AP_HAL::millis();
-
     ins.update();
-#if MINIDP_BARO_ENABLED
-    barometer.update();
-#endif
-    compass.read();
-    gps.update();
     ahrs.update(true);
     state_source.update(ahrs, ins, compass, gps);
-    if (now_ms - last_notify_ms >= 20U) {
-        last_notify_ms = now_ms;
-        notify.update();
-    }
+}
 
-#if HAL_GCS_ENABLED
-    gcs().update_receive();
-#endif
+void MiniDP::update_current_mode()
+{
+    const uint32_t now_ms = AP_HAL::millis();
+    state_source.update(ahrs, ins, compass, gps);
     mode_manager.set_config(make_mode_config());
     mode_manager.update(get_state());
     update_authority(now_ms);
@@ -1543,6 +1574,12 @@ void MiniDP::loop()
     update_rc_arm_switches();
     sync_soft_armed();
     update_battery(now_ms);
+}
+
+void MiniDP::set_servos()
+{
+    const uint32_t now_ms = AP_HAL::millis();
+
     update_actuator_test(now_ms);
     update_manual_input(now_ms);
 
@@ -1581,24 +1618,29 @@ void MiniDP::loop()
     apply_outputs(output_frame);
     report_authority_transition();
     report_mode_transition();
+}
+
+void MiniDP::update_compass()
+{
+    compass.read();
+}
+
 #if HAL_LOGGING_ENABLED
-    log_useful_data(now_ms);
-#endif
-#if HAL_GCS_ENABLED
-    if (gcs().num_gcs() > 0) {
-        gcs().update_send();
-    }
+void MiniDP::ten_hz_logging_loop()
+{
+    log_useful_data(AP_HAL::millis());
+}
 #endif
 
-    if (now_ms - last_status_ms >= 1000U) {
-        last_status_ms = now_ms;
-#if HAL_GCS_ENABLED
-        gcs_backend.send_minidp_heartbeat();
-#endif
-        report_status();
-    }
+void MiniDP::one_hz_loop()
+{
+    last_status_ms = AP_HAL::millis();
+    report_status();
+}
 
-    hal.scheduler->delay(10);
+void MiniDP::loop()
+{
+    scheduler.loop();
 }
 
 void setup()

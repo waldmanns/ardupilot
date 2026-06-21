@@ -133,6 +133,7 @@ public:
         k_param_in_rc_disarm_pwm,
         k_param_battery,
         k_param_rssi,
+        k_param_scheduler,
     };
 
     AP_Int16 format_version;
@@ -265,6 +266,7 @@ public:
 #if AP_RSSI_ENABLED
     AP_RSSI rssi;
 #endif
+    AP_Scheduler scheduler;
     MiniDP_RC_Channels rc_channels;
     SRV_Channels servo_channels;
 #if HAL_GCS_ENABLED
@@ -275,6 +277,7 @@ public:
 private:
     AP_Param param_loader{var_info};
 
+    static const AP_Scheduler::Task scheduler_tasks[];
     static const LogStructure log_structure[];
 
     uint32_t last_notify_ms = 0;
@@ -322,6 +325,13 @@ private:
     MiniDP_ManualCommand active_manual_command{};
 
     void load_parameters();
+    void read_radio();
+    void update_ahrs();
+    void update_current_mode();
+    void set_servos();
+    void update_compass();
+    void ten_hz_logging_loop();
+    void one_hz_loop();
     MiniDP_ArmingConfig make_arming_config() const;
     MiniDP_InputConfig make_input_config() const;
     MiniDP_ModeConfig make_mode_config() const;

@@ -143,9 +143,17 @@ or heading until gains are set.
 
 MiniDP uses the standard ArduPilot parameter storage area for the board. The
 internal `FORMAT_VERSION` marker is force-saved during startup if it is missing,
-so normal parameters such as `SERIAL*`, `MAV*`, `RC*`, `SERVO*`, `RSSI_*`, and
-`DP_*` persist across reboot. MiniDP also flushes pending parameter writes before
-honoring Mission Planner's reboot command.
+so normal parameters such as `SERIAL*`, `MAV*`, `RC*`, `SERVO*`, `RSSI_*`,
+`SCHED*`, and `DP_*` persist across reboot. MiniDP also flushes pending
+parameter writes before honoring Mission Planner's reboot command.
+
+## Scheduler And GCS Servicing
+
+MiniDP uses the standard ArduPilot scheduler pattern used by Rover. RC input is
+read by a scheduler task, GCS receive/send are serviced by scheduler tasks, and
+the default `SCHED_LOOP_RATE` is `400` Hz. Keep `SCHED_LOOP_RATE=400` for normal
+hardware testing so MAVLink links, ELRS MAVLink RC, and Mission Planner streams
+are serviced at the same cadence as the vehicle code.
 
 ## RTK And NTRIP
 
@@ -183,11 +191,13 @@ Planner can connect on the same link and the shared MAVLink handler can receive
 Mission Planner's Radio Calibration page shows MiniDP's outgoing `RC_CHANNELS`
 MAVLink stream. If telemetry connects but the bars stay blank, set the
 `MAVx_RC_CHAN` stream rate for the Mission Planner link to `1` or higher
-(`MAV0_RC_CHAN` is typical for USB, `MAV1_RC_CHAN` is typical for the first
-telemetry UART). Also confirm that both ELRS transmitter and receiver are in
-MAVLink mode, the receiver UART protocol is MAVLink, the hardware is ESP-based,
-and `SERIALx_PROTOCOL`/`SERIALx_BAUD` were followed by a reboot. MiniDP sends
-RC diagnostic named values once per second:
+(`MAV1_RC_CHAN` is typical for the USB console link, `MAV2_RC_CHAN` is typical
+for the first telemetry UART such as Serial1 when USB is enabled). While
+debugging, setting both `MAV1_RC_CHAN=2` and `MAV2_RC_CHAN=2` is harmless. Also
+confirm that both ELRS transmitter and receiver are in MAVLink mode, the
+receiver UART protocol is MAVLink, the hardware is ESP-based, and
+`SERIALx_PROTOCOL`/`SERIALx_BAUD` were followed by a reboot. MiniDP sends RC
+diagnostic named values once per second:
 
 | Value | Meaning |
 | --- | --- |
@@ -228,6 +238,7 @@ accept for hold. If you require GPS before arming, tune `ARM_HACC_MAX` and
 | `GPS*` | Board defaults | GPS setup. |
 | `BATT*` | ArduPilot defaults | Standard ArduPilot battery monitor setup and failsafe thresholds. |
 | `RSSI_*` | ArduPilot defaults | Standard ArduPilot RSSI setup. Use `RSSI_TYPE=5` for ELRS MAVLink mode. |
+| `SCHED_*` | `SCHED_LOOP_RATE=400` | Standard ArduPilot scheduler setup. MiniDP uses Rover-style scheduler tasks for RC, GCS, sensors, logging, and output updates. |
 | `LOG*` | Board defaults | Logger setup. |
 | `NTF_*` | Board defaults | Notify/LED/buzzer setup. |
 | `RC*` | Board defaults | RC input calibration and behavior. |

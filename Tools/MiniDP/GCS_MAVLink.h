@@ -52,12 +52,6 @@ public:
     void send_minidp_text(MAV_SEVERITY severity, const char *text) const;
 
 protected:
-    uint16_t min_loop_time_remaining_for_message_send_us() const override
-    {
-        // MiniDP currently runs a manually paced loop without scheduler tasks.
-        return 0;
-    }
-
     GCS_MAVLINK_MiniDP *new_gcs_mavlink_backend(AP_HAL::UARTDriver &uart) override
     {
         return NEW_NOTHROW GCS_MAVLINK_MiniDP(uart);

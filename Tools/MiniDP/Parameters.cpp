@@ -27,6 +27,9 @@ const AP_Param::Info MiniDP::var_info[] = {
     // @Path: ../libraries/AP_RSSI/AP_RSSI.cpp
     GOBJECT(rssi, "RSSI_", AP_RSSI),
 #endif
+    // @Group: SCHED_
+    // @Path: ../libraries/AP_Scheduler/AP_Scheduler.cpp
+    GOBJECT(scheduler, "SCHED_", AP_Scheduler),
     GOBJECT(logger, "LOG", AP_Logger),
     GOBJECT(notify, "NTF_", AP_Notify),
     GOBJECT(rc_channels, "RC", RC_Channels),
