@@ -344,6 +344,7 @@ private:
     void sync_output_config_from_servo_params();
     uint32_t motor_output_channel_mask() const;
     void apply_outputs(const MiniDP_OutputFrame &frame);
+    void update_rc_protocol();
     void update_battery(uint32_t now_ms);
     void update_authority(uint32_t now_ms);
     void capture_rc_input_frame(bool rc_healthy);

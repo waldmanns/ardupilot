@@ -188,6 +188,14 @@ ArduPilot. ELRS MAVLink mode must be configured as a MAVLink port so Mission
 Planner can connect on the same link and the shared MAVLink handler can receive
 `RADIO_RC_CHANNELS`.
 
+For plain serial RC, configure it the same way as Rover or Copter: connect the
+receiver signal to a UART RX pin, set that port to `SERIALx_PROTOCOL=23`, and
+reboot. The ArduPilot RC protocol frontend auto-searches the supported serial
+receiver formats, including iBUS and CRSF. If `RC_PROTOCOLS` has been restricted,
+set it back to `1` to allow all protocols while debugging. MiniDP services the
+same `AP_RCProtocol` frontend as normal ArduPilot, and sends `RC_UART=1` when a
+`SERIALx_PROTOCOL=23` UART has been registered.
+
 Mission Planner's Radio Calibration page shows MiniDP's outgoing `RC_CHANNELS`
 MAVLink stream. If telemetry connects but the bars stay blank, set the
 `MAVx_RC_CHAN` stream rate for the Mission Planner link to `1` or higher
@@ -201,8 +209,10 @@ diagnostic named values once per second:
 
 | Value | Meaning |
 | --- | --- |
+| `MAV_CH` | Number of active MiniDP MAVLink backends. USB only is normally `1`; USB plus a MAVLink Serial1 backend is normally `2`. |
 | `RC_OK` | `1` when MiniDP has fresh, non-failsafe RC input. |
 | `RC_CH` | Current ArduPilot RC input channel count. |
+| `RC_UART` | `1` when a `SERIALx_PROTOCOL=23` RCIN UART is registered. |
 | `RC_PROT` | Detected ArduPilot RC protocol number. `15` is MAVLink radio. |
 | `RC_AGE` | Seconds since MiniDP last read fresh RC input. |
 | `RRC_CNT` | Count of accepted MAVLink `RADIO_RC_CHANNELS` packets. |
