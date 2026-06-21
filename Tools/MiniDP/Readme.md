@@ -197,7 +197,9 @@ same `AP_RCProtocol` frontend as normal ArduPilot, and sends `RC_UART=1` when a
 `SERIALx_PROTOCOL=23` UART has been registered.
 
 Mission Planner's Radio Calibration page shows MiniDP's outgoing `RC_CHANNELS`
-MAVLink stream. If telemetry connects but the bars stay blank, set the
+MAVLink stream. MiniDP uses Rover-style default MAVLink stream rates, so
+`MAVx_RC_CHAN` defaults to a nonzero rate on new/default parameters. If telemetry
+connects but the bars stay blank on an existing parameter set, set the
 `MAVx_RC_CHAN` stream rate for the Mission Planner link to `1` or higher
 (`MAV1_RC_CHAN` is typical for the USB console link, `MAV2_RC_CHAN` is typical
 for the first telemetry UART such as Serial1 when USB is enabled). While

@@ -176,9 +176,6 @@ constexpr int8_t MiniDP::battery_failsafe_priorities[4];
 #define SCHED_TASK(func, rate_hz, _max_time_micros, _priority) SCHED_TASK_CLASS(MiniDP, &minidp, func, rate_hz, _max_time_micros, _priority)
 
 const AP_Scheduler::Task MiniDP::scheduler_tasks[] = {
-#if AP_RCPROTOCOL_ENABLED
-    SCHED_TASK(update_rc_protocol,    400,    100,   2),
-#endif
     SCHED_TASK(read_radio,             50,    200,   3),
     SCHED_TASK(update_ahrs,           400,    400,   6),
     SCHED_TASK(update_current_mode,   400,    250,  12),
@@ -686,13 +683,6 @@ void MiniDP::read_radio()
     if (rc_channels.read_input()) {
         last_rc_input_ms = AP_HAL::millis();
     }
-}
-
-void MiniDP::update_rc_protocol()
-{
-#if AP_RCPROTOCOL_ENABLED
-    AP::RC().update();
-#endif
 }
 
 void MiniDP::update_authority(const uint32_t now_ms)
