@@ -174,6 +174,12 @@ set the flight-controller UART connected to the ELRS receiver to
 standard MAVLink-radio RC data, which MiniDP feeds into the normal ArduPilot RC
 frontend used by Mission Planner radio calibration.
 
+Do not use `SERIALx_PROTOCOL=23` for ELRS MAVLink mode. Protocol `23` is the
+raw serial RC-input path for receivers sending CRSF/SBUS/etc. bytes directly to
+ArduPilot. ELRS MAVLink mode must be configured as a MAVLink port so Mission
+Planner can connect on the same link and the shared MAVLink handler can receive
+`RADIO_RC_CHANNELS`.
+
 Mission Planner's Radio Calibration page shows MiniDP's outgoing `RC_CHANNELS`
 MAVLink stream. If telemetry connects but the bars stay blank, set the
 `MAVx_RC_CHAN` stream rate for the Mission Planner link to `1` or higher

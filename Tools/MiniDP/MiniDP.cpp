@@ -524,10 +524,19 @@ void MiniDP::setup()
 
     load_parameters();
     printf("MiniDP parameters ready\n");
-    board_config.init();
-    printf("MiniDP board config ready\n");
+#if HAL_GCS_ENABLED
+    gcs().init();
+#endif
     serial_manager.init();
     printf("MiniDP serial manager ready\n");
+#if HAL_GCS_ENABLED
+    gcs().setup_console();
+#endif
+    board_config.init();
+    printf("MiniDP board config ready\n");
+#if HAL_GCS_ENABLED
+    gcs().setup_uarts();
+#endif
 #if AP_BATTERY_ENABLED
     battery.init();
     printf("MiniDP battery monitor ready\n");
@@ -601,11 +610,6 @@ void MiniDP::setup()
     notify.init();
     AP_Notify::flags.initialising = false;
 
-#if HAL_GCS_ENABLED
-    gcs().init();
-    gcs().setup_console();
-    gcs().setup_uarts();
-#endif
     report_mode_transition();
     report_authority_transition();
 

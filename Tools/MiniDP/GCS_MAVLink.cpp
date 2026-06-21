@@ -161,8 +161,6 @@ void GCS_MAVLINK_MiniDP::handle_message(const mavlink_message_t &msg)
             packet.count,
             packet.flags,
             packet.count > 0 ? radio_rc_channel_to_pwm(packet.channels[0]) : 0);
-        AP::RC().handle_radio_rc_channels(&packet);
-        return;
     }
 #endif
 
