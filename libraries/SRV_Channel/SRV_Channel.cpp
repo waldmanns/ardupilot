@@ -63,7 +63,7 @@ const AP_Param::GroupInfo SRV_Channel::var_info[] = {
 
     // @Param: FUNCTION
     // @DisplayName: Servo output function
-    // @Description: Function assigned to this servo. Setting this to Disabled(0) will setup this output for control by auto missions or MAVLink servo set commands. any other value will enable the corresponding function
+    // @Description: Function assigned to this servo. Setting this to Disabled(0) will setup this output for control by auto missions or MAVLink servo set commands. Any other value will enable the corresponding function. For RC passthrough, RCPassThru(1) passes the same-numbered RC input to this output, RCIN1 to RCIN16 pass the selected raw RC input, and RCIN1Scaled to RCIN16Scaled pass the selected RC input scaled through this output's MIN/TRIM/MAX values. RC passthrough functions are not gated by vehicle arming state, but the output must be enabled, the output protocol must match the connected device, and the hardware safety switch can still block physical output unless the switch is released or the output is included in BRD_SAFETY_MASK.
     // @SortValues: AlphabeticalZeroAtTop
     // @Values: -1:GPIO
     // @Values{Plane, Copter, Rover, Sub}: -1:GPIO

@@ -321,6 +321,14 @@ const AP_Param::Info MiniDP::var_info[] = {
     // @User: Standard
     GSCALAR(dp_yaw_p, "DP_YAW_P", 0.0f),
 
+    // @Param: DP_YAW_I
+    // @DisplayName: DP yaw integral gain
+    // @Description: Heading hold integral gain. Integrates yaw error in radians over time to correct steady-state yaw bias.
+    // @Range: 0 2
+    // @Increment: 0.01
+    // @User: Standard
+    GSCALAR(dp_yaw_i, "DP_YAW_I", 0.0f),
+
     // @Param: DP_YAW_D
     // @DisplayName: DP yaw damping gain
     // @Description: Heading hold yaw-rate damping gain. Multiplies yaw rate in radians per second to reduce yaw output.
@@ -336,6 +344,14 @@ const AP_Param::Info MiniDP::var_info[] = {
     // @Increment: 0.01
     // @User: Standard
     GSCALAR(dp_position_p, "DP_POS_P", 0.0f),
+
+    // @Param: DP_POS_I
+    // @DisplayName: DP position integral gain
+    // @Description: Position hold integral gain. Integrates shaped north/east position error over time to correct steady wind or current bias.
+    // @Range: 0 2
+    // @Increment: 0.01
+    // @User: Standard
+    GSCALAR(dp_position_i, "DP_POS_I", 0.0f),
 
     // @Param: DP_VEL_D
     // @DisplayName: DP velocity damping gain
@@ -368,6 +384,22 @@ const AP_Param::Info MiniDP::var_info[] = {
     // @Increment: 0.01
     // @User: Standard
     GSCALAR(dp_yaw_limit, "DP_YAW_MAX", 0.5f),
+
+    // @Param: DP_YAW_IMAX
+    // @DisplayName: DP yaw integral limit
+    // @Description: Maximum normalized yaw output that the yaw integral term may add. Set to 0 to disable yaw integral authority even if DP_YAW_I is nonzero.
+    // @Range: 0 1
+    // @Increment: 0.01
+    // @User: Standard
+    GSCALAR(dp_yaw_imax, "DP_YAW_IMAX", 0.2f),
+
+    // @Param: DP_POS_IMAX
+    // @DisplayName: DP position integral limit
+    // @Description: Maximum normalized surge/sway vector output that the position integral term may add. Set to 0 to disable position integral authority even if DP_POS_I is nonzero.
+    // @Range: 0 1
+    // @Increment: 0.01
+    // @User: Standard
+    GSCALAR(dp_position_imax, "DP_POS_IMAX", 0.2f),
 
     // @Param: DP_RETARGET
     // @DisplayName: Relatch DP target on mode request

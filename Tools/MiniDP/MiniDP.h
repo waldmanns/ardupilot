@@ -134,6 +134,10 @@ public:
         k_param_battery,
         k_param_rssi,
         k_param_scheduler,
+        k_param_dp_yaw_i,
+        k_param_dp_position_i,
+        k_param_dp_yaw_imax,
+        k_param_dp_position_imax,
     };
 
     AP_Int16 format_version;
@@ -173,8 +177,10 @@ public:
     AP_Float axis_sway_slew;
     AP_Float axis_yaw_slew;
     AP_Float dp_yaw_p;
+    AP_Float dp_yaw_i;
     AP_Float dp_yaw_d;
     AP_Float dp_position_p;
+    AP_Float dp_position_i;
     AP_Float dp_velocity_d;
     AP_Float dp_position_radius;
     AP_Float dp_position_deadband;
@@ -183,6 +189,8 @@ public:
     AP_Float dp_surge_limit;
     AP_Float dp_sway_limit;
     AP_Float dp_yaw_limit;
+    AP_Float dp_yaw_imax;
+    AP_Float dp_position_imax;
     AP_Int8 dp_retarget;
     AP_Int8 arm_require;
     AP_Int8 arm_gps_require;

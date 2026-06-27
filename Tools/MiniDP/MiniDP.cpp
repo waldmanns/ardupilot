@@ -339,14 +339,18 @@ MiniDP_ControllerConfig MiniDP::make_controller_config() const
 {
     MiniDP_ControllerConfig config{};
     config.yaw_p = g.dp_yaw_p.get();
+    config.yaw_i = g.dp_yaw_i.get();
     config.yaw_d = g.dp_yaw_d.get();
     config.position_p = g.dp_position_p.get();
+    config.position_i = g.dp_position_i.get();
     config.velocity_d = g.dp_velocity_d.get();
     config.position_radius_m = g.dp_position_radius.get();
     config.position_deadband_m = g.dp_position_deadband.get();
     config.surge_limit = g.dp_surge_limit.get();
     config.sway_limit = g.dp_sway_limit.get();
     config.yaw_limit = g.dp_yaw_limit.get();
+    config.position_i_limit = g.dp_position_imax.get();
+    config.yaw_i_limit = g.dp_yaw_imax.get();
     return config;
 }
 
@@ -1594,6 +1598,7 @@ void MiniDP::set_servos()
     axis_limiter.set_config(make_axis_limiter_config());
     controller.set_config(make_controller_config());
     bool have_active_command = false;
+    bool controller_command_active = false;
     MiniDP_AxisCommand active_command{};
     if (output_state == MiniDP_OutputState::ARMED_ACTIVE) {
         if (active_manual_command.valid) {
@@ -1605,11 +1610,16 @@ void MiniDP::set_servos()
                 mode_manager.target(),
                 get_state());
             have_active_command = true;
+            controller_command_active = true;
         }
     }
     if (have_active_command) {
+        if (!controller_command_active) {
+            controller.reset();
+        }
         output_command = axis_limiter.update(now_ms, active_command);
     } else {
+        controller.reset();
         axis_limiter.reset(now_ms);
     }
     const MiniDP_OutputFrame &output_frame =

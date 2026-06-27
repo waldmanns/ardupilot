@@ -205,7 +205,7 @@ const AP_Param::GroupInfo AP_BoardConfig::var_info[] = {
 
     // @Param: SAFETY_MASK
     // @DisplayName: Outputs which ignore the safety switch state
-    // @Description: A bitmask which controls what outputs can move while the safety switch has not been pressed
+    // @Description: A bitmask which controls what outputs can move while the safety switch has not been pressed. This applies to all physical outputs, including outputs configured for RC passthrough with SERVOx_FUNCTION. Vehicle disarming does not block RC passthrough by itself, but the hardware safety state still blocks outputs that are not included in this mask.
     // @Bitmask: 0:Output1
     // @Bitmask: 1:Output2
     // @Bitmask: 2:Output3

@@ -60,6 +60,30 @@ EKF reset identity, position, velocity, or EKF health, it falls back to
 `HEADING_HOLD` when yaw is still valid. DP entry and continued DP hold also
 respect the configured GPS horizontal and speed accuracy limits.
 
+## How DP Hold Works
+
+Easy view: `DP_HOLD` is a "stay here and keep pointing this way" mode. When the
+mode is entered, MiniDP remembers the current position and heading, then keeps
+comparing the boat against that remembered target. If the boat drifts north,
+south, sideways, or rotates away from the target heading, MiniDP asks the
+thrusters for the opposite correction. The correction stays small near the
+target, grows as the error grows, and is limited before it reaches the motors so
+tuning mistakes do not immediately command full thrust.
+
+Technical view: `DP_HOLD` uses the EKF local north/east position, velocity, yaw,
+and yaw rate to build normalized `surge`, `sway`, and `yaw` commands. Yaw error
+is wrapped to the shortest turn and controlled by `DP_YAW_P`, bounded integral
+correction from `DP_YAW_I`/`DP_YAW_IMAX`, and yaw-rate damping from
+`DP_YAW_D`. Position error is first shaped by `DP_POS_DZ` and `DP_POS_RAD`, then
+the proportional position command from `DP_POS_P` is combined with a bounded
+north/east integral correction from `DP_POS_I`/`DP_POS_IMAX`. That position
+command is rotated into the body frame so it becomes surge and sway, then
+`DP_VEL_D` subtracts body-frame velocity damping. `DP_SRG_MAX`, `DP_SWY_MAX`,
+and `DP_YAW_MAX` limit the controller output before the normal `AXIS_*` limits,
+frame mixer, motor scaling, and `SERVOx_*` PWM mapping run. Integral state is
+cleared when the mode or target changes, when required state becomes invalid, or
+when controller output is not active.
+
 ## Output Frame
 
 `FRAME_TYPE=901` is the current default and only implemented frame. It is named
@@ -105,9 +129,9 @@ The DP controller is intentionally simple:
 
 | Axis | Control law |
 | --- | --- |
-| Yaw | `DP_YAW_P * yaw_error - DP_YAW_D * yaw_rate` |
-| Surge | `DP_POS_P * body_forward_position_error - DP_VEL_D * body_forward_velocity` |
-| Sway | `DP_POS_P * body_lateral_position_error - DP_VEL_D * body_lateral_velocity` |
+| Yaw | `DP_YAW_P * yaw_error + bounded_yaw_i - DP_YAW_D * yaw_rate` |
+| Surge | `body_forward(DP_POS_P * position_error + bounded_position_i) - DP_VEL_D * body_forward_velocity` |
+| Sway | `body_lateral(DP_POS_P * position_error + bounded_position_i) - DP_VEL_D * body_lateral_velocity` |
 
 Position error is shaped before it reaches the surge/sway controller. Inside
 `DP_POS_DZ`, the position term is zero. Between `DP_POS_DZ` and `DP_POS_RAD`,
@@ -116,6 +140,12 @@ is used.
 
 All DP gains default to zero, so the vessel will not actively correct position
 or heading until gains are set.
+
+Tune P and D terms first with `DP_YAW_I` and `DP_POS_I` left at zero. After the
+vessel is stable, add small I terms only to cancel steady current, wind, or
+thruster bias. `DP_YAW_IMAX` and `DP_POS_IMAX` cap the integral contribution,
+and MiniDP resets the stored integral correction whenever the mode or target
+changes or controller output is no longer active.
 
 ## Key Setup Steps
 
@@ -377,12 +407,16 @@ running.
 | Parameter | Default | Use |
 | --- | ---: | --- |
 | `DP_YAW_P` | `0.0` | Heading-hold yaw proportional gain. |
+| `DP_YAW_I` | `0.0` | Heading-hold yaw integral gain for steady-state bias correction. |
 | `DP_YAW_D` | `0.0` | Yaw-rate damping gain. |
 | `DP_POS_P` | `0.0` | Position proportional gain for surge and sway. |
+| `DP_POS_I` | `0.0` | Position integral gain for steady wind/current bias correction. |
 | `DP_VEL_D` | `0.0` | Velocity damping gain for surge and sway. |
 | `DP_SRG_MAX` | `0.5` | DP controller surge output limit. |
 | `DP_SWY_MAX` | `0.5` | DP controller sway output limit. |
 | `DP_YAW_MAX` | `0.5` | DP controller yaw output limit. |
+| `DP_YAW_IMAX` | `0.2` | Maximum normalized yaw output from the yaw integral term. |
+| `DP_POS_IMAX` | `0.2` | Maximum normalized surge/sway vector output from the position integral term. |
 | `DP_RETARGET` | `1` | Relatch current yaw/position whenever `DP_HOLD` is requested. |
 | `DP_POS_RAD` | `2.0` | Soft hold radius in meters. Position correction ramps in below this radius. |
 | `DP_POS_DZ` | `0.5` | Position deadband in meters. Position correction is zero inside this distance. |
