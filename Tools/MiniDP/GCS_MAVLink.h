@@ -17,6 +17,7 @@ protected:
     MAV_STATE vehicle_system_status() const override;
     void handle_message(const mavlink_message_t &msg) override;
     bool try_send_message(enum ap_message id) override;
+    uint64_t capabilities() const override;
     MAV_RESULT handle_command_int_packet(
         const mavlink_command_int_t &packet,
         const mavlink_message_t &msg) override;
@@ -36,9 +37,28 @@ protected:
 private:
     void send_minidp_sys_status() const;
     void send_minidp_firmware_identity() const;
+    bool handle_guided_request(AP_Mission::Mission_Command &cmd) override;
+    MAV_RESULT request_dp_target_ne(
+        float pos_n_m,
+        float pos_e_m,
+        bool yaw_valid,
+        float yaw_rad,
+        const char *accepted_text,
+        const char *rejected_prefix);
+    MAV_RESULT request_dp_target_location(
+        const Location &location,
+        bool yaw_valid,
+        float yaw_rad,
+        const char *accepted_text,
+        const char *rejected_prefix);
+    bool current_or_target_position(float &pos_n_m, float &pos_e_m) const;
+    void handle_set_position_target_local_ned(const mavlink_message_t &msg);
+    void handle_set_position_target_global_int(const mavlink_message_t &msg);
     MAV_RESULT handle_mav_cmd_do_motor_test(
         const mavlink_command_int_t &packet);
     MAV_RESULT handle_mav_cmd_do_set_mode(
+        const mavlink_command_int_t &packet);
+    MAV_RESULT handle_mav_cmd_do_reposition(
         const mavlink_command_int_t &packet);
     MAV_RESULT handle_mav_cmd_component_arm_disarm(
         const mavlink_command_int_t &packet);

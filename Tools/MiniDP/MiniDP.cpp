@@ -1036,6 +1036,78 @@ MiniDP_ModeCommandResult MiniDP::request_mode(
     };
 }
 
+MiniDP_ModeCommandResult MiniDP::request_dp_target(
+    const float pos_n_m,
+    const float pos_e_m,
+    const bool yaw_valid,
+    const float yaw_rad,
+    const MiniDP_ModeReason reason)
+{
+    MiniDP_AuthorityStatus request_status = authority_status;
+    request_status.time_us = AP_HAL::micros64();
+    request_status.mavlink_healthy = true;
+    request_status.mavlink_manual_authorized = g.auth_mav_manual != 0;
+    request_status.mavlink_target_authorized = g.auth_mav_target != 0;
+    request_status.actuator_test_authorized = g.auth_test != 0;
+    request_status.rc_kill = input_mapper.rc_kill_active(rc_input_frame);
+    request_status.failsafe_active =
+        battery_failsafe_latched ||
+        mode_manager.mode() == MiniDP_Mode::FAILSAFE;
+    mode_manager.set_config(make_mode_config());
+
+    const MiniDP_ControlOwner previous_owner = authority.owner();
+    const MiniDP_AuthorityRequestResult authority_result =
+        authority.request_owner(
+            MiniDP_ControlOwner::MAVLINK_TARGET,
+            MiniDP_AuthorityReason::MAVLINK_TARGET_REQUEST,
+            request_status);
+    if (!authority_result.accepted) {
+        return {
+            false,
+            MiniDP_ModeReject::NONE,
+            authority_result.rejection,
+        };
+    }
+
+    const MiniDP_State &state = get_state();
+    MiniDP_ModeTarget target{};
+    target.position_valid = true;
+    target.pos_n_m = pos_n_m;
+    target.pos_e_m = pos_e_m;
+    target.origin_id = state.origin_id;
+    target.reset_counter = state.reset_counter;
+
+    const MiniDP_ModeTarget &current_target = mode_manager.target();
+    if (yaw_valid && isfinite(yaw_rad)) {
+        target.yaw_valid = true;
+        target.yaw_rad = yaw_rad;
+    } else if (current_target.yaw_valid &&
+               current_target.reset_counter == state.reset_counter) {
+        target.yaw_valid = true;
+        target.yaw_rad = current_target.yaw_rad;
+    } else if (state.yaw_valid) {
+        target.yaw_valid = true;
+        target.yaw_rad = state.yaw_rad;
+    }
+
+    const MiniDP_ModeRequestResult mode_result =
+        mode_manager.request_dp_target(target, reason, state);
+    if (!mode_result.accepted &&
+        previous_owner != MiniDP_ControlOwner::MAVLINK_TARGET &&
+        authority.owner() == MiniDP_ControlOwner::MAVLINK_TARGET) {
+        (void)authority.request_owner(
+            MiniDP_ControlOwner::NONE,
+            MiniDP_AuthorityReason::RELEASED,
+            request_status);
+    }
+
+    return {
+        mode_result.accepted,
+        mode_result.rejection,
+        MiniDP_AuthorityReject::NONE,
+    };
+}
+
 void MiniDP::update_manual_input(const uint32_t now_ms)
 {
     rc_manual_command = input_mapper.map_rc(rc_input_frame, now_ms);
@@ -1307,9 +1379,42 @@ void MiniDP::send_named_status_values()
     const MiniDP_State &state = get_state();
     const MiniDP_ModeTarget &target = mode_manager.target();
     const MiniDP_OutputFrame &frame = output_manager.frame();
+    const MiniDP_ModeConfig mode_config = make_mode_config();
+    const bool gps_hacc_bad =
+        mode_config.dp_hacc_max_m > 0.0f &&
+        (!isfinite(state.gps_hacc_m) ||
+         state.gps_hacc_m > mode_config.dp_hacc_max_m);
+    const bool gps_sacc_bad =
+        mode_config.dp_sacc_max_m > 0.0f &&
+        (!isfinite(state.gps_sacc_m) ||
+         state.gps_sacc_m > mode_config.dp_sacc_max_m);
+    const bool dp_ready =
+        state.ekf_healthy &&
+        state.yaw_valid &&
+        state.origin_valid &&
+        state.position_valid &&
+        state.velocity_valid &&
+        !gps_hacc_bad &&
+        !gps_sacc_bad;
+    const MiniDP_ModeTransition &transition = mode_manager.last_transition();
+    const bool dp_fallback =
+        mode_manager.mode() == MiniDP_Mode::HEADING_HOLD &&
+        transition.from == MiniDP_Mode::DP_HOLD;
 
     gcs().send_named_float("DP_MODE", float(uint8_t(mode_manager.mode())));
     gcs().send_named_float("DP_OWN", float(uint8_t(authority.owner())));
+    gcs().send_named_float("DP_READY", dp_ready ? 1.0f : 0.0f);
+    gcs().send_named_float(
+        "DP_HOLD",
+        mode_manager.mode() == MiniDP_Mode::DP_HOLD ? 1.0f : 0.0f);
+    gcs().send_named_float("DP_FALLB", dp_fallback ? 1.0f : 0.0f);
+    gcs().send_named_float(
+        "DP_EKF_BAD",
+        state.ekf_healthy ? 0.0f : 1.0f);
+    gcs().send_named_float(
+        "DP_GPS_BAD",
+        (gps_hacc_bad || gps_sacc_bad) ? 1.0f : 0.0f);
+    gcs().send_named_float("DP_TGT_ID", float(target.target_id));
     gcs().send_named_float("DP_SAT", frame.saturated ? 1.0f : 0.0f);
     gcs().send_named_float("DP_OUT", float(frame.active_pwm_count));
     gcs().send_named_float("MAV_CH", float(gcs().num_gcs()));
@@ -1370,6 +1475,8 @@ void MiniDP::send_named_status_values()
         gcs().send_named_float(
             "DP_ERR_M",
             sqrtf((err_n * err_n) + (err_e * err_e)));
+        gcs().send_named_float("DP_TGT_N", target.pos_n_m);
+        gcs().send_named_float("DP_TGT_E", target.pos_e_m);
     }
 
     if (target.yaw_valid && state.yaw_valid) {

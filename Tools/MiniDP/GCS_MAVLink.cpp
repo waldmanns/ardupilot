@@ -12,6 +12,10 @@ extern const AP_HAL::HAL &hal;
 
 namespace {
 
+constexpr uint16_t set_pos_type_mask_pos_ignore = (1U << 0) | (1U << 1);
+constexpr uint16_t set_pos_type_mask_acc_ignore = (1U << 6) | (1U << 7);
+constexpr uint16_t set_pos_type_mask_yaw_ignore = 1U << 10;
+
 bool parse_uint8_param(
     const float value,
     const uint8_t min_value,
@@ -84,6 +88,40 @@ uint8_t rc_override_count(const mavlink_rc_channels_override_t &packet)
     return count;
 }
 
+bool supported_local_position_frame(const uint8_t frame)
+{
+    switch (frame) {
+    case MAV_FRAME_LOCAL_NED:
+    case MAV_FRAME_LOCAL_OFFSET_NED:
+    case MAV_FRAME_BODY_NED:
+    case MAV_FRAME_BODY_OFFSET_NED:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool supported_global_position_frame(const uint8_t frame)
+{
+    switch (frame) {
+    case MAV_FRAME_GLOBAL:
+    case MAV_FRAME_GLOBAL_INT:
+    case MAV_FRAME_GLOBAL_RELATIVE_ALT:
+    case MAV_FRAME_GLOBAL_RELATIVE_ALT_INT:
+    case MAV_FRAME_GLOBAL_TERRAIN_ALT:
+    case MAV_FRAME_GLOBAL_TERRAIN_ALT_INT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool body_position_frame(const uint8_t frame)
+{
+    return frame == MAV_FRAME_BODY_NED ||
+           frame == MAV_FRAME_BODY_OFFSET_NED;
+}
+
 } // namespace
 
 void GCS_MAVLINK_MiniDP::send_minidp_text(MAV_SEVERITY severity, const char *text) const
@@ -138,6 +176,10 @@ uint8_t GCS_MAVLINK_MiniDP::base_mode() const
     if (minidp.get_mode() == MiniDP_Mode::MANUAL) {
         base_mode |= MAV_MODE_FLAG_MANUAL_INPUT_ENABLED;
     }
+    if (minidp.get_mode() == MiniDP_Mode::HEADING_HOLD ||
+        minidp.get_mode() == MiniDP_Mode::DP_HOLD) {
+        base_mode |= MAV_MODE_FLAG_GUIDED_ENABLED;
+    }
     return base_mode;
 }
 
@@ -175,6 +217,19 @@ void GCS_MAVLINK_MiniDP::handle_message(const mavlink_message_t &msg)
             packet.chan1_raw);
     }
 #endif
+
+    switch (msg.msgid) {
+    case MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED:
+        handle_set_position_target_local_ned(msg);
+        return;
+
+    case MAVLINK_MSG_ID_SET_POSITION_TARGET_GLOBAL_INT:
+        handle_set_position_target_global_int(msg);
+        return;
+
+    default:
+        break;
+    }
 
     GCS_MAVLINK::handle_message(msg);
 }
@@ -294,6 +349,129 @@ bool GCS_MAVLINK_MiniDP::try_send_message(const enum ap_message id)
     }
 }
 
+uint64_t GCS_MAVLINK_MiniDP::capabilities() const
+{
+    return MAV_PROTOCOL_CAPABILITY_MISSION_FLOAT |
+           MAV_PROTOCOL_CAPABILITY_MISSION_INT |
+           MAV_PROTOCOL_CAPABILITY_COMMAND_INT |
+           MAV_PROTOCOL_CAPABILITY_SET_POSITION_TARGET_LOCAL_NED |
+           MAV_PROTOCOL_CAPABILITY_SET_POSITION_TARGET_GLOBAL_INT |
+           GCS_MAVLINK::capabilities();
+}
+
+MAV_RESULT GCS_MAVLINK_MiniDP::request_dp_target_ne(
+    const float pos_n_m,
+    const float pos_e_m,
+    const bool yaw_valid,
+    const float yaw_rad,
+    const char *accepted_text,
+    const char *rejected_prefix)
+{
+    const MiniDP_ModeCommandResult result =
+        minidp.request_dp_target(
+            pos_n_m,
+            pos_e_m,
+            yaw_valid,
+            yaw_rad,
+            MiniDP_ModeReason::MAVLINK_REQUEST);
+
+    if (result.accepted) {
+        if (accepted_text != nullptr) {
+            send_minidp_text(MAV_SEVERITY_INFO, accepted_text);
+        }
+        return MAV_RESULT_ACCEPTED;
+    }
+
+    if (rejected_prefix != nullptr) {
+        char text[50];
+        if (result.authority_rejection != MiniDP_AuthorityReject::NONE) {
+            AP_HAL::get_HAL().util->snprintf(
+                text,
+                sizeof(text),
+                "%s: %s",
+                rejected_prefix,
+                MiniDP_AuthorityArbiter::reject_name(
+                    result.authority_rejection));
+        } else {
+            AP_HAL::get_HAL().util->snprintf(
+                text,
+                sizeof(text),
+                "%s: %s",
+                rejected_prefix,
+                MiniDP_ModeManager::reject_name(result.mode_rejection));
+        }
+        send_minidp_text(MAV_SEVERITY_WARNING, text);
+    }
+
+    return MAV_RESULT_DENIED;
+}
+
+MAV_RESULT GCS_MAVLINK_MiniDP::request_dp_target_location(
+    const Location &location,
+    const bool yaw_valid,
+    const float yaw_rad,
+    const char *accepted_text,
+    const char *rejected_prefix)
+{
+    if (!location.check_latlng()) {
+        if (rejected_prefix != nullptr) {
+            send_minidp_text(MAV_SEVERITY_WARNING, "DP target rejected: lat/lon");
+        }
+        return MAV_RESULT_DENIED;
+    }
+
+    Location origin;
+    if (!minidp.ahrs.get_origin(origin)) {
+        if (rejected_prefix != nullptr) {
+            send_minidp_text(MAV_SEVERITY_WARNING, "DP target rejected: origin");
+        }
+        return MAV_RESULT_DENIED;
+    }
+
+    const Vector2f target_ne = origin.get_distance_NE(location);
+    return request_dp_target_ne(
+        target_ne.x,
+        target_ne.y,
+        yaw_valid,
+        yaw_rad,
+        accepted_text,
+        rejected_prefix);
+}
+
+bool GCS_MAVLINK_MiniDP::current_or_target_position(
+    float &pos_n_m,
+    float &pos_e_m) const
+{
+    const MiniDP_State &state = minidp.get_state();
+    const MiniDP_ModeTarget &target = minidp.get_mode_target();
+    if (target.position_valid &&
+        target.origin_id == state.origin_id &&
+        target.reset_counter == state.reset_counter) {
+        pos_n_m = target.pos_n_m;
+        pos_e_m = target.pos_e_m;
+        return true;
+    }
+
+    if (state.position_valid) {
+        pos_n_m = state.pos_n_m;
+        pos_e_m = state.pos_e_m;
+        return true;
+    }
+
+    return false;
+}
+
+bool GCS_MAVLINK_MiniDP::handle_guided_request(
+    AP_Mission::Mission_Command &cmd)
+{
+    return request_dp_target_location(
+        cmd.content.location,
+        false,
+        0.0f,
+        "DP target accepted",
+        "DP target rejected") == MAV_RESULT_ACCEPTED;
+}
+
 void GCS_MAVLINK_MiniDP::handle_manual_control_axes(
     const mavlink_manual_control_t &packet,
     const uint32_t tnow)
@@ -411,6 +589,154 @@ void GCS_MAVLINK_MiniDP::send_position_target_local_ned()
         0.0f,
         target.yaw_valid ? target.yaw_rad : 0.0f,
         0.0f);
+}
+
+void GCS_MAVLINK_MiniDP::handle_set_position_target_local_ned(
+    const mavlink_message_t &msg)
+{
+    mavlink_set_position_target_local_ned_t packet;
+    mavlink_msg_set_position_target_local_ned_decode(&msg, &packet);
+
+    if (!supported_local_position_frame(packet.coordinate_frame)) {
+        return;
+    }
+
+    const uint16_t pos_mask = packet.type_mask & set_pos_type_mask_pos_ignore;
+    if (pos_mask != 0 && pos_mask != set_pos_type_mask_pos_ignore) {
+        return;
+    }
+    const bool pos_ignore = pos_mask == set_pos_type_mask_pos_ignore;
+    const bool yaw_ignore =
+        (packet.type_mask & set_pos_type_mask_yaw_ignore) != 0;
+    const bool acc_ignore =
+        (packet.type_mask & set_pos_type_mask_acc_ignore) ==
+        set_pos_type_mask_acc_ignore;
+    if (!acc_ignore || (pos_ignore && yaw_ignore)) {
+        return;
+    }
+
+    const MiniDP_State &state = minidp.get_state();
+    float pos_n_m = 0.0f;
+    float pos_e_m = 0.0f;
+
+    if (pos_ignore) {
+        if (!current_or_target_position(pos_n_m, pos_e_m)) {
+            return;
+        }
+    } else {
+        switch (packet.coordinate_frame) {
+        case MAV_FRAME_LOCAL_NED:
+            pos_n_m = packet.x;
+            pos_e_m = packet.y;
+            break;
+
+        case MAV_FRAME_LOCAL_OFFSET_NED:
+            if (!state.position_valid) {
+                return;
+            }
+            pos_n_m = state.pos_n_m + packet.x;
+            pos_e_m = state.pos_e_m + packet.y;
+            break;
+
+        case MAV_FRAME_BODY_NED:
+        case MAV_FRAME_BODY_OFFSET_NED:
+            if (!state.position_valid || !state.yaw_valid) {
+                return;
+            }
+            pos_n_m =
+                state.pos_n_m +
+                (cosf(state.yaw_rad) * packet.x) -
+                (sinf(state.yaw_rad) * packet.y);
+            pos_e_m =
+                state.pos_e_m +
+                (sinf(state.yaw_rad) * packet.x) +
+                (cosf(state.yaw_rad) * packet.y);
+            break;
+
+        default:
+            return;
+        }
+    }
+
+    bool yaw_valid = false;
+    float yaw_rad = 0.0f;
+    if (!yaw_ignore) {
+        yaw_valid = true;
+        yaw_rad = packet.yaw;
+        if (body_position_frame(packet.coordinate_frame) && state.yaw_valid) {
+            yaw_rad = wrap_PI(state.yaw_rad + yaw_rad);
+        }
+    }
+
+    (void)request_dp_target_ne(
+        pos_n_m,
+        pos_e_m,
+        yaw_valid,
+        yaw_rad,
+        nullptr,
+        nullptr);
+}
+
+void GCS_MAVLINK_MiniDP::handle_set_position_target_global_int(
+    const mavlink_message_t &msg)
+{
+    mavlink_set_position_target_global_int_t packet;
+    mavlink_msg_set_position_target_global_int_decode(&msg, &packet);
+
+    if (!supported_global_position_frame(packet.coordinate_frame)) {
+        return;
+    }
+
+    const uint16_t pos_mask = packet.type_mask & set_pos_type_mask_pos_ignore;
+    if (pos_mask != 0 && pos_mask != set_pos_type_mask_pos_ignore) {
+        return;
+    }
+    const bool pos_ignore = pos_mask == set_pos_type_mask_pos_ignore;
+    const bool yaw_ignore =
+        (packet.type_mask & set_pos_type_mask_yaw_ignore) != 0;
+    const bool acc_ignore =
+        (packet.type_mask & set_pos_type_mask_acc_ignore) ==
+        set_pos_type_mask_acc_ignore;
+    if (!acc_ignore || (pos_ignore && yaw_ignore)) {
+        return;
+    }
+
+    bool yaw_valid = false;
+    float yaw_rad = 0.0f;
+    if (!yaw_ignore) {
+        yaw_valid = true;
+        yaw_rad = packet.yaw;
+    }
+
+    if (pos_ignore) {
+        float pos_n_m = 0.0f;
+        float pos_e_m = 0.0f;
+        if (!current_or_target_position(pos_n_m, pos_e_m)) {
+            return;
+        }
+        (void)request_dp_target_ne(
+            pos_n_m,
+            pos_e_m,
+            yaw_valid,
+            yaw_rad,
+            nullptr,
+            nullptr);
+        return;
+    }
+
+    if (!check_latlng(packet.lat_int, packet.lon_int)) {
+        return;
+    }
+
+    Location target_location{};
+    target_location.lat = packet.lat_int;
+    target_location.lng = packet.lon_int;
+    (void)request_dp_target_location(
+        target_location,
+        yaw_valid,
+        yaw_rad,
+        nullptr,
+        nullptr);
 }
 
 uint8_t GCS_MAVLINK_MiniDP::send_available_mode(const uint8_t index) const
@@ -561,6 +887,30 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_motor_test(
     return MAV_RESULT_ACCEPTED;
 }
 
+MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_reposition(
+    const mavlink_command_int_t &packet)
+{
+    if (!check_latlng(packet.x, packet.y) ||
+        (packet.x == 0 && packet.y == 0)) {
+        send_minidp_text(MAV_SEVERITY_WARNING, "DP target rejected: lat/lon");
+        return MAV_RESULT_DENIED;
+    }
+
+    Location requested_location{};
+    if (!location_from_command_t(packet, requested_location) ||
+        !requested_location.check_latlng()) {
+        send_minidp_text(MAV_SEVERITY_WARNING, "DP target rejected: location");
+        return MAV_RESULT_DENIED;
+    }
+
+    return request_dp_target_location(
+        requested_location,
+        false,
+        0.0f,
+        "DP target accepted",
+        "DP target rejected");
+}
+
 MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_component_arm_disarm(
     const mavlink_command_int_t &packet)
 {
@@ -620,6 +970,8 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_command_int_packet(
         return handle_mav_cmd_component_arm_disarm(packet);
     case MAV_CMD_DO_SET_MODE:
         return handle_mav_cmd_do_set_mode(packet);
+    case MAV_CMD_DO_REPOSITION:
+        return handle_mav_cmd_do_reposition(packet);
     case MAV_CMD_DO_MOTOR_TEST:
         return handle_mav_cmd_do_motor_test(packet);
     case MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN:

@@ -89,6 +89,8 @@ const char *MiniDP_ModeManager::reject_name(const MiniDP_ModeReject rejection)
         return "failsafe-latched";
     case MiniDP_ModeReject::UNSUPPORTED_MODE:
         return "unsupported-mode";
+    case MiniDP_ModeReject::TARGET_INVALID:
+        return "target-invalid";
     }
     return "unknown";
 }
@@ -207,6 +209,28 @@ void MiniDP_ModeManager::transition_to(
     };
 }
 
+void MiniDP_ModeManager::transition_to_dp_target(
+    const MiniDP_ModeTarget &target,
+    const MiniDP_ModeReason reason,
+    const MiniDP_State &state)
+{
+    const MiniDP_Mode previous = current_mode;
+    current_mode = MiniDP_Mode::DP_HOLD;
+    current_target = target;
+    current_target.position_valid = true;
+    current_target.yaw_valid = true;
+    current_target.origin_id = state.origin_id;
+    current_target.reset_counter = state.reset_counter;
+    current_target.target_id = ++target_sequence;
+    transition_record = {
+        ++transition_sequence,
+        state.time_us,
+        previous,
+        MiniDP_Mode::DP_HOLD,
+        reason,
+    };
+}
+
 MiniDP_ModeRequestResult MiniDP_ModeManager::request_mode(
     const MiniDP_Mode requested,
     const MiniDP_ModeReason reason,
@@ -244,6 +268,45 @@ MiniDP_ModeRequestResult MiniDP_ModeManager::request_mode(
     }
 
     transition_to(requested, reason, state);
+    return {true, true, MiniDP_ModeReject::NONE};
+}
+
+MiniDP_ModeRequestResult MiniDP_ModeManager::request_dp_target(
+    const MiniDP_ModeTarget &target,
+    const MiniDP_ModeReason reason,
+    const MiniDP_State &state)
+{
+    if (!is_initialised) {
+        init(state.time_us);
+    }
+
+    if (current_mode == MiniDP_Mode::FAILSAFE) {
+        return {false, false, MiniDP_ModeReject::FAILSAFE_LATCHED};
+    }
+
+    const MiniDP_ModeReject rejection =
+        entry_rejection(MiniDP_Mode::DP_HOLD, state, false);
+    if (rejection != MiniDP_ModeReject::NONE) {
+        return {false, false, rejection};
+    }
+
+    if (!target.position_valid) {
+        return {false, false, MiniDP_ModeReject::POSITION_INVALID};
+    }
+    if (!target.yaw_valid) {
+        return {false, false, MiniDP_ModeReject::YAW_INVALID};
+    }
+    if (target.origin_id != state.origin_id ||
+        target.reset_counter != state.reset_counter) {
+        return {false, false, MiniDP_ModeReject::TARGET_INVALID};
+    }
+    if (!isfinite(target.pos_n_m) ||
+        !isfinite(target.pos_e_m) ||
+        !isfinite(target.yaw_rad)) {
+        return {false, false, MiniDP_ModeReject::TARGET_INVALID};
+    }
+
+    transition_to_dp_target(target, reason, state);
     return {true, true, MiniDP_ModeReject::NONE};
 }
 

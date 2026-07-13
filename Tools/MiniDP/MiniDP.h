@@ -230,6 +230,12 @@ public:
     MiniDP_ModeCommandResult request_mode(
         MiniDP_Mode requested,
         MiniDP_ModeReason reason);
+    MiniDP_ModeCommandResult request_dp_target(
+        float pos_n_m,
+        float pos_e_m,
+        bool yaw_valid,
+        float yaw_rad,
+        MiniDP_ModeReason reason);
     void record_mavlink_manual_control(
         uint32_t now_ms,
         int16_t x,

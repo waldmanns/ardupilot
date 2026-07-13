@@ -60,6 +60,15 @@ EKF reset identity, position, velocity, or EKF health, it falls back to
 `HEADING_HOLD` when yaw is still valid. DP entry and continued DP hold also
 respect the configured GPS horizontal and speed accuracy limits.
 
+MiniDP also accepts MAVLink target updates as new DP hold points when
+`AUTH_MAV_TGT=1` and the EKF/GPS state is DP-ready. Mission Planner map
+"go here" / guided reposition commands set the clicked latitude/longitude as
+the new `DP_HOLD` point. `SET_POSITION_TARGET_GLOBAL_INT` does the same for a
+global target, while `SET_POSITION_TARGET_LOCAL_NED` can set an EKF-origin
+local target or nudge the current target with local/body offset frames. If the
+incoming command does not include yaw, MiniDP keeps the existing DP yaw target
+when possible, otherwise it latches the current yaw.
+
 ## How DP Hold Works
 
 Easy view: `DP_HOLD` is a "stay here and keep pointing this way" mode. When the
@@ -447,12 +456,17 @@ When `DP_HOLD` has a valid latched position target, MiniDP also sends
 `POSITION_TARGET_GLOBAL_INT` and `POSITION_TARGET_LOCAL_NED`. Mission Planner
 and MAVLink tools can use these as the DP target position marker.
 
+Mission Planner's map "go here" / guided reposition action is accepted as a new
+DP hold target when `AUTH_MAV_TGT=1`, yaw/origin/position/velocity are valid,
+EKF is healthy, and GPS accuracy is inside `DP_HACC_MAX`/`DP_SACC_MAX`.
+
 Once per second MiniDP sends `NAMED_VALUE_FLOAT` status values:
-`DP_MODE`, `DP_OWN`, `DP_SAT`, `DP_OUT`, `GPS_FIX`, `GPS_SATS`, `RC_OK`,
+`DP_MODE`, `DP_OWN`, `DP_READY`, `DP_HOLD`, `DP_FALLB`, `DP_EKF_BAD`,
+`DP_GPS_BAD`, `DP_TGT_ID`, `DP_SAT`, `DP_OUT`, `GPS_FIX`, `GPS_SATS`, `RC_OK`,
 `RC_CH`, `RC_PROT`, `RC_AGE`, `RRC_CNT`, `RRC_AGE`, `RRC_CH`, `RRC_FLG`,
 `RRC_C1`, `RRC_SYS`, `RCO_CNT`, `RCO_AGE`, `RCO_CH`, `RCO_C1`, `RCO_SYS`,
-`RTK_FIX`, `DP_ERR_M`, `DP_YERR`, `DP_HACC`, and `DP_SACC` when the underlying
-values are valid.
+`RTK_FIX`, `DP_ERR_M`, `DP_TGT_N`, `DP_TGT_E`, `DP_YERR`, `DP_HACC`, and
+`DP_SACC` when the underlying values are valid.
 
 MiniDP accepts the standard `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` command for
 Mission Planner board reboot and reboot-to-bootloader actions. The shared

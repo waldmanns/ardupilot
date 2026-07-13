@@ -36,6 +36,7 @@ enum class MiniDP_ModeReject : uint8_t {
     ACTUATOR_TEST_NOT_AUTHORIZED,
     FAILSAFE_LATCHED,
     UNSUPPORTED_MODE,
+    TARGET_INVALID,
 };
 
 struct MiniDP_ModeConfig {
@@ -80,6 +81,10 @@ public:
         const MiniDP_State &state,
         bool actuator_test_authorized = false,
         bool force_target_update = false);
+    MiniDP_ModeRequestResult request_dp_target(
+        const MiniDP_ModeTarget &target,
+        MiniDP_ModeReason reason,
+        const MiniDP_State &state);
 
     MiniDP_ModeRequestResult manual_override(const MiniDP_State &state);
 
@@ -111,4 +116,8 @@ private:
         MiniDP_ModeReason reason,
         const MiniDP_State &state);
     void latch_target(MiniDP_Mode requested, const MiniDP_State &state);
+    void transition_to_dp_target(
+        const MiniDP_ModeTarget &target,
+        MiniDP_ModeReason reason,
+        const MiniDP_State &state);
 };
