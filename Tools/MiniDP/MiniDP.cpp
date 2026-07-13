@@ -676,6 +676,10 @@ void MiniDP::capture_rc_input_frame(const bool rc_healthy)
 
 void MiniDP::read_radio()
 {
+#if AP_RCPROTOCOL_ENABLED
+    AP::RC().update();
+#endif
+
     if (hal.rcin == nullptr) {
         return;
     }
