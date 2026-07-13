@@ -70,10 +70,14 @@ struct PACKED log_MiniDP_Output {
     float motor2_demand;
     float motor3_demand;
     float motor4_demand;
+    float motor5_demand;
+    float motor6_demand;
     uint16_t motor1_pwm_us;
     uint16_t motor2_pwm_us;
     uint16_t motor3_pwm_us;
     uint16_t motor4_pwm_us;
+    uint16_t motor5_pwm_us;
+    uint16_t motor6_pwm_us;
     uint8_t active_pwm_count;
 };
 
@@ -191,6 +195,7 @@ const AP_Scheduler::Task MiniDP::scheduler_tasks[] = {
 #if HAL_GCS_ENABLED
     SCHED_TASK_CLASS(GCS,                 (GCS*)&minidp.gcs_backend, update_receive, 400, 500,  51),
     SCHED_TASK_CLASS(GCS,                 (GCS*)&minidp.gcs_backend, update_send,    400, 1000, 54),
+    SCHED_TASK_CLASS(GCS_MiniDP,          &minidp.gcs_backend, send_minidp_thruster_status, 4, 300, 55),
 #endif
     SCHED_TASK_CLASS(RC_Channels,         (RC_Channels*)&minidp.rc_channels, read_mode_switch, 7, 200, 57),
     SCHED_TASK_CLASS(RC_Channels,         (RC_Channels*)&minidp.rc_channels, read_aux_all,    10, 200, 60),
@@ -214,13 +219,13 @@ const LogStructure MiniDP::log_structure[] = {
       "TimeUS,Mode,Own,Out,RSrg,RSw,RYaw,LSrg,LSw,LYaw",
       "s---------", "F---------", true },
     { LOG_MINIDP_OUTPUT_MSG, sizeof(log_MiniDP_Output),
-      "MDOT", "QBBffffHHHHB",
-      "TimeUS,State,Sat,M1,M2,M3,M4,P1,P2,P3,P4,Act",
-      "s------YYYY-", "F-----------", true },
+      "MDOT", "QBBffffffHHHHHHB",
+      "TimeUS,State,Sat,M1,M2,M3,M4,M5,M6,P1,P2,P3,P4,P5,P6,Act",
+      "s--------YYYYYY-", "F---------------", true },
     { LOG_MINIDP_STATUS_MSG, sizeof(log_MiniDP_Status),
-      "MDST", "QBBBBBBBBBBBBBB",
+      "MDST", "QBBBBBBBBBBBBB",
       "TimeUS,Arm,SArm,Req,GReq,Rej,Mode,Own,Out,RC,Mav,Kill,GPS,Sats",
-      "s-------------S", "F--------------", true },
+      "s------------S", "F-------------", true },
 };
 
 void MiniDP::load_parameters()
@@ -561,6 +566,10 @@ void MiniDP::setup()
     printf("MiniDP parameters ready\n");
     scheduler.init(scheduler_tasks, ARRAY_SIZE(scheduler_tasks), uint32_t(-1));
     printf("MiniDP scheduler ready\n");
+#if HAL_CANMANAGER_ENABLED
+    can_mgr.init();
+    printf("MiniDP CAN manager ready\n");
+#endif
 #if HAL_GCS_ENABLED
     gcs().init();
 #endif
@@ -1652,6 +1661,8 @@ void MiniDP::log_control_frame(
     const MiniDP_ActuatorOutput &motor2 = frame.actuator[1];
     const MiniDP_ActuatorOutput &motor3 = frame.actuator[2];
     const MiniDP_ActuatorOutput &motor4 = frame.actuator[3];
+    const MiniDP_ActuatorOutput &motor5 = frame.actuator[4];
+    const MiniDP_ActuatorOutput &motor6 = frame.actuator[5];
     const struct log_MiniDP_Output output_pkt = {
         LOG_PACKET_HEADER_INIT(LOG_MINIDP_OUTPUT_MSG),
         time_us             : AP_HAL::micros64(),
@@ -1661,10 +1672,14 @@ void MiniDP::log_control_frame(
         motor2_demand       : motor2.configured ? motor2.demand : nan,
         motor3_demand       : motor3.configured ? motor3.demand : nan,
         motor4_demand       : motor4.configured ? motor4.demand : nan,
+        motor5_demand       : motor5.configured ? motor5.demand : nan,
+        motor6_demand       : motor6.configured ? motor6.demand : nan,
         motor1_pwm_us       : motor1.pwm_enabled ? motor1.pwm_us : uint16_t(0),
         motor2_pwm_us       : motor2.pwm_enabled ? motor2.pwm_us : uint16_t(0),
         motor3_pwm_us       : motor3.pwm_enabled ? motor3.pwm_us : uint16_t(0),
         motor4_pwm_us       : motor4.pwm_enabled ? motor4.pwm_us : uint16_t(0),
+        motor5_pwm_us       : motor5.pwm_enabled ? motor5.pwm_us : uint16_t(0),
+        motor6_pwm_us       : motor6.pwm_enabled ? motor6.pwm_us : uint16_t(0),
         active_pwm_count    : frame.active_pwm_count,
     };
     logger.WriteBlock(&output_pkt, sizeof(output_pkt));

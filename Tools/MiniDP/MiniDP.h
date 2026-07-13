@@ -5,9 +5,11 @@
 #include "Config.h"
 
 #include <AP_AHRS/AP_AHRS.h>
+#include <AP_Arming/AP_Arming.h>
 #include <AP_BattMonitor/AP_BattMonitor.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
+#include <AP_CANManager/AP_CANManager.h>
 #include <AP_Compass/AP_Compass.h>
 #include <AP_ExternalAHRS/AP_ExternalAHRS.h>
 #include <AP_GPS/AP_GPS.h>
@@ -138,6 +140,7 @@ public:
         k_param_dp_position_i,
         k_param_dp_yaw_imax,
         k_param_dp_position_imax,
+        k_param_can_mgr,
     };
 
     AP_Int16 format_version;
@@ -218,6 +221,7 @@ public:
     void loop();
 
     const MiniDP_State &get_state() const { return state_source.get(); }
+    const MiniDP_OutputFrame &get_output_frame() const { return output_manager.frame(); }
     MiniDP_Mode get_mode() const { return mode_manager.mode(); }
     const MiniDP_ModeTarget &get_mode_target() const { return mode_manager.target(); }
     MiniDP_ControlOwner get_control_owner() const { return authority.owner(); }
@@ -269,6 +273,9 @@ public:
     AP_GPS gps;
     AP_Baro barometer;
     AP_AHRS ahrs{AP_AHRS::FLAG_ALWAYS_USE_EKF};
+#if HAL_CANMANAGER_ENABLED
+    AP_CANManager can_mgr;
+#endif
     AP_Logger logger;
     AP_Notify notify;
 #if AP_BATTERY_ENABLED
@@ -324,6 +331,7 @@ private:
     uint32_t last_slow_log_ms = 0;
 #endif
     MiniDP_StateSource state_source;
+    AP_Arming ap_arming;
     MiniDP_Arming arming;
     MiniDP_ModeManager mode_manager;
     MiniDP_AuthorityArbiter authority;

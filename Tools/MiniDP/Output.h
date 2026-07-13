@@ -19,6 +19,7 @@ enum class MiniDP_OutputState : uint8_t {
 
 enum class MiniDP_FrameType : int16_t {
     OMNI_PLUS = 901,
+    DUAL_AZ_180_BOW = 902,
 };
 
 enum class MiniDP_ScrewPosition : int8_t {
@@ -36,6 +37,26 @@ struct MiniDP_AxisCommand {
     float surge;
     float sway;
     float yaw;
+};
+
+enum class MiniDP_ThrusterType : uint8_t {
+    NONE = 0,
+    FIXED = 1,
+    AZIMUTH_180 = 2,
+    VOITH = 3,
+};
+
+struct MiniDP_ThrusterConfig {
+    bool enabled;
+    MiniDP_ThrusterType type;
+    uint8_t output1;
+    uint8_t output2;
+    float k_surge;
+    float k_sway;
+    float k_yaw;
+    float angle_min_rad;
+    float angle_max_rad;
+    bool allow_reverse_fold;
 };
 
 struct MiniDP_ActuatorConfig {
@@ -72,11 +93,27 @@ struct MiniDP_ActuatorOutput {
     bool saturated;
 };
 
+struct MiniDP_ThrusterOutput {
+    bool configured;
+    MiniDP_ThrusterType type;
+    uint16_t flags;
+    uint8_t output1;
+    uint8_t output2;
+    float force_x;
+    float force_y;
+    float value;
+    float value2;
+    uint16_t pwm1_us;
+    uint16_t pwm2_us;
+};
+
 struct MiniDP_OutputFrame {
     MiniDP_OutputState state;
     MiniDP_ActuatorOutput actuator[6];
+    MiniDP_ThrusterOutput thruster[4];
     bool saturated;
     uint8_t active_pwm_count;
+    uint8_t configured_thruster_count;
 };
 
 struct MiniDP_ActuatorTestCommand {
@@ -90,8 +127,14 @@ struct MiniDP_ActuatorTestCommand {
 class MiniDP_OutputManager {
 public:
     static constexpr uint8_t max_actuators = 6;
+    static constexpr uint8_t max_thrusters = 4;
     static constexpr int16_t default_frame_type =
         int16_t(MiniDP_FrameType::OMNI_PLUS);
+
+    static constexpr uint16_t thruster_flag_active = 1U << 0;
+    static constexpr uint16_t thruster_flag_saturated = 1U << 1;
+    static constexpr uint16_t thruster_flag_angle_limited = 1U << 2;
+    static constexpr uint16_t thruster_flag_reverse_folded = 1U << 3;
 
     void init(int16_t frame_type = default_frame_type);
     bool set_frame_type(int16_t frame_type);
@@ -115,30 +158,51 @@ public:
     static MiniDP_FrameGeometryConfig default_frame_geometry_config();
     static const char *frame_type_name(int16_t frame_type);
     static const char *screw_position_name(MiniDP_ScrewPosition position);
+    static const char *thruster_type_name(MiniDP_ThrusterType type);
     static const char *motor_name(uint8_t index);
     static const char *state_name(MiniDP_OutputState state);
     static const char *safe_action_name(MiniDP_OutputSafeAction action);
 
 private:
     MiniDP_ActuatorConfig configs[max_actuators];
+    MiniDP_ThrusterConfig thruster_configs[max_thrusters];
     MiniDP_OutputFrame output_frame{};
     MiniDP_FrameGeometryConfig frame_geometry{};
     int16_t configured_frame_type = default_frame_type;
 
     void reset_frame_configs();
+    void reset_thruster_configs();
     void configure_motor(
         uint8_t index,
         float k_surge,
         float k_sway,
         float k_yaw);
+    void configure_fixed_thruster(
+        uint8_t thruster_index,
+        uint8_t output_index,
+        float k_surge,
+        float k_sway,
+        float k_yaw);
+    void configure_azimuth_180_thruster(
+        uint8_t thruster_index,
+        uint8_t thrust_output_index,
+        uint8_t azimuth_output_index);
     void configure_omni_plus_frame();
+    void configure_dual_az_180_bow_frame();
     void apply_omni_plus_geometry();
+    void initialise_output_frame(MiniDP_OutputState state);
     void apply_safe_outputs(MiniDP_OutputState state);
     void apply_active_outputs(MiniDP_OutputState state, const MiniDP_AxisCommand &command);
+    void apply_scalar_mixer_outputs(MiniDP_OutputState state, const MiniDP_AxisCommand &command);
+    void apply_dual_az_180_bow_outputs(MiniDP_OutputState state, const MiniDP_AxisCommand &command);
     void apply_actuator_test_output(const MiniDP_ActuatorTestCommand &command);
     void set_disabled_output(uint8_t index);
     void set_safe_output(uint8_t index, MiniDP_OutputSafeAction action);
     void set_pwm_output(uint8_t index, uint16_t pwm_us, float demand, bool saturated);
+    void set_fixed_thruster_output(uint8_t thruster_index, float demand, bool saturated);
+    void set_azimuth_180_thruster_output(uint8_t thruster_index, float force_x, float force_y, bool saturated);
+    void sync_thruster_outputs_from_actuators();
     uint16_t constrain_pwm_to_actuator(const MiniDP_ActuatorConfig &config, uint16_t pwm_us) const;
     uint16_t pwm_from_demand(const MiniDP_ActuatorConfig &config, float demand) const;
+    uint16_t pwm_from_angle(const MiniDP_ActuatorConfig &config, float angle_rad, float angle_min_rad, float angle_max_rad) const;
 };

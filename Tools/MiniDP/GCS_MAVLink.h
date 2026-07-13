@@ -11,6 +11,7 @@ public:
     using GCS_MAVLINK::GCS_MAVLINK;
 
     void send_minidp_text(MAV_SEVERITY severity, const char *text) const;
+    bool send_minidp_thruster_status();
 
 protected:
     uint8_t base_mode() const override;
@@ -62,6 +63,8 @@ private:
         const mavlink_command_int_t &packet);
     MAV_RESULT handle_mav_cmd_component_arm_disarm(
         const mavlink_command_int_t &packet);
+
+    uint8_t thruster_status_next = 0;
 };
 
 class GCS_MiniDP : public GCS {
@@ -70,6 +73,7 @@ public:
 
     void send_minidp_heartbeat() const;
     void send_minidp_text(MAV_SEVERITY severity, const char *text) const;
+    void send_minidp_thruster_status();
 
 protected:
     GCS_MAVLINK_MiniDP *new_gcs_mavlink_backend(AP_HAL::UARTDriver &uart) override

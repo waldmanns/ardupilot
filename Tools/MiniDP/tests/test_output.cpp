@@ -103,6 +103,33 @@ TEST(MiniDPOutput, Frame901OmniPlusMapsMotor1ToMotor4)
     EXPECT_EQ(frame.actuator[3].pwm_us, 1300U);
 }
 
+TEST(MiniDPOutput, Frame901ReportsFourFixedThrusters)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::OMNI_PLUS));
+
+    MiniDP_AxisCommand command{};
+    command.surge = 0.50f;
+    command.sway = -0.25f;
+    command.yaw = 0.25f;
+
+    const MiniDP_OutputFrame &frame =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+
+    ASSERT_EQ(frame.configured_thruster_count, 4U);
+    for (uint8_t i = 0; i < 4U; i++) {
+        const MiniDP_ThrusterOutput &thruster = frame.thruster[i];
+        EXPECT_TRUE(thruster.configured);
+        EXPECT_EQ(thruster.type, MiniDP_ThrusterType::FIXED);
+        EXPECT_EQ(thruster.output1, i);
+        EXPECT_EQ(thruster.output2, UINT8_MAX);
+        EXPECT_FLOAT_EQ(thruster.value, frame.actuator[i].demand);
+        EXPECT_FLOAT_EQ(thruster.value2, 0.0f);
+        EXPECT_EQ(thruster.pwm1_us, frame.actuator[i].pwm_us);
+        EXPECT_EQ(thruster.pwm2_us, 0U);
+    }
+}
+
 TEST(MiniDPOutput, Frame901ScrewPositionAdjustsDifferentialYaw)
 {
     MiniDP_OutputManager output;
@@ -139,6 +166,118 @@ TEST(MiniDPOutput, Frame901ScrewPositionAdjustsDifferentialYaw)
         output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
     EXPECT_FLOAT_EQ(scaled.actuator[0].demand, 0.25f);
     EXPECT_FLOAT_EQ(scaled.actuator[1].demand, -0.25f);
+}
+
+TEST(MiniDPOutput, Frame902DualAzimuthBowMapsMotor1ToMotor5)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+
+    EXPECT_EQ(output.frame_type(), int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+    EXPECT_STREQ(
+        MiniDP_OutputManager::frame_type_name(output.frame_type()),
+        "DUAL_AZ_180_BOW");
+    for (uint8_t i = 0; i < 5; i++) {
+        EXPECT_TRUE(output.actuator_config(i).enabled);
+    }
+    EXPECT_FALSE(output.actuator_config(5).enabled);
+
+    const MiniDP_OutputFrame &safe = output.frame();
+    EXPECT_EQ(safe.configured_thruster_count, 3U);
+    EXPECT_EQ(safe.thruster[0].type, MiniDP_ThrusterType::AZIMUTH_180);
+    EXPECT_EQ(safe.thruster[0].output1, 0U);
+    EXPECT_EQ(safe.thruster[0].output2, 1U);
+    EXPECT_EQ(safe.thruster[1].type, MiniDP_ThrusterType::AZIMUTH_180);
+    EXPECT_EQ(safe.thruster[1].output1, 2U);
+    EXPECT_EQ(safe.thruster[1].output2, 3U);
+    EXPECT_EQ(safe.thruster[2].type, MiniDP_ThrusterType::FIXED);
+    EXPECT_EQ(safe.thruster[2].output1, 4U);
+}
+
+TEST(MiniDPOutput, Frame902ForwardSurgeSplitsAcrossAftPods)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+
+    MiniDP_AxisCommand command{};
+    command.surge = 1.0f;
+
+    const MiniDP_OutputFrame &frame =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+
+    EXPECT_FALSE(frame.saturated);
+    EXPECT_EQ(frame.active_pwm_count, 5U);
+    EXPECT_FLOAT_EQ(frame.actuator[0].demand, 0.5f);
+    EXPECT_FLOAT_EQ(frame.actuator[1].demand, 0.0f);
+    EXPECT_FLOAT_EQ(frame.actuator[2].demand, 0.5f);
+    EXPECT_FLOAT_EQ(frame.actuator[3].demand, 0.0f);
+    EXPECT_FLOAT_EQ(frame.actuator[4].demand, 0.0f);
+    EXPECT_EQ(frame.actuator[0].pwm_us, 1700U);
+    EXPECT_EQ(frame.actuator[1].pwm_us, 1500U);
+    EXPECT_EQ(frame.actuator[2].pwm_us, 1700U);
+    EXPECT_EQ(frame.actuator[3].pwm_us, 1500U);
+    EXPECT_EQ(frame.actuator[4].pwm_us, 1500U);
+
+    EXPECT_FLOAT_EQ(frame.thruster[0].value, 0.5f);
+    EXPECT_FLOAT_EQ(frame.thruster[0].value2, 0.0f);
+    EXPECT_FLOAT_EQ(frame.thruster[0].force_x, 0.5f);
+    EXPECT_FLOAT_EQ(frame.thruster[0].force_y, 0.0f);
+    EXPECT_EQ(frame.thruster[0].pwm1_us, 1700U);
+    EXPECT_EQ(frame.thruster[0].pwm2_us, 1500U);
+}
+
+TEST(MiniDPOutput, Frame902ReverseSurgeFoldsAzimuthAndReversesThrust)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+
+    MiniDP_AxisCommand command{};
+    command.surge = -1.0f;
+
+    const MiniDP_OutputFrame &frame =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+
+    EXPECT_FLOAT_EQ(frame.actuator[0].demand, -0.5f);
+    EXPECT_FLOAT_EQ(frame.actuator[1].demand, 0.0f);
+    EXPECT_FLOAT_EQ(frame.actuator[2].demand, -0.5f);
+    EXPECT_FLOAT_EQ(frame.actuator[3].demand, 0.0f);
+    EXPECT_EQ(frame.actuator[0].pwm_us, 1300U);
+    EXPECT_EQ(frame.actuator[1].pwm_us, 1500U);
+    EXPECT_EQ(frame.actuator[2].pwm_us, 1300U);
+    EXPECT_EQ(frame.actuator[3].pwm_us, 1500U);
+    EXPECT_TRUE(
+        (frame.thruster[0].flags &
+         MiniDP_OutputManager::thruster_flag_reverse_folded) != 0);
+    EXPECT_TRUE(
+        (frame.thruster[1].flags &
+         MiniDP_OutputManager::thruster_flag_reverse_folded) != 0);
+    EXPECT_FLOAT_EQ(frame.thruster[0].value, -0.5f);
+    EXPECT_FLOAT_EQ(frame.thruster[0].value2, 0.0f);
+    EXPECT_FLOAT_EQ(frame.thruster[0].force_x, -0.5f);
+}
+
+TEST(MiniDPOutput, Frame902SwayUsesPodAzimuthAndBowThruster)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+
+    MiniDP_AxisCommand command{};
+    command.sway = 1.0f;
+
+    const MiniDP_OutputFrame &frame =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+
+    EXPECT_FLOAT_EQ(frame.actuator[0].demand, 0.25f);
+    EXPECT_FLOAT_EQ(frame.actuator[2].demand, 0.25f);
+    EXPECT_FLOAT_EQ(frame.actuator[4].demand, 0.5f);
+    EXPECT_EQ(frame.actuator[0].pwm_us, 1600U);
+    EXPECT_EQ(frame.actuator[1].pwm_us, 1900U);
+    EXPECT_EQ(frame.actuator[2].pwm_us, 1600U);
+    EXPECT_EQ(frame.actuator[3].pwm_us, 1900U);
+    EXPECT_EQ(frame.actuator[4].pwm_us, 1700U);
+    EXPECT_NEAR(frame.thruster[0].value2, 1.5707963f, 0.0001f);
+    EXPECT_NEAR(frame.thruster[1].value2, 1.5707963f, 0.0001f);
+    EXPECT_FLOAT_EQ(frame.thruster[2].value, 0.5f);
 }
 
 TEST(MiniDPOutput, SaturationScalesAllActuatorsTogether)

@@ -15,6 +15,11 @@ const AP_Param::Info MiniDP::var_info[] = {
     GSCALAR(log_bitmask, "LOG_BITMASK", -1),
 
     GOBJECT(board_config, "BRD_", AP_BoardConfig),
+#if HAL_CANMANAGER_ENABLED
+    // @Group: CAN_
+    // @Path: ../libraries/AP_CANManager/AP_CANManager.cpp
+    GOBJECT(can_mgr, "CAN_", AP_CANManager),
+#endif
     GOBJECT(serial_manager, "SERIAL", AP_SerialManager),
     GOBJECT(ins, "INS", AP_InertialSensor),
     GOBJECT(compass, "COMPASS_", Compass),
@@ -117,8 +122,8 @@ const AP_Param::Info MiniDP::var_info[] = {
 
     // @Param: FRAME_TYPE
     // @DisplayName: MiniDP frame type
-    // @Description: Selects the MiniDP output mixer frame. Frame 901 is OMNI_PLUS: port and starboard propulsion screws plus bow and stern tunnel thrusters.
-    // @Values: 901:OMNI_PLUS
+    // @Description: Selects the MiniDP output mixer frame. Frame 901 is OMNI_PLUS: port and starboard propulsion screws plus bow and stern tunnel thrusters. Frame 902 is DUAL_AZ_180_BOW: aft port 180-degree azimuth pod on Motor1 thrust and Motor2 azimuth, aft starboard 180-degree azimuth pod on Motor3 thrust and Motor4 azimuth, and bow thruster on Motor5.
+    // @Values: 901:OMNI_PLUS,902:DUAL_AZ_180_BOW
     // @User: Standard
     GSCALAR(frame_type, "FRAME_TYPE", MiniDP_OutputManager::default_frame_type),
 

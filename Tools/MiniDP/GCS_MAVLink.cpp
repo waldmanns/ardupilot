@@ -141,6 +141,16 @@ void GCS_MiniDP::send_minidp_text(MAV_SEVERITY severity, const char *text) const
     }
 }
 
+void GCS_MiniDP::send_minidp_thruster_status()
+{
+    for (uint8_t i = 0; i < num_gcs(); i++) {
+        auto *backend = static_cast<GCS_MAVLINK_MiniDP *>(chan(i));
+        if (backend != nullptr) {
+            backend->send_minidp_thruster_status();
+        }
+    }
+}
+
 void GCS_MAVLINK_MiniDP::send_minidp_firmware_identity() const
 {
     const char *firmware = AP::fwversion().fw_short_string;
@@ -319,6 +329,49 @@ void GCS_MAVLINK_MiniDP::send_minidp_sys_status() const
         0,
         0,
         0);
+}
+
+bool GCS_MAVLINK_MiniDP::send_minidp_thruster_status()
+{
+    const MiniDP_OutputFrame &frame = minidp.get_output_frame();
+
+    for (uint8_t i = 0; i < MiniDP_OutputManager::max_thrusters; i++) {
+        const uint8_t thruster_index =
+            (thruster_status_next + i) % MiniDP_OutputManager::max_thrusters;
+        const MiniDP_ThrusterOutput &thruster = frame.thruster[thruster_index];
+        if (!thruster.configured) {
+            continue;
+        }
+
+        thruster_status_next =
+            (thruster_index + 1U) % MiniDP_OutputManager::max_thrusters;
+
+        CHECK_PAYLOAD_SIZE(MINIDP_THRUSTER_STATUS);
+
+        mavlink_minidp_thruster_status_t packet {};
+        packet.time_boot_ms = AP_HAL::millis();
+        packet.thruster_id = thruster_index + 1U;
+        packet.thruster_type = uint8_t(thruster.type);
+        packet.output_state = uint8_t(frame.state);
+        packet.flags = thruster.flags;
+        packet.force_x = thruster.force_x;
+        packet.force_y = thruster.force_y;
+        packet.value = thruster.value;
+        packet.value2 = thruster.value2;
+        packet.motor1 = thruster.output1 < MiniDP_OutputManager::max_actuators ?
+            thruster.output1 + 1U :
+            0U;
+        packet.motor2 = thruster.output2 < MiniDP_OutputManager::max_actuators ?
+            thruster.output2 + 1U :
+            0U;
+        packet.pwm1 = thruster.pwm1_us;
+        packet.pwm2 = thruster.pwm2_us;
+
+        mavlink_msg_minidp_thruster_status_send_struct(chan, &packet);
+        return true;
+    }
+
+    return true;
 }
 
 bool GCS_MAVLINK_MiniDP::try_send_message(const enum ap_message id)
