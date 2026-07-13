@@ -194,6 +194,51 @@ TEST(MiniDPOutput, Frame902DualAzimuthBowMapsMotor1ToMotor5)
     EXPECT_EQ(safe.thruster[2].output1, 4U);
 }
 
+TEST(MiniDPOutput, Frame902AzipodParametersLimitEachPodIndependently)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+
+    MiniDP_AzipodConfig config{};
+    config.angle_min_rad = -0.7853982f;
+    config.angle_max_rad = 0.7853982f;
+    config.allow_reverse_fold = false;
+    ASSERT_TRUE(output.set_azipod_config(0U, config));
+
+    MiniDP_AxisCommand command{};
+    command.sway = 1.0f;
+    const MiniDP_OutputFrame &frame =
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
+
+    EXPECT_NEAR(frame.thruster[0].value2, 0.7853982f, 0.0001f);
+    EXPECT_TRUE(
+        (frame.thruster[0].flags &
+         MiniDP_OutputManager::thruster_flag_angle_limited) != 0U);
+    EXPECT_NEAR(frame.actuator[1].demand, 0.5f, 0.0001f);
+    EXPECT_NEAR(frame.thruster[1].value2, 1.5707963f, 0.0001f);
+    EXPECT_FALSE(
+        (frame.thruster[1].flags &
+         MiniDP_OutputManager::thruster_flag_angle_limited) != 0U);
+}
+
+TEST(MiniDPOutput, Frame902AzipodSpanIsLimitedTo180Degrees)
+{
+    MiniDP_OutputManager output;
+    output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+
+    MiniDP_AzipodConfig config{};
+    config.angle_min_rad = -3.1415927f;
+    config.angle_max_rad = 3.1415927f;
+    config.allow_reverse_fold = true;
+    ASSERT_TRUE(output.set_azipod_config(0U, config));
+
+    const MiniDP_AzipodConfig &sanitized = output.azipod_config(0U);
+    EXPECT_NEAR(sanitized.angle_min_rad, -1.5707963f, 0.0001f);
+    EXPECT_NEAR(sanitized.angle_max_rad, 1.5707963f, 0.0001f);
+    EXPECT_TRUE(sanitized.allow_reverse_fold);
+    EXPECT_FALSE(output.set_azipod_config(2U, config));
+}
+
 TEST(MiniDPOutput, Frame902ForwardSurgeSplitsAcrossAftPods)
 {
     MiniDP_OutputManager output;

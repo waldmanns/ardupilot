@@ -59,6 +59,12 @@ struct MiniDP_ThrusterConfig {
     bool allow_reverse_fold;
 };
 
+struct MiniDP_AzipodConfig {
+    float angle_min_rad;
+    float angle_max_rad;
+    bool allow_reverse_fold;
+};
+
 struct MiniDP_ActuatorConfig {
     bool enabled;
     uint8_t pwm_channel;
@@ -139,6 +145,7 @@ public:
     void init(int16_t frame_type = default_frame_type);
     bool set_frame_type(int16_t frame_type);
     void set_frame_geometry(const MiniDP_FrameGeometryConfig &new_config);
+    bool set_azipod_config(uint8_t index, const MiniDP_AzipodConfig &config);
 
     const MiniDP_OutputFrame &update(
         MiniDP_OutputState state,
@@ -151,6 +158,7 @@ public:
         const MiniDP_ActuatorConfig &config);
 
     const MiniDP_ActuatorConfig &actuator_config(uint8_t index) const;
+    const MiniDP_AzipodConfig &azipod_config(uint8_t index) const;
     const MiniDP_OutputFrame &frame() const { return output_frame; }
     int16_t frame_type() const { return configured_frame_type; }
 
@@ -165,6 +173,7 @@ public:
 
 private:
     MiniDP_ActuatorConfig configs[max_actuators];
+    MiniDP_AzipodConfig azipod_configs[2];
     MiniDP_ThrusterConfig thruster_configs[max_thrusters];
     MiniDP_OutputFrame output_frame{};
     MiniDP_FrameGeometryConfig frame_geometry{};

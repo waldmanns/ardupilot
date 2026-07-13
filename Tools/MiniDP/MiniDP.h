@@ -60,6 +60,22 @@ private:
     int8_t flight_mode_channel_number() const override { return -1; }
 };
 
+class MiniDP_AzipodParams {
+public:
+    MiniDP_AzipodParams();
+
+    MiniDP_AzipodConfig config(uint8_t index) const;
+
+    static const AP_Param::GroupInfo var_info[];
+
+    AP_Float pod1_angle_min_deg;
+    AP_Float pod1_angle_max_deg;
+    AP_Int8 pod1_reverse_fold;
+    AP_Float pod2_angle_min_deg;
+    AP_Float pod2_angle_max_deg;
+    AP_Int8 pod2_reverse_fold;
+};
+
 class Parameters {
 public:
     enum {
@@ -141,6 +157,7 @@ public:
         k_param_dp_yaw_imax,
         k_param_dp_position_imax,
         k_param_can_mgr,
+        k_param_azipod_params,
     };
 
     AP_Int16 format_version;
@@ -293,6 +310,9 @@ public:
 #if HAL_GCS_ENABLED
     GCS_MiniDP gcs_backend;
 #endif
+    MiniDP_AzipodParams azipod_params_storage;
+    MiniDP_AzipodParams *azipod_params = &azipod_params_storage;
+    const AP_Param::GroupInfo *azipod_var_info = MiniDP_AzipodParams::var_info;
     static const AP_Param::Info var_info[];
 
 private:
@@ -358,6 +378,8 @@ private:
     MiniDP_InputConfig make_input_config() const;
     MiniDP_ModeConfig make_mode_config() const;
     MiniDP_FrameGeometryConfig make_frame_geometry_config() const;
+    void sync_azipod_params();
+    void update_azipod_param_visibility();
     MiniDP_AxisLimiterConfig make_axis_limiter_config() const;
     MiniDP_ControllerConfig make_controller_config() const;
     MiniDP_OutputState desired_output_state() const;

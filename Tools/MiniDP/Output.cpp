@@ -216,9 +216,10 @@ void MiniDP_OutputManager::configure_azimuth_180_thruster(
     thruster.type = MiniDP_ThrusterType::AZIMUTH_180;
     thruster.output1 = thrust_output_index;
     thruster.output2 = azimuth_output_index;
-    thruster.angle_min_rad = -half_pi;
-    thruster.angle_max_rad = half_pi;
-    thruster.allow_reverse_fold = true;
+    thruster.angle_min_rad = azipod_configs[thruster_index].angle_min_rad;
+    thruster.angle_max_rad = azipod_configs[thruster_index].angle_max_rad;
+    thruster.allow_reverse_fold =
+        azipod_configs[thruster_index].allow_reverse_fold;
 }
 
 void MiniDP_OutputManager::configure_omni_plus_frame()
@@ -272,10 +273,49 @@ bool MiniDP_OutputManager::set_frame_type(const int16_t frame_type)
 void MiniDP_OutputManager::init(const int16_t frame_type)
 {
     frame_geometry = default_frame_geometry_config();
+    for (uint8_t i = 0; i < 2U; i++) {
+        azipod_configs[i].angle_min_rad = -half_pi;
+        azipod_configs[i].angle_max_rad = half_pi;
+        azipod_configs[i].allow_reverse_fold = true;
+    }
     if (!set_frame_type(frame_type)) {
         (void)set_frame_type(default_frame_type);
     }
     apply_safe_outputs(MiniDP_OutputState::DISARMED);
+}
+
+bool MiniDP_OutputManager::set_azipod_config(
+    const uint8_t index,
+    const MiniDP_AzipodConfig &config)
+{
+    if (index >= 2U) {
+        return false;
+    }
+
+    MiniDP_AzipodConfig sanitized = config;
+    if (!isfinite(sanitized.angle_min_rad)) {
+        sanitized.angle_min_rad = -half_pi;
+    }
+    if (!isfinite(sanitized.angle_max_rad)) {
+        sanitized.angle_max_rad = half_pi;
+    }
+    sanitized.angle_min_rad = constrain_angle(sanitized.angle_min_rad, -pi, 0.0f);
+    sanitized.angle_max_rad = constrain_angle(sanitized.angle_max_rad, 0.0f, pi);
+    if (sanitized.angle_max_rad - sanitized.angle_min_rad > pi) {
+        const float center =
+            0.5f * (sanitized.angle_min_rad + sanitized.angle_max_rad);
+        sanitized.angle_min_rad = center - half_pi;
+        sanitized.angle_max_rad = center + half_pi;
+    }
+    azipod_configs[index] = sanitized;
+
+    if (configured_frame_type == int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW)) {
+        MiniDP_ThrusterConfig &thruster = thruster_configs[index];
+        thruster.angle_min_rad = sanitized.angle_min_rad;
+        thruster.angle_max_rad = sanitized.angle_max_rad;
+        thruster.allow_reverse_fold = sanitized.allow_reverse_fold;
+    }
+    return true;
 }
 
 void MiniDP_OutputManager::set_frame_geometry(
@@ -344,6 +384,12 @@ const MiniDP_ActuatorConfig &MiniDP_OutputManager::actuator_config(
     const uint8_t index) const
 {
     return configs[index < max_actuators ? index : 0U];
+}
+
+const MiniDP_AzipodConfig &MiniDP_OutputManager::azipod_config(
+    const uint8_t index) const
+{
+    return azipod_configs[index < 2U ? index : 0U];
 }
 
 void MiniDP_OutputManager::initialise_output_frame(

@@ -247,6 +247,7 @@ void MiniDP::load_parameters()
     }
     g.format_version.set_default(k_format_version);
     AP_Param::load_all();
+    update_azipod_param_visibility();
 }
 
 MiniDP_ArmingConfig MiniDP::make_arming_config() const
@@ -317,6 +318,25 @@ MiniDP_FrameGeometryConfig MiniDP::make_frame_geometry_config() const
     }
     config.screw_yaw_scale = g.frame_screw_yaw_scale.get();
     return config;
+}
+
+void MiniDP::update_azipod_param_visibility()
+{
+    const AP_Param::GroupInfo *wanted_var_info =
+        g.frame_type.get() == int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW) ?
+        MiniDP_AzipodParams::var_info :
+        nullptr;
+    if (azipod_var_info != wanted_var_info) {
+        azipod_var_info = wanted_var_info;
+        AP_Param::invalidate_count();
+    }
+}
+
+void MiniDP::sync_azipod_params()
+{
+    for (uint8_t i = 0; i < 2U; i++) {
+        (void)output_manager.set_azipod_config(i, azipod_params_storage.config(i));
+    }
 }
 
 MiniDP_ModeConfig MiniDP::make_mode_config() const
@@ -432,7 +452,9 @@ void MiniDP::sync_frame_config_from_params()
                 MiniDP_OutputManager::default_frame_type);
         }
     }
+    update_azipod_param_visibility();
     output_manager.set_frame_geometry(make_frame_geometry_config());
+    sync_azipod_params();
 }
 
 void MiniDP::sync_output_config_from_servo_params()

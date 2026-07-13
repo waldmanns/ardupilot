@@ -1,5 +1,81 @@
 #include "MiniDP.h"
 
+#include <AP_Math/AP_Math.h>
+
+MiniDP_AzipodParams::MiniDP_AzipodParams()
+{
+    AP_Param::setup_object_defaults(this, var_info);
+}
+
+MiniDP_AzipodConfig MiniDP_AzipodParams::config(const uint8_t index) const
+{
+    MiniDP_AzipodConfig output{};
+    if (index == 0U) {
+        output.angle_min_rad = radians(pod1_angle_min_deg.get());
+        output.angle_max_rad = radians(pod1_angle_max_deg.get());
+        output.allow_reverse_fold = pod1_reverse_fold.get() != 0;
+    } else {
+        output.angle_min_rad = radians(pod2_angle_min_deg.get());
+        output.angle_max_rad = radians(pod2_angle_max_deg.get());
+        output.allow_reverse_fold = pod2_reverse_fold.get() != 0;
+    }
+    return output;
+}
+
+const AP_Param::GroupInfo MiniDP_AzipodParams::var_info[] = {
+    // @Param: 1_ANG_MIN
+    // @DisplayName: Azipod 1 minimum angle
+    // @Description: Minimum commanded angle for the Motor1/Motor2 azipod, measured from body forward. Positive angles point toward starboard. The combined minimum-to-maximum span is limited to 180 degrees.
+    // @Units: deg
+    // @Range: -180 0
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("1_ANG_MIN", 1, MiniDP_AzipodParams, pod1_angle_min_deg, -90.0f),
+
+    // @Param: 1_ANG_MAX
+    // @DisplayName: Azipod 1 maximum angle
+    // @Description: Maximum commanded angle for the Motor1/Motor2 azipod, measured from body forward. Positive angles point toward starboard. The combined minimum-to-maximum span is limited to 180 degrees.
+    // @Units: deg
+    // @Range: 0 180
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("1_ANG_MAX", 2, MiniDP_AzipodParams, pod1_angle_max_deg, 90.0f),
+
+    // @Param: 1_REV_FOLD
+    // @DisplayName: Azipod 1 reverse folding
+    // @Description: Allows directions outside azipod travel to be produced by rotating the command 180 degrees and reversing Motor1 thrust. This requires a bidirectional thruster motor.
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Standard
+    AP_GROUPINFO("1_REV_FOLD", 3, MiniDP_AzipodParams, pod1_reverse_fold, 1),
+
+    // @Param: 2_ANG_MIN
+    // @DisplayName: Azipod 2 minimum angle
+    // @Description: Minimum commanded angle for the Motor3/Motor4 azipod, measured from body forward. Positive angles point toward starboard. The combined minimum-to-maximum span is limited to 180 degrees.
+    // @Units: deg
+    // @Range: -180 0
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("2_ANG_MIN", 4, MiniDP_AzipodParams, pod2_angle_min_deg, -90.0f),
+
+    // @Param: 2_ANG_MAX
+    // @DisplayName: Azipod 2 maximum angle
+    // @Description: Maximum commanded angle for the Motor3/Motor4 azipod, measured from body forward. Positive angles point toward starboard. The combined minimum-to-maximum span is limited to 180 degrees.
+    // @Units: deg
+    // @Range: 0 180
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("2_ANG_MAX", 5, MiniDP_AzipodParams, pod2_angle_max_deg, 90.0f),
+
+    // @Param: 2_REV_FOLD
+    // @DisplayName: Azipod 2 reverse folding
+    // @Description: Allows directions outside azipod travel to be produced by rotating the command 180 degrees and reversing Motor3 thrust. This requires a bidirectional thruster motor.
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Standard
+    AP_GROUPINFO("2_REV_FOLD", 6, MiniDP_AzipodParams, pod2_reverse_fold, 1),
+
+    AP_GROUPEND
+};
+
 const AP_Param::Info MiniDP::var_info[] = {
     // @Param: FORMAT_VERSION
     // @DisplayName: MiniDP parameter storage format
@@ -124,8 +200,13 @@ const AP_Param::Info MiniDP::var_info[] = {
     // @DisplayName: MiniDP frame type
     // @Description: Selects the MiniDP output mixer frame. Frame 901 is OMNI_PLUS: port and starboard propulsion screws plus bow and stern tunnel thrusters. Frame 902 is DUAL_AZ_180_BOW: aft port 180-degree azimuth pod on Motor1 thrust and Motor2 azimuth, aft starboard 180-degree azimuth pod on Motor3 thrust and Motor4 azimuth, and bow thruster on Motor5.
     // @Values: 901:OMNI_PLUS,902:DUAL_AZ_180_BOW
+    // @RebootRequired: True
     // @User: Standard
     GSCALAR(frame_type, "FRAME_TYPE", MiniDP_OutputManager::default_frame_type),
+
+    // @Group: AZI
+    // @Path: Parameters.cpp
+    GOBJECTVARPTR(azipod_params, "AZI", &minidp.azipod_var_info),
 
     // @Param: FRAME_SCR_POS
     // @DisplayName: Propulsion screw position
