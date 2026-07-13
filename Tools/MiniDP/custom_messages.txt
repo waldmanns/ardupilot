@@ -1,0 +1,16 @@
+<message id="11061" name="MINIDP_THRUSTER_STATUS">
+      <description>Status for one MiniDP logical thruster and its associated MotorN physical outputs.</description>
+      <field type="uint32_t" name="time_boot_ms" units="ms">Timestamp (time since system boot).</field>
+      <field type="uint8_t" name="thruster_id" instance="true">One-based logical thruster number.</field>
+      <field type="uint8_t" name="thruster_type" enum="MINIDP_THRUSTER_TYPE">Logical thruster type.</field>
+      <field type="uint8_t" name="output_state">MiniDP output state.</field>
+      <field type="uint16_t" name="flags" enum="MINIDP_THRUSTER_FLAGS">Thruster status flags.</field>
+      <field type="float" name="force_x">Normalized body-frame force command in the forward axis.</field>
+      <field type="float" name="force_y">Normalized body-frame force command in the right axis.</field>
+      <field type="float" name="value">Primary normalized thruster value. For fixed and azimuth thrusters this is thrust; for Voith this is the first control axis.</field>
+      <field type="float" name="value2">Secondary thruster value. For azimuth thrusters this is azimuth angle in radians; for Voith this is the second control axis. Zero if unused.</field>
+      <field type="uint8_t" name="motor1">One-based MotorN function used by the primary output, or 0 if unused.</field>
+      <field type="uint8_t" name="motor2">One-based MotorN function used by the secondary output, or 0 if unused.</field>
+      <field type="uint16_t" name="pwm1" units="us">Primary output PWM in microseconds, or 0 if inactive.</field>
+      <field type="uint16_t" name="pwm2" units="us">Secondary output PWM in microseconds, or 0 if inactive.</field>
+    </message>
