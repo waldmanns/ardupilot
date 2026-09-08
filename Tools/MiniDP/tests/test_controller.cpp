@@ -311,4 +311,89 @@ TEST(MiniDPController, SanitizesInvalidConfig)
     EXPECT_FLOAT_EQ(controller.config().yaw_i_limit, 0.0f);
 }
 
+
+TEST(MiniDPController, HugeFiniteYawReturnsBoundedCommand)
+{
+    MiniDP_Controller controller;
+    controller.init();
+    auto config = controller.config();
+    config.yaw_p = 1;
+    controller.set_config(config);
+    auto target = valid_target();
+    target.yaw_rad = 1.0e20f;
+    auto command = controller.update(MiniDP_Mode::HEADING_HOLD, target, valid_state());
+    EXPECT_TRUE(isfinite(command.yaw));
+    EXPECT_LE(fabsf(command.yaw), config.yaw_limit);
+}
+
+TEST(MiniDPController, DisablingIntegralGainsClearsAccumulatedThrust)
+{
+    MiniDP_Controller controller;
+    controller.init();
+    auto config = controller.config();
+    config.position_i = config.yaw_i = 0.1f;
+    controller.set_config(config);
+    auto state = valid_state();
+    auto target = valid_target();
+    target.pos_n_m = 2;
+    target.yaw_rad = 1;
+    controller.update(MiniDP_Mode::DP_HOLD, target, state);
+    state.time_us += 1000000;
+    auto command = controller.update(MiniDP_Mode::DP_HOLD, target, state);
+    EXPECT_GT(command.surge, 0);
+    EXPECT_GT(command.yaw, 0);
+    config.position_i = config.yaw_i = 0;
+    controller.set_config(config);
+    state.time_us += 1000000;
+    command = controller.update(MiniDP_Mode::DP_HOLD, target, state);
+    EXPECT_FLOAT_EQ(command.surge, 0);
+    EXPECT_FLOAT_EQ(command.yaw, 0);
+}
+
+TEST(MiniDPController, SaturatedAxesDoNotAccumulateHiddenIntegral)
+{
+    MiniDP_Controller controller;
+    controller.init();
+    auto config = controller.config();
+    config.position_p = config.yaw_p = 1;
+    config.position_i = config.yaw_i = 0.1f;
+    controller.set_config(config);
+    auto state = valid_state();
+    auto target = valid_target();
+    target.pos_n_m = 2;
+    target.yaw_rad = 1;
+    for (unsigned i = 0; i < 100; i++) {
+        state.time_us += 100000;
+        controller.update(MiniDP_Mode::DP_HOLD, target, state);
+    }
+    state.pos_n_m = target.pos_n_m;
+    state.yaw_rad = target.yaw_rad;
+    state.time_us += 100000;
+    auto command = controller.update(MiniDP_Mode::DP_HOLD, target, state);
+    EXPECT_FLOAT_EQ(command.surge, 0);
+    EXPECT_FLOAT_EQ(command.sway, 0);
+    EXPECT_FLOAT_EQ(command.yaw, 0);
+}
+
+TEST(MiniDPController, DownstreamLimitsFreezeIntegrationAndAllowUnwind)
+{
+    MiniDP_Controller controller;
+    controller.init();
+    auto config = controller.config();
+    config.yaw_i = 0.1f;
+    controller.set_config(config);
+    auto state = valid_state();
+    auto target = valid_target();
+    target.yaw_rad = 1;
+    controller.update(MiniDP_Mode::HEADING_HOLD, target, state);
+    state.time_us += 1000000;
+    EXPECT_NEAR(controller.update(MiniDP_Mode::HEADING_HOLD, target, state).yaw, 0.1f, 1e-6f);
+    controller.set_output_limited(true);
+    state.time_us += 1000000;
+    EXPECT_NEAR(controller.update(MiniDP_Mode::HEADING_HOLD, target, state).yaw, 0.1f, 1e-6f);
+    state.yaw_rad = 2;
+    state.time_us += 1000000;
+    EXPECT_NEAR(controller.update(MiniDP_Mode::HEADING_HOLD, target, state).yaw, 0, 1e-6f);
+}
+
 AP_GTEST_MAIN()

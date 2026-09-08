@@ -1,4 +1,5 @@
 #include "Mode.h"
+#include "ControlMath.h"
 
 #include <math.h>
 
@@ -89,6 +90,8 @@ const char *MiniDP_ModeManager::reject_name(const MiniDP_ModeReject rejection)
         return "failsafe-latched";
     case MiniDP_ModeReject::UNSUPPORTED_MODE:
         return "unsupported-mode";
+    case MiniDP_ModeReject::OUTPUT_UNAVAILABLE:
+        return "output-unavailable";
     case MiniDP_ModeReject::TARGET_INVALID:
         return "target-invalid";
     }
@@ -139,7 +142,7 @@ MiniDP_ModeReject MiniDP_ModeManager::entry_rejection(
         return MiniDP_ModeReject::NONE;
 
     case MiniDP_Mode::HEADING_HOLD:
-        return state.yaw_valid ?
+        return state.yaw_valid && isfinite(state.yaw_rad) && isfinite(state.yaw_rate_rad_s) ?
             MiniDP_ModeReject::NONE :
             MiniDP_ModeReject::YAW_INVALID;
 
@@ -147,16 +150,16 @@ MiniDP_ModeReject MiniDP_ModeManager::entry_rejection(
         if (!state.ekf_healthy) {
             return MiniDP_ModeReject::EKF_UNHEALTHY;
         }
-        if (!state.yaw_valid) {
+        if (!state.yaw_valid || !isfinite(state.yaw_rad) || !isfinite(state.yaw_rate_rad_s)) {
             return MiniDP_ModeReject::YAW_INVALID;
         }
         if (!state.origin_valid) {
             return MiniDP_ModeReject::ORIGIN_INVALID;
         }
-        if (!state.position_valid) {
+        if (!state.position_valid || !isfinite(state.pos_n_m) || !isfinite(state.pos_e_m)) {
             return MiniDP_ModeReject::POSITION_INVALID;
         }
-        if (!state.velocity_valid) {
+        if (!state.velocity_valid || !isfinite(state.vel_n_m_s) || !isfinite(state.vel_e_m_s)) {
             return MiniDP_ModeReject::VELOCITY_INVALID;
         }
         return gps_quality_rejection(state);
@@ -217,6 +220,7 @@ void MiniDP_ModeManager::transition_to_dp_target(
     const MiniDP_Mode previous = current_mode;
     current_mode = MiniDP_Mode::DP_HOLD;
     current_target = target;
+    current_target.yaw_rad = MiniDP_Math::wrap_pi(target.yaw_rad);
     current_target.position_valid = true;
     current_target.yaw_valid = true;
     current_target.origin_id = state.origin_id;
@@ -306,6 +310,15 @@ MiniDP_ModeRequestResult MiniDP_ModeManager::request_dp_target(
         return {false, false, MiniDP_ModeReject::TARGET_INVALID};
     }
 
+    if (current_mode == MiniDP_Mode::DP_HOLD &&
+        current_target.origin_id == target.origin_id &&
+        current_target.reset_counter == target.reset_counter &&
+        fabsf(current_target.pos_n_m - target.pos_n_m) < 1.0e-4f &&
+        fabsf(current_target.pos_e_m - target.pos_e_m) < 1.0e-4f &&
+        fabsf(MiniDP_Math::wrap_pi(current_target.yaw_rad -
+              MiniDP_Math::wrap_pi(target.yaw_rad))) < 1.0e-6f) {
+        return {true, false, MiniDP_ModeReject::NONE};
+    }
     transition_to_dp_target(target, reason, state);
     return {true, true, MiniDP_ModeReject::NONE};
 }
@@ -332,7 +345,7 @@ void MiniDP_ModeManager::update(const MiniDP_State &state)
         return;
 
     case MiniDP_Mode::HEADING_HOLD:
-        if (!state.yaw_valid) {
+        if (!state.yaw_valid || !isfinite(state.yaw_rad) || !isfinite(state.yaw_rate_rad_s)) {
             transition_to(
                 MiniDP_Mode::FAILSAFE,
                 MiniDP_ModeReason::FAILSAFE_TRIGGERED,
@@ -346,7 +359,7 @@ void MiniDP_ModeManager::update(const MiniDP_State &state)
         return;
 
     case MiniDP_Mode::DP_HOLD:
-        if (!state.yaw_valid) {
+        if (!state.yaw_valid || !isfinite(state.yaw_rad) || !isfinite(state.yaw_rate_rad_s)) {
             transition_to(
                 MiniDP_Mode::FAILSAFE,
                 MiniDP_ModeReason::FAILSAFE_TRIGGERED,

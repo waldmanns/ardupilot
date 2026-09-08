@@ -28,7 +28,8 @@ MiniDP has these modes:
 
 `HEADING_HOLD` and `DP_HOLD` are requested through MAVLink mode commands. RC or
 MAVLink manual input can take the vessel back to `MANUAL` when manual authority
-is enabled and accepted.
+is enabled and accepted. Centered inputs do not cancel target modes; takeover
+requires stick deflection beyond the configured deadband and authority policy.
 
 ## Arming
 
@@ -65,7 +66,15 @@ MiniDP also accepts MAVLink target updates as new DP hold points when
 "go here" / guided reposition commands set the clicked latitude/longitude as
 the new `DP_HOLD` point. `SET_POSITION_TARGET_GLOBAL_INT` does the same for a
 global target, while `SET_POSITION_TARGET_LOCAL_NED` can set an EKF-origin
-local target or nudge the current target with local/body offset frames. If the
+local target. `LOCAL_NED` and `BODY_NED` positions are absolute relative to
+the EKF origin. `LOCAL_OFFSET_NED` offsets the current vessel position in NE;
+`BODY_OFFSET_NED` offsets the current position along forward/starboard axes
+and interprets yaw relative to current heading. Offset commands are relative
+to the vessel at receipt, so repeatedly sending an offset moves the target.
+Velocity, acceleration and yaw-rate control are unsupported: set their ignore
+bits. Z/altitude is unused on this surface vessel. Identical absolute targets
+preserve their identity and integral state. Invalid requests leave mode and
+control ownership unchanged. If the
 incoming command does not include yaw, MiniDP keeps the existing DP yaw target
 when possible, otherwise it latches the current yaw.
 
@@ -91,37 +100,86 @@ command is rotated into the body frame so it becomes surge and sway, then
 and `DP_YAW_MAX` limit the controller output before the normal `AXIS_*` limits,
 frame mixer, motor scaling, and `SERVOx_*` PWM mapping run. Integral state is
 cleared when the mode or target changes, when required state becomes invalid, or
-when controller output is not active.
+when controller output is not active. Setting an I gain to zero also clears
+that integral. Controller saturation, axis limiting, unavailable motor mappings,
+and steering/allocator limits inhibit further windup while allowing unwinding.
 
 ## Output Frame
 
-`FRAME_TYPE=901` is the current default and only implemented frame. It is named
-`OMNI_PLUS` and maps four actuators in clean ArduPilot motor order:
+`FRAME_TYPE` is selected at boot. Changing it requires reboot; unknown values
+inhibit managed outputs. Both implemented frames assume bidirectional thrust,
+with forward surge, starboard sway, and clockwise yaw positive.
 
-| Motor | Default output | Physical actuator | Mix contribution |
-| --- | --- | --- | --- |
-| `Motor1` | `SERVO1_FUNCTION=33` | Port propulsion screw | Surge + yaw |
-| `Motor2` | `SERVO2_FUNCTION=34` | Starboard propulsion screw | Surge - yaw |
-| `Motor3` | `SERVO3_FUNCTION=35` | Bow tunnel thruster | Sway + yaw |
-| `Motor4` | `SERVO4_FUNCTION=36` | Stern tunnel thruster | Sway - yaw |
+`901` (`OMNI_PLUS`, the default):
 
-`FRAME_SCR_POS` configures where the Motor1/Motor2 propulsion screws sit
-relative to the vessel yaw center. `-1` is aft and preserves the default
-`Surge +/- yaw` differential mix, `0` removes screw yaw contribution, and `1`
-flips the screw yaw sign for forward-mounted screws. `FRAME_SCR_YAW` scales
-only the Motor1/Motor2 yaw contribution.
+| Motor | Default function/output | Physical actuator |
+| --- | --- | --- |
+| Motor1 | `SERVO1_FUNCTION=33` | Port propulsion screw |
+| Motor2 | `SERVO2_FUNCTION=34` | Starboard propulsion screw |
+| Motor3 | `SERVO3_FUNCTION=35` | Bow tunnel thruster |
+| Motor4 | `SERVO4_FUNCTION=36` | Stern tunnel thruster |
 
-Motor outputs use the standard `SERVOx_MIN`, `SERVOx_TRIM`, `SERVOx_MAX`, and
-`SERVOx_REVERSED` parameters from whichever output channel is assigned to that
-motor function. Mission Planner should show the motor channels as normal servo
-outputs because they are ordinary ArduPilot `Motor1` through `Motor4`
-functions.
+Differential screw yaw depends on port/starboard placement, regardless of
+whether the screws are forward or aft. `FRAME_SCR_POS` is a retained legacy
+annotation; it no longer changes yaw. `FRAME_SCR_YAW=0` disables screw yaw.
+`FRAME_HALF_SPAN` is each screw's lateral distance from the vessel center.
+`FRAME_BOW_ARM` and `FRAME_AFT_ARM` are positive longitudinal distances from
+the yaw center to the bow and stern tunnel thrusters, in metres.
 
-Unused outputs may still use normal ArduPilot servo functions. For example,
-`SERVO5_FUNCTION=51` passes through `RCIN1`, and `SERVO5_FUNCTION=140` uses the
-scaled `RCIN1Scaled` function. MiniDP temporarily masks its managed motor
-channels while allowing other valid `SERVOx_FUNCTION` outputs to run through the
-standard SRV channel code.
+With unit arms/span and `FRAME_SCR_YAW=1`, demands retain the original
+`surge+yaw`, `surge-yaw`, `sway+yaw`, `sway-yaw` convention. Before saturation,
+this corresponds to net surge `2*surge`, sway `2*sway`, and moment
+`(2+2*FRAME_SCR_YAW)*yaw` in normalized thrust/lever-arm units. Unequal tunnel
+arms are compensated so pure sway produces no yaw moment.
+
+`902` (`DUAL_AZ_180_BOW`):
+
+| Motor | Default function/output | Physical actuator |
+| --- | --- | --- |
+| Motor1 | `SERVO1_FUNCTION=33` | Aft port pod thrust |
+| Motor2 | `SERVO2_FUNCTION=34` | Aft port pod steering |
+| Motor3 | `SERVO3_FUNCTION=35` | Aft starboard pod thrust |
+| Motor4 | `SERVO4_FUNCTION=36` | Aft starboard pod steering |
+| Motor5 | `SERVO5_FUNCTION=37` | Bow tunnel thruster |
+
+Both pods must be at the same aft distance (`FRAME_AFT_ARM`) and symmetrically
+placed. `FRAME_BOW_ARM` is the bow thruster distance. The allocation solves
+net forward/lateral force and yaw moment; pure yaw produces opposing aft and
+bow lateral forces with zero net sway. Frame 902 axes represent net normalized
+force and moment directly, so gains are not interchangeable with frame 901.
+
+`AZI1_ANG_MIN/MAX` and `AZI2_ANG_MIN/MAX` define physical steering limits
+about forward (degrees, total travel at most 180 degrees). `AZI1_REV_FOLD` and
+`AZI2_REV_FOLD` allow reverse thrust to produce otherwise inaccessible
+vectors. Infeasible vectors are projected onto a feasible direction and
+reported as saturated. `AZIRATE` (default 90 degrees/second) must be set no
+faster than either real servo can travel under load. All three thrust outputs
+stay neutral while either pod is steering. After boot, disabled steering PWM,
+or an actuator test, a full travel-time settling period precedes thrust.
+Neutral output holds the last steering angle; an explicit failsafe-PWM action
+still uses `OUT_FS_PWM`. Steering angle is an estimate from commands and rate,
+not measured position feedback; a stalled servo cannot be detected by this model.
+
+Motor outputs use `SERVOx_MIN/TRIM/MAX/REVERSED` on the physical channel
+assigned to that motor function. Reassignments are applied together so swapped
+functions keep the destination channel's calibration. Assign each motor
+function once; duplicated functions share one logical PWM command/calibration.
+Normal propulsion requires every motor/steering function for the selected
+frame to be assigned; removing one inhibits propulsion. Individual actuator
+tests can still check assigned outputs. Changing mappings, steering calibration,
+or geometry requires rechecking the
+physical force directions before enabling hold.
+
+Other physical outputs can use `RCIN1..16` (`51..66`) or
+`RCIN1Scaled..16Scaled` (`140..155`). For example, `SERVO8_FUNCTION=51`
+passes RC1 PWM to output 8. Raw RCIN copies input PWM; scaled RCIN applies RC
+calibration and that output's range/reversal. These auxiliary outputs do not
+require `MAN_ENABLE` or MiniDP arming, but board safety and output protocol
+still apply. MiniDP initializes board safety, including `BRD_SAFETY_DEFLT=0`;
+otherwise release the hardware safety switch or configure the appropriate
+`BRD_SAFETY_MASK`. The output must support PWM, and the servo needs its normal
+power supply. Check RC calibration input and `SERVO_OUTPUT_RAW` to distinguish
+input/mapping problems from physical output problems.
 
 ## Controller Path
 
@@ -162,9 +220,9 @@ changes or controller output is no longer active.
    MAVLink ground station.
 2. Confirm the firmware reports as MiniDP. The MAVLink vehicle type is still a
    surface boat for compatibility.
-3. Check `FRAME_TYPE=901`.
-4. Confirm `SERVO1_FUNCTION` through `SERVO4_FUNCTION` are `Motor1` through
-   `Motor4`, or assign them to the physical output channels you need.
+3. Select `FRAME_TYPE=901` or `902` and reboot; set measured lever arms.
+4. Assign the four (901) or five (902) motor functions using the table above.
+   For frame 902, calibrate steering endpoints, reversal and `AZIRATE`.
 5. Check motor direction with `MAV_CMD_DO_MOTOR_TEST` after setting
    `AUTH_TEST=1`.
 6. Choose arming policy with `ARM_GPS_REQ`: `0` for no-GPS arming, `1` for GPS
@@ -375,9 +433,16 @@ running.
 
 | Parameter | Default | Use |
 | --- | ---: | --- |
-| `FRAME_TYPE` | `901` | Output/mixer frame. `901` is `OMNI_PLUS`. Unknown values fall back to `901`. |
-| `FRAME_SCR_POS` | `-1` | Propulsion screw position for frame 901 yaw geometry: `-1` aft, `0` centered/no screw yaw, `1` forward. |
+| `FRAME_TYPE` | `901` | Boot-selected frame: `901` OMNI_PLUS, `902` DUAL_AZ_180_BOW. Reboot required; unknown values inhibit outputs. |
+| `FRAME_SCR_POS` | `-1` | Legacy mounting annotation; no effect on yaw allocation. |
 | `FRAME_SCR_YAW` | `1.0` | Motor1/Motor2 differential yaw scale for frame 901. Runtime clamp is `0..2`. |
+| `FRAME_AFT_ARM` | `1.0` | Aft pod or stern tunnel longitudinal arm in metres; clamp `0.05..100`. |
+| `FRAME_BOW_ARM` | `1.0` | Bow tunnel longitudinal arm in metres; clamp `0.05..100`. |
+| `FRAME_HALF_SPAN` | `1.0` | Frame 901 screw lateral half-span in metres; clamp `0.05..100`. |
+| `AZI1_ANG_MIN`, `AZI2_ANG_MIN` | `-90` | Minimum physical pod steering angle in degrees. |
+| `AZI1_ANG_MAX`, `AZI2_ANG_MAX` | `90` | Maximum physical pod steering angle in degrees; combined span at most 180. |
+| `AZI1_REV_FOLD`, `AZI2_REV_FOLD` | `1` | Allow reverse thrust when allocating pod vectors. |
+| `AZIRATE` | `90` | Conservative pod steering rate in degrees/second (frame 902). |
 | `IN_RC_SURGE` | `2` | 1-based RC channel for manual surge. `0` disables the axis. |
 | `IN_RC_SWAY` | `1` | 1-based RC channel for manual sway. `0` disables the axis. |
 | `IN_RC_YAW` | `4` | 1-based RC channel for manual yaw. `0` disables the axis. |
@@ -432,12 +497,21 @@ running.
 | `DP_HACC_MAX` | `10.0` | Maximum GPS horizontal accuracy in meters for DP hold. `0` disables this check. |
 | `DP_SACC_MAX` | `2.0` | Maximum GPS speed accuracy in m/s for DP hold. `0` disables this check. |
 
+Failsafe recovery is deliberate: remove the kill/fault condition, disarm, then
+request `MANUAL` (custom mode 0). Re-arm separately. With `ARMING_REQUIRE=0`,
+set it to 1 before recovery so clearing failsafe cannot immediately enable
+thrust. Active battery or kill faults prevent clearing.
+
 ## Compile-Time Options
 
 `MINIDP_BARO_ENABLED` defaults to `0` in `Config.h`. With the default build,
 MiniDP keeps the shared ArduPilot barometer singleton present but does not
 register `BARO*` parameters, initialize baro hardware, calibrate the barometer,
-or update it in the main loop. Build with `MINIDP_BARO_ENABLED=1` only if a
+or update it in the main loop. No barometer is required. The no-baro build
+uses GPS height for `EK3_SRC1/2/3_POSZ=3` and `EK2_ALT_SOURCE=2`, migrating
+incompatible inherited barometer selections at startup while preserving other
+non-barometer selections. The EKF still estimates in three dimensions even
+though the controller uses only horizontal position and yaw. Build with `MINIDP_BARO_ENABLED=1` only if a
 future MiniDP configuration intentionally needs barometer data.
 
 ## Ground Station Notes
@@ -473,7 +547,7 @@ Mission Planner board reboot and reboot-to-bootloader actions. The shared
 ArduPilot reboot handler rejects reboot while soft-armed unless the command uses
 the standard force value.
 
-Use Mission Planner's servo output view to verify `Motor1` through `Motor4`.
+Use Mission Planner's servo output view to verify the selected frame's motor functions.
 For passthrough outputs, assign an unused output to `RCIN1` through `RCIN16`
 (`SERVOx_FUNCTION=51..66`) or `RCIN1Scaled` through `RCIN16Scaled`
 (`SERVOx_FUNCTION=140..155`).
@@ -490,7 +564,7 @@ enabled; `GPA.RTCMFU` and `GPA.RTCMFD` show RTCM fragments used and discarded.
 | --- | --- |
 | `MDTG` | DP target/state trace: mode, target id, validity flags, target yaw, current yaw, NE position error, NE velocity, GPS horizontal accuracy, and GPS speed accuracy. |
 | `MDAX` | Axis trace: mode, control owner, output state, raw surge/sway/yaw command, and post-limiter surge/sway/yaw command. |
-| `MDOT` | Output trace: output state, mixer saturation flag, Motor1 through Motor4 normalized demand, Motor1 through Motor4 PWM, and active PWM count. |
+| `MDOT` | Output trace: output state, mixer saturation flag, Motor1 through Motor6 normalized demand, Motor1 through Motor6 PWM, and active PWM count. |
 | `MDST` | MiniDP status trace: armed/soft-armed state, arming requirements, last arm rejection, mode, owner, output state, link/kill status, GPS fix, and satellite count. |
 
 `MDTG.Flags` bits are: bit 0 target yaw valid, bit 1 target position valid,
@@ -505,7 +579,7 @@ Typical local checks:
 ./waf configure --board revo-mini
 ./waf --targets bin/MiniDP
 ./waf configure --board sitl
-./waf --targets tests/test_minidp_mode,tests/test_minidp_authority,tests/test_minidp_input,tests/test_minidp_axis_limiter,tests/test_minidp_controller,tests/test_minidp_output,tests/test_minidp_actuator_test,tests/test_minidp_arming,bin/MiniDP
+./waf --targets tests/test_minidp_mode,tests/test_minidp_authority,tests/test_minidp_input,tests/test_minidp_axis_limiter,tests/test_minidp_controller,tests/test_minidp_output,tests/test_minidp_actuator_test,tests/test_minidp_arming,tests/test_minidp_dynamics,bin/MiniDP
 build/sitl/tests/test_minidp_mode
 build/sitl/tests/test_minidp_authority
 build/sitl/tests/test_minidp_input
@@ -514,8 +588,18 @@ build/sitl/tests/test_minidp_controller
 build/sitl/tests/test_minidp_output
 build/sitl/tests/test_minidp_actuator_test
 build/sitl/tests/test_minidp_arming
-./waf configure --board revo-mini
+build/sitl/tests/test_minidp_dynamics
+python3 Tools/MiniDP/tests/test_sitl.py
 ```
+
+The SITL script requires `pymavlink` and local TCP access, uses a temporary
+parameter store, and prints its artifact directory. It checks transport,
+parameters, RCIN, mode/target transactions, motor tests and failsafe recovery.
+The C++ dynamics tests use allocated forces in a planar model with drag and
+steady disturbances. They establish control regression coverage, not physical
+hull tuning or servo performance. The stock Rover SITL model does not represent
+MiniDP thruster geometry. The custom MiniDP-F405 board definition remains a
+placeholder pending the actual schematic; use an existing matching board.
 
 When adding new MiniDP parameters or behavior, update this file in the same
 change.

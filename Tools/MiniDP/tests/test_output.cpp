@@ -1,6 +1,15 @@
 #include <AP_gtest.h>
 
 #include "Output.h"
+#include <math.h>
+
+static void settle_steering(MiniDP_OutputManager &output)
+{
+    for (unsigned i = 0; i < 3; i++) {
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, {}, 1.0f);
+    }
+}
+
 
 TEST(MiniDPOutput, DefaultsStartElectricallyQuiet)
 {
@@ -130,7 +139,7 @@ TEST(MiniDPOutput, Frame901ReportsFourFixedThrusters)
     }
 }
 
-TEST(MiniDPOutput, Frame901ScrewPositionAdjustsDifferentialYaw)
+TEST(MiniDPOutput, Frame901YawSignDependsOnSideNotLongitudinalPosition)
 {
     MiniDP_OutputManager output;
     output.init(int16_t(MiniDP_FrameType::OMNI_PLUS));
@@ -149,15 +158,15 @@ TEST(MiniDPOutput, Frame901ScrewPositionAdjustsDifferentialYaw)
     output.set_frame_geometry(geometry);
     const MiniDP_OutputFrame &forward =
         output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
-    EXPECT_FLOAT_EQ(forward.actuator[0].demand, -0.5f);
-    EXPECT_FLOAT_EQ(forward.actuator[1].demand, 0.5f);
+    EXPECT_FLOAT_EQ(forward.actuator[0].demand, 0.5f);
+    EXPECT_FLOAT_EQ(forward.actuator[1].demand, -0.5f);
 
     geometry.screw_position = MiniDP_ScrewPosition::CENTER;
     output.set_frame_geometry(geometry);
     const MiniDP_OutputFrame &center =
         output.update(MiniDP_OutputState::ARMED_ACTIVE, command);
-    EXPECT_FLOAT_EQ(center.actuator[0].demand, 0.0f);
-    EXPECT_FLOAT_EQ(center.actuator[1].demand, 0.0f);
+    EXPECT_FLOAT_EQ(center.actuator[0].demand, 0.5f);
+    EXPECT_FLOAT_EQ(center.actuator[1].demand, -0.5f);
 
     geometry.screw_position = MiniDP_ScrewPosition::AFT;
     geometry.screw_yaw_scale = 0.5f;
@@ -172,6 +181,7 @@ TEST(MiniDPOutput, Frame902DualAzimuthBowMapsMotor1ToMotor5)
 {
     MiniDP_OutputManager output;
     output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+    settle_steering(output);
 
     EXPECT_EQ(output.frame_type(), int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
     EXPECT_STREQ(
@@ -198,6 +208,7 @@ TEST(MiniDPOutput, Frame902AzipodParametersLimitEachPodIndependently)
 {
     MiniDP_OutputManager output;
     output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+    settle_steering(output);
 
     MiniDP_AzipodConfig config{};
     config.angle_min_rad = -0.7853982f;
@@ -225,6 +236,7 @@ TEST(MiniDPOutput, Frame902AzipodSpanIsLimitedTo180Degrees)
 {
     MiniDP_OutputManager output;
     output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+    settle_steering(output);
 
     MiniDP_AzipodConfig config{};
     config.angle_min_rad = -3.1415927f;
@@ -243,6 +255,7 @@ TEST(MiniDPOutput, Frame902ForwardSurgeSplitsAcrossAftPods)
 {
     MiniDP_OutputManager output;
     output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+    settle_steering(output);
 
     MiniDP_AxisCommand command{};
     command.surge = 1.0f;
@@ -275,6 +288,7 @@ TEST(MiniDPOutput, Frame902ReverseSurgeFoldsAzimuthAndReversesThrust)
 {
     MiniDP_OutputManager output;
     output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+    settle_steering(output);
 
     MiniDP_AxisCommand command{};
     command.surge = -1.0f;
@@ -305,6 +319,7 @@ TEST(MiniDPOutput, Frame902SwayUsesPodAzimuthAndBowThruster)
 {
     MiniDP_OutputManager output;
     output.init(int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW));
+    settle_steering(output);
 
     MiniDP_AxisCommand command{};
     command.sway = 1.0f;
@@ -458,6 +473,157 @@ TEST(MiniDPOutput, ActuatorTestPwmClampsToActuatorConfig)
 
     EXPECT_EQ(frame.active_pwm_count, 1U);
     EXPECT_EQ(frame.actuator[0].pwm_us, 1900U);
+}
+
+
+TEST(MiniDPOutput, BatchRemappingPreservesPhysicalChannelCalibration)
+{
+    MiniDP_OutputManager output;
+    output.init();
+    MiniDP_ActuatorConfig configs[MiniDP_OutputManager::max_actuators];
+    for (uint8_t i = 0; i < MiniDP_OutputManager::max_actuators; i++) {
+        configs[i] = output.actuator_config(i);
+    }
+    configs[0].pwm_channel = 1;
+    configs[0].pwm_trim = 1600;
+    configs[1].pwm_channel = 0;
+    configs[1].pwm_trim = 1400;
+    configs[2].pwm_channel = 15;
+    ASSERT_TRUE(output.set_actuator_configs(configs));
+    const auto &frame = output.update(MiniDP_OutputState::ARMED_NEUTRAL, {});
+    EXPECT_EQ(frame.actuator[0].pwm_channel, 1);
+    EXPECT_EQ(frame.actuator[0].pwm_us, 1600);
+    EXPECT_EQ(frame.actuator[1].pwm_channel, 0);
+    EXPECT_EQ(frame.actuator[1].pwm_us, 1400);
+    EXPECT_EQ(frame.actuator[2].pwm_channel, 15);
+    configs[2].pwm_channel = 0;
+    EXPECT_FALSE(output.set_actuator_configs(configs));
+    EXPECT_EQ(output.actuator_config(2).pwm_channel, 15);
+}
+
+TEST(MiniDPOutput, Frame902PureYawHasNoNetTranslation)
+{
+    for (float aft : {0.5f, 1.0f, 2.0f}) {
+        MiniDP_OutputManager output;
+        output.init(902);
+    settle_steering(output);
+        auto geometry = output.default_frame_geometry_config();
+        geometry.aft_arm_m = aft;
+        geometry.bow_arm_m = 1.5f;
+        output.set_frame_geometry(geometry);
+        const auto &f = output.update(MiniDP_OutputState::ARMED_ACTIVE, {0, 0, 0.5f});
+        EXPECT_NEAR(f.thruster[0].force_x + f.thruster[1].force_x, 0, 1e-6f);
+        const float aft_y = f.thruster[0].force_y + f.thruster[1].force_y;
+        EXPECT_NEAR(aft_y + f.thruster[2].force_y, 0, 1e-6f);
+        EXPECT_NEAR(-aft * aft_y + 1.5f * f.thruster[2].force_y, 0.5f, 1e-6f);
+    }
+}
+
+TEST(MiniDPOutput, Frame901UnequalTunnelArmsProducePureSway)
+{
+    MiniDP_OutputManager output;
+    output.init(901);
+    auto geometry = output.default_frame_geometry_config();
+    geometry.aft_arm_m = 2;
+    geometry.bow_arm_m = 1;
+    output.set_frame_geometry(geometry);
+    const auto &f = output.update(MiniDP_OutputState::ARMED_ACTIVE, {0, 0.3f, 0});
+    EXPECT_NEAR(f.actuator[2].demand - 2 * f.actuator[3].demand, 0, 1e-6f);
+    EXPECT_NEAR(f.actuator[2].demand + f.actuator[3].demand, 0.6f, 1e-6f);
+}
+
+TEST(MiniDPOutput, LimitedReversePodProjectsForceInCorrectDirection)
+{
+    MiniDP_OutputManager output;
+    output.init(902);
+    settle_steering(output);
+    MiniDP_AzipodConfig config{};
+    config.angle_min_rad = -0.5f;
+    config.angle_max_rad = 0.5f;
+    config.allow_reverse_fold = true;
+    ASSERT_TRUE(output.set_azipod_config(0, config));
+    ASSERT_TRUE(output.set_azipod_config(1, config));
+    const auto &f = output.update(MiniDP_OutputState::ARMED_ACTIVE, {-0.5f, 1, 0});
+    EXPECT_LT(f.thruster[0].force_x, 0);
+    EXPECT_GT(f.thruster[0].force_y, 0);
+    EXPECT_TRUE(f.saturated);
+}
+
+TEST(MiniDPOutput, AsymmetricReversedAzimuthUsesFullElectricalRange)
+{
+    MiniDP_OutputManager output;
+    output.init(902);
+    settle_steering(output);
+    MiniDP_AzipodConfig pod{};
+    pod.angle_min_rad = -0.5235988f;
+    pod.angle_max_rad = 1.5707963f;
+    pod.allow_reverse_fold = true;
+    ASSERT_TRUE(output.set_azipod_config(0, pod));
+    auto servo = output.actuator_config(1);
+    servo.reversed = true;
+    ASSERT_TRUE(output.set_actuator_config(1, servo));
+    const auto &f = output.update(MiniDP_OutputState::ARMED_ACTIVE, {0, 1, 0});
+    EXPECT_EQ(f.actuator[1].pwm_us, servo.pwm_min);
+}
+
+TEST(MiniDPOutput, SteeringRateGatesAllThrustAndHoldsAngleOnNeutral)
+{
+    MiniDP_OutputManager output;
+    output.init(902);
+    settle_steering(output);
+    auto first = output.update(MiniDP_OutputState::ARMED_ACTIVE, {0, 1, 0}, 0.1f);
+    EXPECT_NEAR(first.thruster[0].value2, 0.1570796f, 1e-6f);
+    EXPECT_TRUE(first.saturated);
+    for (unsigned i : {0U, 2U, 4U}) {
+        EXPECT_FLOAT_EQ(first.actuator[i].demand, 0);
+        EXPECT_EQ(first.actuator[i].pwm_us, 1500);
+    }
+    for (unsigned i = 0; i < 10; i++) {
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, {0, 1, 0}, 0.1f);
+    }
+    EXPECT_GT(output.frame().actuator[4].demand, 0);
+    const uint16_t pwm = output.frame().actuator[1].pwm_us;
+    EXPECT_EQ(output.update(MiniDP_OutputState::ARMED_NEUTRAL, {}).actuator[1].pwm_us, pwm);
+}
+
+TEST(MiniDPOutput, MinimumEffectiveOutputNeverCreatesThrustFromZero)
+{
+    for (int frame : {901, 902}) {
+        MiniDP_OutputManager output;
+        output.init(frame);
+    settle_steering(output);
+        for (uint8_t i = 0; i < output.max_actuators; i++) {
+            auto config = output.actuator_config(i);
+            config.min_effective_output = 0.2f;
+            ASSERT_TRUE(output.set_actuator_config(i, config));
+        }
+        const auto &f = output.update(MiniDP_OutputState::ARMED_ACTIVE, {});
+        for (uint8_t i = 0; i < output.max_actuators; i++) {
+            EXPECT_FLOAT_EQ(f.actuator[i].demand, 0);
+        }
+    }
+}
+
+
+TEST(MiniDPOutput, UnknownSteeringPositionRequiresFullSweepTimeBeforeThrust)
+{
+    MiniDP_OutputManager output;
+    output.init(902);
+    for (unsigned i = 0; i < 19; i++) {
+        const auto &f = output.update(MiniDP_OutputState::ARMED_ACTIVE, {1, 0, 0}, 0.1f);
+        EXPECT_FLOAT_EQ(f.actuator[0].demand, 0);
+        EXPECT_TRUE(f.saturated);
+    }
+    for (unsigned i = 0; i < 2; i++) {
+        output.update(MiniDP_OutputState::ARMED_ACTIVE, {1, 0, 0}, 0.1f);
+    }
+    EXPECT_GT(output.frame().actuator[0].demand, 0);
+    MiniDP_ActuatorTestCommand test{};
+    test.active = true;
+    test.actuator_index = 1;
+    test.demand = 1;
+    output.update_actuator_test(test);
+    EXPECT_FLOAT_EQ(output.update(MiniDP_OutputState::ARMED_ACTIVE, {1, 0, 0}, 0.1f).actuator[0].demand, 0);
 }
 
 AP_GTEST_MAIN()

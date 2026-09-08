@@ -718,6 +718,8 @@ public:
     bool get_pwm(uint8_t channel, uint16_t &pwm) const;
 
     uint32_t last_input_ms() const { return last_update_ms; };
+    // Receiver freshness must remain independent of MAVLink overrides.
+    uint32_t last_receiver_input_ms() const { return last_receiver_update_ms; }
 
     // method for other parts of the system (e.g. Button and mavlink)
     // to trigger auxiliary functions
@@ -773,6 +775,7 @@ private:
     static RC_Channel *channels;
 
     uint32_t last_update_ms;
+    uint32_t last_receiver_update_ms = 0;
     bool has_new_overrides;
     bool _has_had_rc_receiver; // true if we have had a direct detach RC receiver, does not include overrides
     bool _has_had_override; // true if we have had an override on any channel

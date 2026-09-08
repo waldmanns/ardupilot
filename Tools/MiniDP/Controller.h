@@ -32,6 +32,7 @@ public:
         const MiniDP_ModeTarget &target,
         const MiniDP_State &state);
     void reset();
+    void set_output_limited(bool limited) { output_limited = limited; }
 
     static MiniDP_ControllerConfig default_config();
 
@@ -44,6 +45,7 @@ private:
     uint32_t last_target_id = 0;
     MiniDP_Mode last_mode = MiniDP_Mode::MANUAL;
     bool have_update = false;
+    bool output_limited = false;
 
     MiniDP_AxisCommand update_heading_hold(
         const MiniDP_ModeTarget &target,

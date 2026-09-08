@@ -8,6 +8,7 @@
  */
 
 #include "MiniDP.h"
+#include "ControlMath.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Logger/LogStructure.h>
@@ -168,9 +169,6 @@ MiniDP_OutputSafeAction safe_action_from_param(
 
 MiniDP minidp;
 
-#if AP_SIM_ENABLED
-SITL::SIM sitl;
-#endif
 #if AP_EXTERNAL_AHRS_ENABLED
 AP_ExternalAHRS external_ahrs;
 #endif
@@ -247,6 +245,24 @@ void MiniDP::load_parameters()
     }
     g.format_version.set_default(k_format_version);
     AP_Param::load_all();
+#if !MINIDP_BARO_ENABLED
+    // Migrate the incompatible inherited barometer source, including existing
+    // installations. Preserve explicitly selected non-barometer sources.
+    const char *height_sources[] = {"EK3_SRC1_POSZ", "EK3_SRC2_POSZ", "EK3_SRC3_POSZ", "EK2_ALT_SOURCE"};
+    for (uint8_t i = 0; i < ARRAY_SIZE(height_sources); i++) {
+        enum ap_var_type type;
+        AP_Param *parameter = AP_Param::find(height_sources[i], &type);
+        if (parameter != nullptr && type == AP_PARAM_INT8) {
+            AP_Int8 *source = static_cast<AP_Int8 *>(parameter);
+            const int8_t baro_source = i == 3 ? 0 : 1;
+            const int8_t gps_source = i == 3 ? 2 : 3;
+            source->set_default(gps_source);
+            if (source->get() == baro_source) {
+                source->set_and_save(gps_source);
+            }
+        }
+    }
+#endif
     update_azipod_param_visibility();
 }
 
@@ -297,7 +313,7 @@ MiniDP_InputConfig MiniDP::make_input_config() const
     config.manual_sway_limit = g.manual_sway_limit.get();
     config.manual_yaw_limit = g.manual_yaw_limit.get();
     config.mavlink_manual_timeout_ms =
-        uint32_t(MAX(g.manual_mavlink_timeout.get(), 0.0f) * 1000.0f);
+        MiniDP_Math::timeout_ms(g.manual_mavlink_timeout.get(), 0.5f, 0.1f, 5.0f);
     return config;
 }
 
@@ -317,6 +333,9 @@ MiniDP_FrameGeometryConfig MiniDP::make_frame_geometry_config() const
         break;
     }
     config.screw_yaw_scale = g.frame_screw_yaw_scale.get();
+    config.aft_arm_m = g.frame_aft_arm.get();
+    config.bow_arm_m = g.frame_bow_arm.get();
+    config.screw_half_span_m = g.frame_half_span.get();
     return config;
 }
 
@@ -387,12 +406,26 @@ bool MiniDP::outputs_armed() const
     return hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_DISARMED;
 }
 
+bool MiniDP::motor_outputs_available() const
+{
+    if (!frame_valid) {
+        return false;
+    }
+    for (uint8_t i = 0; i < MiniDP_OutputManager::max_actuators; i++) {
+        if (output_manager.actuator_config(i).enabled &&
+            SRV_Channels::get_output_channel_mask(SRV_Channels::get_motor_function(i)) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 MiniDP_OutputState MiniDP::desired_output_state() const
 {
     if (authority_status.rc_kill) {
         return MiniDP_OutputState::KILL;
     }
-    if (!outputs_armed()) {
+    if (!frame_valid || !outputs_armed()) {
         return MiniDP_OutputState::DISARMED;
     }
     if (mode_manager.mode() == MiniDP_Mode::FAILSAFE ||
@@ -403,6 +436,9 @@ MiniDP_OutputState MiniDP::desired_output_state() const
         authority.owner() == MiniDP_ControlOwner::TEST &&
         actuator_test.active()) {
         return MiniDP_OutputState::ACTUATOR_TEST;
+    }
+    if (!motor_outputs_available()) {
+        return MiniDP_OutputState::DISARMED;
     }
     if (mode_manager.mode() == MiniDP_Mode::MANUAL &&
         active_manual_command.valid &&
@@ -446,12 +482,6 @@ void MiniDP::setup_motor_output_defaults()
 
 void MiniDP::sync_frame_config_from_params()
 {
-    if (output_manager.frame_type() != g.frame_type.get()) {
-        if (!output_manager.set_frame_type(g.frame_type.get())) {
-            (void)output_manager.set_frame_type(
-                MiniDP_OutputManager::default_frame_type);
-        }
-    }
     update_azipod_param_visibility();
     output_manager.set_frame_geometry(make_frame_geometry_config());
     sync_azipod_params();
@@ -476,8 +506,10 @@ void MiniDP::sync_output_config_from_servo_params()
     const uint16_t configured_failsafe_pwm =
         uint16_t(MAX(int16_t(g.out_failsafe_pwm.get()), int16_t(0)));
 
+    MiniDP_ActuatorConfig configs[MiniDP_OutputManager::max_actuators];
     for (uint8_t i = 0; i < MiniDP_OutputManager::max_actuators; i++) {
-        MiniDP_ActuatorConfig config = output_manager.actuator_config(i);
+        configs[i] = output_manager.actuator_config(i);
+        MiniDP_ActuatorConfig &config = configs[i];
         if (!config.enabled) {
             continue;
         }
@@ -490,6 +522,7 @@ void MiniDP::sync_output_config_from_servo_params()
         const SRV_Channel::Function function =
             SRV_Channels::get_motor_function(i);
         uint8_t channel = 0;
+        config.pwm_channel = 255U;
         if (SRV_Channels::find_channel(function, channel)) {
             config.pwm_channel = channel;
         }
@@ -505,7 +538,9 @@ void MiniDP::sync_output_config_from_servo_params()
             }
         }
 
-        (void)output_manager.set_actuator_config(i, config);
+    }
+    if (!output_manager.set_actuator_configs(configs)) {
+        frame_valid = false;
     }
 }
 
@@ -552,10 +587,10 @@ void MiniDP::apply_outputs(const MiniDP_OutputFrame &frame)
     set_channel_enabled_by_mask(active_mask, true);
     for (uint8_t i = 0; i < MiniDP_OutputManager::max_actuators; i++) {
         const MiniDP_ActuatorOutput &output = frame.actuator[i];
-        if (output.pwm_enabled) {
+        if (output.configured) {
             SRV_Channels::set_output_pwm(
                 SRV_Channels::get_motor_function(i),
-                output.pwm_us);
+                output.pwm_enabled ? output.pwm_us : 0U);
         }
     }
     set_channel_enabled_by_mask(managed_mask & ~active_mask, false);
@@ -614,6 +649,9 @@ void MiniDP::setup()
     printf("MiniDP RSSI frontend ready\n");
 #endif
     rc_channels.init();
+    for (uint8_t i = 0; i < NUM_RC_CHANNELS; i++) {
+        rc_channels.channel(i)->set_angle(4500);
+    }
     printf("MiniDP RC frontend ready\n");
     input_mapper.init();
     input_mapper.set_config(make_input_config());
@@ -625,6 +663,8 @@ void MiniDP::setup()
     arming.set_config(make_arming_config());
     sync_soft_armed();
 
+    frame_valid = g.frame_type.get() == int16_t(MiniDP_FrameType::OMNI_PLUS) ||
+                  g.frame_type.get() == int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW);
     output_manager.init(g.frame_type.get());
     sync_frame_config_from_params();
     setup_motor_output_defaults();
@@ -676,6 +716,7 @@ void MiniDP::setup()
     authority.init(AP_HAL::micros64());
 
     notify.init();
+    board_config.init_safety();
     AP_Notify::flags.initialising = false;
 
     report_mode_transition();
@@ -688,6 +729,7 @@ void MiniDP::capture_rc_input_frame(const bool rc_healthy)
 {
     rc_input_frame = {};
     rc_input_frame.healthy = rc_healthy;
+    rc_input_frame.valid_mask = 0;
     if (!rc_healthy) {
         return;
     }
@@ -703,6 +745,12 @@ void MiniDP::capture_rc_input_frame(const bool rc_healthy)
         RC_Channel *channel = rc_channels.channel(i);
         if (channel == nullptr) {
             continue;
+        }
+        const bool override_valid = channel->has_override() &&
+            !rc_channels.option_is_enabled(RC_Channels::Option::IGNORE_OVERRIDES);
+        if (override_valid || (rc_receiver_healthy && i < channel_count)) {
+            rc_input_frame.valid_mask |= 1U << i;
+            rc_input_frame.channel_count = MAX(rc_input_frame.channel_count, uint8_t(i + 1));
         }
         rc_input_frame.norm[i] = channel->norm_input_dz();
         rc_input_frame.pwm[i] = channel->get_radio_in();
@@ -735,9 +783,9 @@ void MiniDP::update_authority(const uint32_t now_ms)
 #endif
 
     const uint32_t rc_timeout_ms =
-        MAX(uint32_t(50), uint32_t(MAX(g.auth_rc_timeout.get(), 0.0f) * 1000.0f));
+        MiniDP_Math::timeout_ms(g.auth_rc_timeout.get(), 0.5f, 0.05f, 5.0f);
     const uint32_t mavlink_timeout_ms =
-        MAX(uint32_t(100), uint32_t(MAX(g.auth_mav_timeout.get(), 0.0f) * 1000.0f));
+        MiniDP_Math::timeout_ms(g.auth_mav_timeout.get(), 3.0f, 0.1f, 30.0f);
 #if HAL_GCS_ENABLED
     const uint32_t mavlink_last_seen_ms = gcs().sysid_mygcs_last_seen_time_ms();
 #else
@@ -746,11 +794,18 @@ void MiniDP::update_authority(const uint32_t now_ms)
 
     authority_status = {};
     authority_status.time_us = AP_HAL::micros64();
-    authority_status.rc_healthy =
-        have_rc_backend &&
-        last_rc_input_ms != 0 &&
-        now_ms - last_rc_input_ms <= rc_timeout_ms &&
-        !rc_protocol_failsafe;
+    const bool input_recent = last_rc_input_ms != 0 && now_ms - last_rc_input_ms <= rc_timeout_ms;
+    const uint32_t receiver_ms = rc_channels.last_receiver_input_ms();
+    rc_receiver_healthy = have_rc_backend && receiver_ms != 0 &&
+        now_ms - receiver_ms <= rc_timeout_ms && !rc_protocol_failsafe &&
+        !rc_channels.option_is_enabled(RC_Channels::Option::IGNORE_RECEIVER);
+    bool have_override = false;
+    if (!rc_channels.option_is_enabled(RC_Channels::Option::IGNORE_OVERRIDES)) {
+        for (uint8_t i = 0; i < MiniDP_InputMapper::max_rc_channels; i++) {
+            have_override |= rc_channels.channel(i)->has_override();
+        }
+    }
+    authority_status.rc_healthy = rc_receiver_healthy || (input_recent && have_override);
     rc_channels.set_input_valid(authority_status.rc_healthy);
     authority_status.mavlink_healthy =
         mavlink_last_seen_ms != 0 &&
@@ -841,6 +896,20 @@ void MiniDP::sync_soft_armed()
 #if HAL_LOGGING_ENABLED
     logger.set_vehicle_armed(soft_armed);
 #endif
+}
+
+MiniDP_ArmResult MiniDP::check_arm() const
+{
+    // Run MiniDP's surface-vessel policy without changing the actual arm state.
+    MiniDP_Arming candidate;
+    candidate.init();
+    candidate.set_config(make_arming_config());
+    if (!frame_valid) {
+        return {false, false, MiniDP_ArmReject::STATE_INVALID};
+    }
+    return candidate.arm(get_state(), authority_status.rc_kill,
+        battery_failsafe_latched || mode_manager.mode() == MiniDP_Mode::FAILSAFE ||
+        authority.owner() == MiniDP_ControlOwner::FAILSAFE, false);
 }
 
 MiniDP_ArmResult MiniDP::request_arm(const bool arm, const bool force)
@@ -981,125 +1050,80 @@ void MiniDP::handle_battery_failsafe(
 }
 
 MiniDP_ModeCommandResult MiniDP::request_mode(
-    const MiniDP_Mode requested,
-    const MiniDP_ModeReason reason)
+    const MiniDP_Mode requested, const MiniDP_ModeReason reason)
 {
-    MiniDP_AuthorityStatus request_status = authority_status;
-    request_status.time_us = AP_HAL::micros64();
-    request_status.mavlink_healthy = true;
-    request_status.mavlink_manual_authorized = g.auth_mav_manual != 0;
-    request_status.mavlink_target_authorized = g.auth_mav_target != 0;
-    request_status.actuator_test_authorized = g.auth_test != 0;
-    request_status.rc_kill = input_mapper.rc_kill_active(rc_input_frame);
-    request_status.failsafe_active =
-        battery_failsafe_latched ||
-        mode_manager.mode() == MiniDP_Mode::FAILSAFE;
-    mode_manager.set_config(make_mode_config());
+    MiniDP_AuthorityStatus status = authority_status;
+    status.time_us = AP_HAL::micros64();
+    status.mavlink_healthy = true;
+    status.mavlink_target_authorized = g.auth_mav_target != 0;
+    status.rc_kill = input_mapper.rc_kill_active(rc_input_frame);
+    status.failsafe_active = battery_failsafe_latched;
+    MiniDP_ModeManager next_mode = mode_manager;
+    MiniDP_AuthorityArbiter next_authority = authority;
+    next_mode.set_config(make_mode_config());
 
-    switch (requested) {
-    case MiniDP_Mode::MANUAL: {
-        const MiniDP_ModeRequestResult mode_result =
-            mode_manager.request_mode(requested, reason, get_state());
-        if (mode_result.accepted &&
-            authority.owner() == MiniDP_ControlOwner::MAVLINK_TARGET) {
-            (void)authority.request_owner(
-                MiniDP_ControlOwner::NONE,
-                MiniDP_AuthorityReason::RELEASED,
-                request_status);
+    const bool clearing = requested == MiniDP_Mode::MANUAL &&
+        (mode_manager.mode() == MiniDP_Mode::FAILSAFE ||
+         authority.owner() == MiniDP_ControlOwner::FAILSAFE);
+    if (clearing) {
+        // Deliberate disarm then MANUAL is the recovery transaction. Never
+        // recover directly to active thrust, including ARMING_REQUIRE=0.
+        if (arming.armed() || outputs_armed()) {
+            return {false, MiniDP_ModeReject::FAILSAFE_LATCHED, MiniDP_AuthorityReject::NONE};
         }
-        return {
-            mode_result.accepted,
-            mode_result.rejection,
-            MiniDP_AuthorityReject::NONE,
-        };
-    }
-
-    case MiniDP_Mode::HEADING_HOLD:
-    case MiniDP_Mode::DP_HOLD: {
-        const MiniDP_ControlOwner previous_owner = authority.owner();
-        const MiniDP_AuthorityRequestResult authority_result =
-            authority.request_owner(
-                MiniDP_ControlOwner::MAVLINK_TARGET,
-                MiniDP_AuthorityReason::MAVLINK_TARGET_REQUEST,
-                request_status);
-        if (!authority_result.accepted) {
-            return {
-                false,
-                MiniDP_ModeReject::NONE,
-                authority_result.rejection,
-            };
+        const auto cleared = next_authority.clear_failsafe(status);
+        if (!cleared.accepted) {
+            return {false, MiniDP_ModeReject::NONE, cleared.rejection};
         }
-
-        const bool force_target_update =
-            requested == MiniDP_Mode::DP_HOLD &&
-            g.dp_retarget != 0;
-        const MiniDP_ModeRequestResult mode_result =
-            mode_manager.request_mode(
-                requested,
-                reason,
-                get_state(),
-                false,
-                force_target_update);
-        if (!mode_result.accepted &&
-            previous_owner != MiniDP_ControlOwner::MAVLINK_TARGET &&
-            authority.owner() == MiniDP_ControlOwner::MAVLINK_TARGET) {
-            (void)authority.request_owner(
-                MiniDP_ControlOwner::NONE,
-                MiniDP_AuthorityReason::RELEASED,
-                request_status);
+    }
+    if (requested != MiniDP_Mode::MANUAL &&
+        requested != MiniDP_Mode::HEADING_HOLD && requested != MiniDP_Mode::DP_HOLD) {
+        return {false, MiniDP_ModeReject::UNSUPPORTED_MODE, MiniDP_AuthorityReject::NONE};
+    }
+    if (requested != MiniDP_Mode::MANUAL && !motor_outputs_available()) {
+        return {false, MiniDP_ModeReject::OUTPUT_UNAVAILABLE, MiniDP_AuthorityReject::NONE};
+    }
+    const auto mode_result = next_mode.request_mode(
+        requested, clearing ? MiniDP_ModeReason::FAILSAFE_CLEARED : reason,
+        get_state(), false, requested == MiniDP_Mode::DP_HOLD && g.dp_retarget != 0);
+    if (!mode_result.accepted) {
+        return {false, mode_result.rejection, MiniDP_AuthorityReject::NONE};
+    }
+    if (requested != MiniDP_Mode::MANUAL) {
+        const auto owner_result = next_authority.request_owner(
+            MiniDP_ControlOwner::MAVLINK_TARGET,
+            MiniDP_AuthorityReason::MAVLINK_TARGET_REQUEST, status);
+        if (!owner_result.accepted) {
+            return {false, MiniDP_ModeReject::NONE, owner_result.rejection};
         }
-        return {
-            mode_result.accepted,
-            mode_result.rejection,
-            MiniDP_AuthorityReject::NONE,
-        };
+    } else if (next_authority.owner() == MiniDP_ControlOwner::MAVLINK_TARGET ||
+               next_authority.owner() == MiniDP_ControlOwner::TEST) {
+        const auto released = next_authority.request_owner(
+            MiniDP_ControlOwner::NONE, MiniDP_AuthorityReason::RELEASED, status);
+        if (!released.accepted) {
+            return {false, MiniDP_ModeReject::NONE, released.rejection};
+        }
     }
-
-    case MiniDP_Mode::ACTUATOR_TEST:
-    case MiniDP_Mode::FAILSAFE:
-        break;
+    mode_manager = next_mode;
+    authority = next_authority;
+    if (requested == MiniDP_Mode::MANUAL) {
+        actuator_test.cancel(MiniDP_ActuatorTestStopReason::CANCELLED);
     }
-
-    return {
-        false,
-        MiniDP_ModeReject::UNSUPPORTED_MODE,
-        MiniDP_AuthorityReject::NONE,
-    };
+    return {true, MiniDP_ModeReject::NONE, MiniDP_AuthorityReject::NONE};
 }
 
 MiniDP_ModeCommandResult MiniDP::request_dp_target(
-    const float pos_n_m,
-    const float pos_e_m,
-    const bool yaw_valid,
-    const float yaw_rad,
-    const MiniDP_ModeReason reason)
+    const float pos_n_m, const float pos_e_m, const bool yaw_valid,
+    const float yaw_rad, const MiniDP_ModeReason reason)
 {
-    MiniDP_AuthorityStatus request_status = authority_status;
-    request_status.time_us = AP_HAL::micros64();
-    request_status.mavlink_healthy = true;
-    request_status.mavlink_manual_authorized = g.auth_mav_manual != 0;
-    request_status.mavlink_target_authorized = g.auth_mav_target != 0;
-    request_status.actuator_test_authorized = g.auth_test != 0;
-    request_status.rc_kill = input_mapper.rc_kill_active(rc_input_frame);
-    request_status.failsafe_active =
-        battery_failsafe_latched ||
-        mode_manager.mode() == MiniDP_Mode::FAILSAFE;
-    mode_manager.set_config(make_mode_config());
-
-    const MiniDP_ControlOwner previous_owner = authority.owner();
-    const MiniDP_AuthorityRequestResult authority_result =
-        authority.request_owner(
-            MiniDP_ControlOwner::MAVLINK_TARGET,
-            MiniDP_AuthorityReason::MAVLINK_TARGET_REQUEST,
-            request_status);
-    if (!authority_result.accepted) {
-        return {
-            false,
-            MiniDP_ModeReject::NONE,
-            authority_result.rejection,
-        };
+    if (!isfinite(pos_n_m) || !isfinite(pos_e_m) ||
+        fabsf(pos_n_m) > 2.0e7f || fabsf(pos_e_m) > 2.0e7f ||
+        (yaw_valid && !isfinite(yaw_rad))) {
+        return {false, MiniDP_ModeReject::TARGET_INVALID, MiniDP_AuthorityReject::NONE};
     }
-
+    if (!motor_outputs_available()) {
+        return {false, MiniDP_ModeReject::OUTPUT_UNAVAILABLE, MiniDP_AuthorityReject::NONE};
+    }
     const MiniDP_State &state = get_state();
     MiniDP_ModeTarget target{};
     target.position_valid = true;
@@ -1107,36 +1131,37 @@ MiniDP_ModeCommandResult MiniDP::request_dp_target(
     target.pos_e_m = pos_e_m;
     target.origin_id = state.origin_id;
     target.reset_counter = state.reset_counter;
-
-    const MiniDP_ModeTarget &current_target = mode_manager.target();
-    if (yaw_valid && isfinite(yaw_rad)) {
+    const MiniDP_ModeTarget &old_target = mode_manager.target();
+    if (yaw_valid) {
         target.yaw_valid = true;
-        target.yaw_rad = yaw_rad;
-    } else if (current_target.yaw_valid &&
-               current_target.reset_counter == state.reset_counter) {
+        target.yaw_rad = MiniDP_Math::wrap_pi(yaw_rad);
+    } else if (old_target.yaw_valid && old_target.reset_counter == state.reset_counter) {
         target.yaw_valid = true;
-        target.yaw_rad = current_target.yaw_rad;
-    } else if (state.yaw_valid) {
-        target.yaw_valid = true;
+        target.yaw_rad = old_target.yaw_rad;
+    } else {
+        target.yaw_valid = state.yaw_valid;
         target.yaw_rad = state.yaw_rad;
     }
-
-    const MiniDP_ModeRequestResult mode_result =
-        mode_manager.request_dp_target(target, reason, state);
-    if (!mode_result.accepted &&
-        previous_owner != MiniDP_ControlOwner::MAVLINK_TARGET &&
-        authority.owner() == MiniDP_ControlOwner::MAVLINK_TARGET) {
-        (void)authority.request_owner(
-            MiniDP_ControlOwner::NONE,
-            MiniDP_AuthorityReason::RELEASED,
-            request_status);
+    MiniDP_ModeManager next_mode = mode_manager;
+    next_mode.set_config(make_mode_config());
+    const auto result = next_mode.request_dp_target(target, reason, state);
+    if (!result.accepted) {
+        return {false, result.rejection, MiniDP_AuthorityReject::NONE};
     }
-
-    return {
-        mode_result.accepted,
-        mode_result.rejection,
-        MiniDP_AuthorityReject::NONE,
-    };
+    MiniDP_AuthorityStatus status = authority_status;
+    status.time_us = AP_HAL::micros64();
+    status.mavlink_healthy = true;
+    status.mavlink_target_authorized = g.auth_mav_target != 0;
+    status.failsafe_active = battery_failsafe_latched || mode_manager.mode() == MiniDP_Mode::FAILSAFE;
+    MiniDP_AuthorityArbiter next_authority = authority;
+    const auto owner_result = next_authority.request_owner(
+        MiniDP_ControlOwner::MAVLINK_TARGET, MiniDP_AuthorityReason::MAVLINK_TARGET_REQUEST, status);
+    if (!owner_result.accepted) {
+        return {false, MiniDP_ModeReject::NONE, owner_result.rejection};
+    }
+    authority = next_authority;
+    mode_manager = next_mode;
+    return {true, MiniDP_ModeReject::NONE, MiniDP_AuthorityReject::NONE};
 }
 
 void MiniDP::update_manual_input(const uint32_t now_ms)
@@ -1165,7 +1190,13 @@ void MiniDP::update_manual_input(const uint32_t now_ms)
         return;
     }
 
-    if (rc_manual_command.valid) {
+    const bool target_mode = mode_manager.mode() == MiniDP_Mode::HEADING_HOLD ||
+                             mode_manager.mode() == MiniDP_Mode::DP_HOLD;
+    const auto deflected = [](const MiniDP_ManualCommand &command) {
+        return fabsf(command.axes.surge) > 0.01f || fabsf(command.axes.sway) > 0.01f ||
+               fabsf(command.axes.yaw) > 0.01f;
+    };
+    if (rc_manual_command.valid && (!target_mode || deflected(rc_manual_command))) {
         const MiniDP_AuthorityRequestResult rc_result =
             authority.request_owner(
                 MiniDP_ControlOwner::RC,
@@ -1186,7 +1217,10 @@ void MiniDP::update_manual_input(const uint32_t now_ms)
             authority_status);
     }
 
-    if (mavlink_manual_command.valid) {
+    if (mavlink_manual_command.valid && (!target_mode ||
+        (deflected(mavlink_manual_command) &&
+         int32_t(mavlink_manual_command.timestamp_ms -
+                 uint32_t(mode_manager.last_transition().time_us / 1000U)) > 0))) {
         const MiniDP_AuthorityRequestResult mavlink_result =
             authority.request_owner(
                 MiniDP_ControlOwner::MAVLINK_MANUAL,
@@ -1226,39 +1260,33 @@ MiniDP_ActuatorTestStartResult MiniDP::request_actuator_test(
         return {false, MiniDP_ActuatorTestReject::NOT_ARMED};
     }
 
-    const MiniDP_AuthorityRequestResult authority_result =
-        authority.request_owner(
-            MiniDP_ControlOwner::TEST,
-            MiniDP_AuthorityReason::TEST_REQUEST,
-            authority_status);
+    if (!frame_valid || request.actuator_index >= MiniDP_OutputManager::max_actuators ||
+        !output_manager.actuator_config(request.actuator_index).enabled ||
+        SRV_Channels::get_output_channel_mask(SRV_Channels::get_motor_function(request.actuator_index)) == 0) {
+        return {false, MiniDP_ActuatorTestReject::INVALID_ACTUATOR};
+    }
+    MiniDP_ActuatorTest next_test = actuator_test;
+    const auto test_result = next_test.start(AP_HAL::millis(), request);
+    if (!test_result.accepted) {
+        return test_result;
+    }
+    MiniDP_AuthorityArbiter next_authority = authority;
+    const auto authority_result = next_authority.request_owner(
+        MiniDP_ControlOwner::TEST, MiniDP_AuthorityReason::TEST_REQUEST,
+        authority_status);
     if (!authority_result.accepted) {
         return {false, MiniDP_ActuatorTestReject::AUTHORITY_REJECTED};
     }
-
-    const MiniDP_ModeRequestResult mode_result =
-        mode_manager.request_mode(
-            MiniDP_Mode::ACTUATOR_TEST,
-            MiniDP_ModeReason::ACTUATOR_TEST_REQUEST,
-            get_state(),
-            true);
+    MiniDP_ModeManager next_mode = mode_manager;
+    const auto mode_result = next_mode.request_mode(
+        MiniDP_Mode::ACTUATOR_TEST, MiniDP_ModeReason::ACTUATOR_TEST_REQUEST,
+        get_state(), true);
     if (!mode_result.accepted) {
-        (void)authority.request_owner(
-            MiniDP_ControlOwner::NONE,
-            MiniDP_AuthorityReason::RELEASED,
-            authority_status);
         return {false, MiniDP_ActuatorTestReject::MODE_REJECTED};
     }
-
-    const MiniDP_ActuatorTestStartResult test_result =
-        actuator_test.start(AP_HAL::millis(), request);
-    if (!test_result.accepted) {
-        (void)authority.request_owner(
-            MiniDP_ControlOwner::NONE,
-            MiniDP_AuthorityReason::RELEASED,
-            authority_status);
-        (void)mode_manager.manual_override(get_state());
-        return test_result;
-    }
+    authority = next_authority;
+    mode_manager = next_mode;
+    actuator_test = next_test;
 
 #if HAL_LOGGING_ENABLED
     logger.Write_MessageF(
@@ -1741,6 +1769,10 @@ void MiniDP::set_servos()
     MiniDP_AxisCommand output_command{};
     axis_limiter.set_config(make_axis_limiter_config());
     controller.set_config(make_controller_config());
+    if (mode_manager.mode() != last_output_mode) {
+        axis_limiter.reset(now_ms);
+        last_output_mode = mode_manager.mode();
+    }
     bool have_active_command = false;
     bool controller_command_active = false;
     MiniDP_AxisCommand active_command{};
@@ -1766,10 +1798,24 @@ void MiniDP::set_servos()
         controller.reset();
         axis_limiter.reset(now_ms);
     }
+    const float output_dt_s = last_output_ms == 0 ? 0.0f :
+        fminf(0.1f, float(now_ms - last_output_ms) * 0.001f);
+    last_output_ms = now_ms;
     const MiniDP_OutputFrame &output_frame =
         output_state == MiniDP_OutputState::ACTUATOR_TEST ?
             output_manager.update_actuator_test(actuator_test.command()) :
-            output_manager.update(output_state, output_command);
+            output_manager.update(output_state, output_command, output_dt_s);
+    if (controller_command_active) {
+        bool missing_motor = false;
+        for (uint8_t i = 0; i < MiniDP_OutputManager::max_actuators; i++) {
+            missing_motor |= output_manager.actuator_config(i).enabled &&
+                SRV_Channels::get_output_channel_mask(SRV_Channels::get_motor_function(i)) == 0;
+        }
+        controller.set_output_limited(output_frame.saturated || missing_motor ||
+            fabsf(active_command.surge - output_command.surge) > 1.0e-5f ||
+            fabsf(active_command.sway - output_command.sway) > 1.0e-5f ||
+            fabsf(active_command.yaw - output_command.yaw) > 1.0e-5f);
+    }
 #if HAL_LOGGING_ENABLED
     log_control_frame(now_ms, active_command, output_command, output_frame);
 #endif

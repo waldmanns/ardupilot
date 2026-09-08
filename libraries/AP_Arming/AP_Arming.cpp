@@ -951,7 +951,7 @@ bool AP_Arming::mission_checks(bool report)
 #if AP_VEHICLE_ENABLED
     // do not allow arming if there are no mission items and we are in
     // (e.g.) AUTO mode
-    if (AP::vehicle()->current_mode_requires_mission() &&
+    if (AP::vehicle() != nullptr && AP::vehicle()->current_mode_requires_mission() &&
         (mission == nullptr || !mission->present())) {
         check_failed(Check::MISSION, report, "Mode requires mission");
         return false;

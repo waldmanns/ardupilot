@@ -153,6 +153,7 @@ MiniDP_AuthorityReject MiniDP_AuthorityArbiter::request_rejection(
     }
     if (current_owner == MiniDP_ControlOwner::TEST &&
         requested != MiniDP_ControlOwner::NONE &&
+        requested != MiniDP_ControlOwner::TEST &&
         requested != MiniDP_ControlOwner::FAILSAFE) {
         return MiniDP_AuthorityReject::TEST_ACTIVE;
     }

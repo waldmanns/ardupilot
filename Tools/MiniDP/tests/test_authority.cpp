@@ -324,4 +324,17 @@ TEST(MiniDPAuthority, TestOwnerIsExclusiveAndRevocationIsSafe)
         MiniDP_AuthorityReason::TEST_AUTH_REVOKED);
 }
 
+
+TEST(MiniDPAuthority, TestOwnerCanReplaceTestWithoutReleasingControl)
+{
+    MiniDP_AuthorityArbiter arbiter;
+    arbiter.init(0);
+    const auto status = healthy_status();
+    ASSERT_TRUE(arbiter.request_owner(MiniDP_ControlOwner::TEST,
+        MiniDP_AuthorityReason::TEST_REQUEST, status).accepted);
+    ASSERT_TRUE(arbiter.request_owner(MiniDP_ControlOwner::TEST,
+        MiniDP_AuthorityReason::TEST_REQUEST, status).accepted);
+    EXPECT_EQ(arbiter.owner(), MiniDP_ControlOwner::TEST);
+}
+
 AP_GTEST_MAIN()

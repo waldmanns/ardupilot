@@ -31,6 +31,9 @@ enum class MiniDP_ScrewPosition : int8_t {
 struct MiniDP_FrameGeometryConfig {
     MiniDP_ScrewPosition screw_position;
     float screw_yaw_scale;
+    float aft_arm_m = 1.0f;
+    float bow_arm_m = 1.0f;
+    float screw_half_span_m = 1.0f;
 };
 
 struct MiniDP_AxisCommand {
@@ -63,6 +66,7 @@ struct MiniDP_AzipodConfig {
     float angle_min_rad;
     float angle_max_rad;
     bool allow_reverse_fold;
+    float steering_rate_rad_s = 1.57079632679f;
 };
 
 struct MiniDP_ActuatorConfig {
@@ -149,7 +153,7 @@ public:
 
     const MiniDP_OutputFrame &update(
         MiniDP_OutputState state,
-        const MiniDP_AxisCommand &command);
+        const MiniDP_AxisCommand &command, float dt_s = 1.0f);
     const MiniDP_OutputFrame &update_actuator_test(
         const MiniDP_ActuatorTestCommand &command);
 
@@ -157,6 +161,7 @@ public:
         uint8_t index,
         const MiniDP_ActuatorConfig &config);
 
+    bool set_actuator_configs(const MiniDP_ActuatorConfig (&config)[max_actuators]);
     const MiniDP_ActuatorConfig &actuator_config(uint8_t index) const;
     const MiniDP_AzipodConfig &azipod_config(uint8_t index) const;
     const MiniDP_OutputFrame &frame() const { return output_frame; }
@@ -174,6 +179,10 @@ public:
 private:
     MiniDP_ActuatorConfig configs[max_actuators];
     MiniDP_AzipodConfig azipod_configs[2];
+    float pod_angle_rad[2]{};
+    bool pod_in_transit[2]{};
+    float pod_settle_s[2]{};
+    float output_dt_s = 0.0f;
     MiniDP_ThrusterConfig thruster_configs[max_thrusters];
     MiniDP_OutputFrame output_frame{};
     MiniDP_FrameGeometryConfig frame_geometry{};

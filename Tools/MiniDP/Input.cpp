@@ -62,7 +62,8 @@ bool read_rc_axis(
         return true;
     }
     if (channel > frame.channel_count ||
-        channel > MiniDP_InputMapper::max_rc_channels) {
+        channel > MiniDP_InputMapper::max_rc_channels ||
+        (frame.valid_mask & (1U << (channel - 1U))) == 0) {
         return false;
     }
     axis = frame.norm[channel - 1U];
@@ -91,7 +92,8 @@ bool rc_switch_high(
     if (!frame.healthy ||
         channel == 0U ||
         channel > frame.channel_count ||
-        channel > MiniDP_InputMapper::max_rc_channels) {
+        channel > MiniDP_InputMapper::max_rc_channels ||
+        (frame.valid_mask & (1U << (channel - 1U))) == 0) {
         return false;
     }
 
@@ -106,7 +108,8 @@ bool rc_switch_low(
     if (!frame.healthy ||
         channel == 0U ||
         channel > frame.channel_count ||
-        channel > MiniDP_InputMapper::max_rc_channels) {
+        channel > MiniDP_InputMapper::max_rc_channels ||
+        (frame.valid_mask & (1U << (channel - 1U))) == 0) {
         return false;
     }
 

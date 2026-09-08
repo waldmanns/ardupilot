@@ -74,6 +74,7 @@ public:
     AP_Float pod2_angle_min_deg;
     AP_Float pod2_angle_max_deg;
     AP_Int8 pod2_reverse_fold;
+    AP_Float steering_rate_deg_s;
 };
 
 class Parameters {
@@ -158,6 +159,10 @@ public:
         k_param_dp_position_imax,
         k_param_can_mgr,
         k_param_azipod_params,
+        k_param_frame_aft_arm,
+        k_param_frame_bow_arm,
+        k_param_frame_half_span,
+        k_param_sitl,
     };
 
     AP_Int16 format_version;
@@ -174,6 +179,9 @@ public:
     AP_Int16 frame_type;
     AP_Int8 frame_screw_position;
     AP_Float frame_screw_yaw_scale;
+    AP_Float frame_aft_arm;
+    AP_Float frame_bow_arm;
+    AP_Float frame_half_span;
     AP_Int8 in_rc_surge_channel;
     AP_Int8 in_rc_sway_channel;
     AP_Int8 in_rc_yaw_channel;
@@ -245,6 +253,7 @@ public:
     bool is_armed() const { return arming.armed(); }
     bool outputs_armed() const;
     MiniDP_ArmResult request_arm(bool arm, bool force);
+    MiniDP_ArmResult check_arm() const;
     MiniDP_ActuatorTestStartResult request_actuator_test(
         const MiniDP_ActuatorTestRequest &request);
     void handle_battery_failsafe(const char *type_str, const int8_t action);
@@ -275,6 +284,9 @@ public:
         uint16_t channel1_pwm);
 
     Parameters g;
+#if AP_SIM_ENABLED
+    SITL::SIM sitl;
+#endif
 
     static constexpr int8_t battery_failsafe_priorities[] = {
         2,
@@ -343,6 +355,10 @@ private:
     bool last_rc_arm_switch = false;
     bool last_rc_disarm_switch = false;
     bool rc_arm_switches_initialised = false;
+    bool frame_valid = false;
+    bool rc_receiver_healthy = false;
+    MiniDP_Mode last_output_mode = MiniDP_Mode::MANUAL;
+    uint32_t last_output_ms = 0;
     bool battery_failsafe_latched = false;
     int8_t last_battery_failsafe_action = 0;
 #if HAL_LOGGING_ENABLED
@@ -383,6 +399,7 @@ private:
     MiniDP_AxisLimiterConfig make_axis_limiter_config() const;
     MiniDP_ControllerConfig make_controller_config() const;
     MiniDP_OutputState desired_output_state() const;
+    bool motor_outputs_available() const;
     void sync_frame_config_from_params();
     void setup_motor_output_defaults();
     void sync_output_config_from_servo_params();

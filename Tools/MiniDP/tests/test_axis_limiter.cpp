@@ -115,4 +115,19 @@ TEST(MiniDPAxisLimiter, SanitizesInvalidConfig)
     EXPECT_FLOAT_EQ(limiter.config().surge_slew_rate, 0.0f);
 }
 
+
+TEST(MiniDPAxisLimiter, RefreshingConfigPreservesSubDeadbandSlewProgress)
+{
+    MiniDP_AxisLimiter limiter;
+    limiter.init(0);
+    auto config = limiter.config();
+    config.deadband = 0.1f;
+    config.surge_slew_rate = 0.5f;
+    for (uint32_t ms = 2; ms <= 1000; ms += 2) {
+        limiter.set_config(config);
+        limiter.update(ms, {1, 0, 0});
+    }
+    EXPECT_NEAR(limiter.command().surge, 0.5f, 1.0e-5f);
+}
+
 AP_GTEST_MAIN()

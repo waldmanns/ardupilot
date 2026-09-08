@@ -448,4 +448,27 @@ TEST(MiniDPMode, ActuatorTestRequiresExplicitAuthorization)
     EXPECT_EQ(manager.mode(), MiniDP_Mode::ACTUATOR_TEST);
 }
 
+
+TEST(MiniDPMode, RepeatedIdenticalTargetPreservesIdentity)
+{
+    MiniDP_ModeManager manager;
+    manager.init(0);
+    const auto state = valid_state();
+    ASSERT_TRUE(manager.request_mode(MiniDP_Mode::DP_HOLD,
+        MiniDP_ModeReason::USER_REQUEST, state).accepted);
+    auto target = manager.target();
+    const uint32_t id = target.target_id;
+    for (unsigned i = 0; i < 100; i++) {
+        auto result = manager.request_dp_target(target,
+            MiniDP_ModeReason::MAVLINK_REQUEST, state);
+        EXPECT_TRUE(result.accepted);
+        EXPECT_FALSE(result.changed);
+        EXPECT_EQ(manager.target().target_id, id);
+    }
+    target.yaw_rad = NAN;
+    EXPECT_FALSE(manager.request_dp_target(target,
+        MiniDP_ModeReason::MAVLINK_REQUEST, state).accepted);
+    EXPECT_EQ(manager.target().target_id, id);
+}
+
 AP_GTEST_MAIN()

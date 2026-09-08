@@ -19,6 +19,7 @@ MiniDP_AzipodConfig MiniDP_AzipodParams::config(const uint8_t index) const
         output.angle_max_rad = radians(pod2_angle_max_deg.get());
         output.allow_reverse_fold = pod2_reverse_fold.get() != 0;
     }
+    output.steering_rate_rad_s = radians(steering_rate_deg_s.get());
     return output;
 }
 
@@ -73,6 +74,14 @@ const AP_Param::GroupInfo MiniDP_AzipodParams::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("2_REV_FOLD", 6, MiniDP_AzipodParams, pod2_reverse_fold, 1),
 
+    // @Param: RATE
+    // @DisplayName: Azipod steering rate
+    // @Description: Conservative steering travel rate. Propulsion is held at zero while steering traverses to its commanded angle. Set no faster than the real mechanism can move under load.
+    // @Units: deg/s
+    // @Range: 1 360
+    // @User: Standard
+    AP_GROUPINFO("RATE", 7, MiniDP_AzipodParams, steering_rate_deg_s, 90.0f),
+
     AP_GROUPEND
 };
 
@@ -100,6 +109,11 @@ const AP_Param::Info MiniDP::var_info[] = {
     GOBJECT(ins, "INS", AP_InertialSensor),
     GOBJECT(compass, "COMPASS_", Compass),
     GOBJECT(gps, "GPS", AP_GPS),
+#if AP_SIM_ENABLED
+    // @Group: SIM_
+    // @Path: ../libraries/SITL/SITL.cpp
+    GOBJECT(sitl, "SIM_", SITL::SIM),
+#endif
 #if AP_BATTERY_ENABLED
     GOBJECT(battery, "BATT", AP_BattMonitor),
 #endif
@@ -208,10 +222,34 @@ const AP_Param::Info MiniDP::var_info[] = {
     // @Path: Parameters.cpp
     GOBJECTVARPTR(azipod_params, "AZI", &minidp.azipod_var_info),
 
+    // @Param: FRAME_AFT_ARM
+    // @DisplayName: Aft lateral thrust lever arm
+    // @Description: Longitudinal distance from yaw center to the aft pods (902) or stern tunnel thruster (901).
+    // @Units: m
+    // @Range: 0.05 100
+    // @User: Standard
+    GSCALAR(frame_aft_arm, "FRAME_AFT_ARM", 1.0f),
+
+    // @Param: FRAME_BOW_ARM
+    // @DisplayName: Bow thruster lever arm
+    // @Description: Longitudinal distance from yaw center to the bow thruster.
+    // @Units: m
+    // @Range: 0.05 100
+    // @User: Standard
+    GSCALAR(frame_bow_arm, "FRAME_BOW_ARM", 1.0f),
+
+    // @Param: FRAME_HALF_SPAN
+    // @DisplayName: Half screw separation
+    // @Description: Lateral distance of each longitudinal propulsion screw from the centerline on frame 901.
+    // @Units: m
+    // @Range: 0.05 100
+    // @User: Standard
+    GSCALAR(frame_half_span, "FRAME_HALF_SPAN", 1.0f),
+
     // @Param: FRAME_SCR_POS
     // @DisplayName: Propulsion screw position
-    // @Description: Position of the Motor1 and Motor2 propulsion screws relative to the yaw center for frame 901. Aft preserves the default differential screw yaw sign, center removes screw yaw contribution, and forward flips the screw yaw sign.
-    // @Values: -1:Aft,0:Center no yaw,1:Forward
+    // @Description: Legacy mounting annotation for frame 901. Longitudinal position does not change screw yaw sign. Use FRAME_SCR_YAW=0 to disable screw yaw contribution.
+    // @Values: -1:Aft,0:Center,1:Forward
     // @User: Standard
     GSCALAR(frame_screw_position, "FRAME_SCR_POS", int8_t(MiniDP_ScrewPosition::AFT)),
 

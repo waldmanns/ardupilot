@@ -52,13 +52,13 @@ public:
 
 private:
     MiniDP_State state{};
-    Location last_origin;
-    bool have_origin;
-    uint32_t origin_id;
-    uint32_t reset_counter;
-    uint32_t last_yaw_reset_ms;
-    uint32_t last_position_reset_ms;
-    uint32_t last_velocity_reset_ms;
+    Location last_origin{};
+    bool have_origin = false;
+    uint32_t origin_id = 0;
+    uint32_t reset_counter = 0;
+    uint32_t last_yaw_reset_ms = 0;
+    uint32_t last_position_reset_ms = 0;
+    uint32_t last_velocity_reset_ms = 0;
 
     void update_origin(AP_AHRS &ahrs, MiniDP_State &next);
     void update_reset_counter(AP_AHRS &ahrs, MiniDP_State &next);

@@ -1,6 +1,7 @@
 #include <AP_gtest.h>
 
 #include "ActuatorTest.h"
+#include <math.h>
 
 TEST(MiniDPActuatorTest, StartsPercentTest)
 {
@@ -142,6 +143,28 @@ TEST(MiniDPActuatorTest, ReplacementRecordsStopReason)
     EXPECT_EQ(
         test.last_stop_reason(),
         MiniDP_ActuatorTestStopReason::REPLACED);
+}
+
+
+TEST(MiniDPActuatorTest, NonfiniteRequestCannotReplaceRunningTest)
+{
+    MiniDP_ActuatorTest test;
+    MiniDP_ActuatorTestRequest request{};
+    request.timeout_s = 1.0f;
+    request.throttle_value = 25.0f;
+    ASSERT_TRUE(test.start(100, request).accepted);
+    const float bad[] = {NAN, INFINITY, -INFINITY};
+    for (float value : bad) {
+        request.timeout_s = value;
+        EXPECT_FALSE(test.start(200, request).accepted);
+        request.timeout_s = 1.0f;
+        request.throttle_value = value;
+        EXPECT_FALSE(test.start(200, request).accepted);
+        request.throttle_value = 25.0f;
+        EXPECT_TRUE(test.active());
+        EXPECT_EQ(test.end_ms(), 1100U);
+        EXPECT_FLOAT_EQ(test.command().demand, 0.25f);
+    }
 }
 
 AP_GTEST_MAIN()

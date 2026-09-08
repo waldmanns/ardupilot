@@ -6,6 +6,7 @@ def build(bld):
         return
 
     tests = [
+        ('test_minidp_dynamics', ['test_dynamics.cpp', '../Controller.cpp', '../Output.cpp']),
         ('test_minidp_mode', ['test_mode.cpp', '../Mode.cpp']),
         ('test_minidp_authority', ['test_authority.cpp', '../Authority.cpp']),
         ('test_minidp_input', ['test_input.cpp', '../Input.cpp']),

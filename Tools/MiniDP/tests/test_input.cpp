@@ -146,4 +146,21 @@ TEST(MiniDPInput, MavlinkManualClampsAndIgnoresInvalidAxis)
     EXPECT_FLOAT_EQ(command.axes.yaw, -0.5f);
 }
 
+
+TEST(MiniDPInput, SparseOverridesCannotUseStaleReceiverChannels)
+{
+    MiniDP_InputMapper input;
+    input.init();
+    auto frame = healthy_frame(16);
+    frame.valid_mask = (1U << 0) | (1U << 1);
+    EXPECT_FALSE(input.map_rc(frame, 100).valid);
+    frame.valid_mask |= (1U << 3);
+    EXPECT_TRUE(input.map_rc(frame, 100).valid);
+    auto config = input.config();
+    config.rc_arm_channel = 16;
+    input.set_config(config);
+    frame.pwm[15] = 2000;
+    EXPECT_FALSE(input.rc_arm_active(frame));
+}
+
 AP_GTEST_MAIN()

@@ -1,4 +1,5 @@
 #include "Output.h"
+#include "ControlMath.h"
 
 #include <math.h>
 
@@ -10,6 +11,9 @@ constexpr uint8_t output_none = 255U;
 
 float constrain_unit(const float value)
 {
+    if (!isfinite(value)) {
+        return 0.0f;
+    }
     if (value > 1.0f) {
         return 1.0f;
     }
@@ -26,27 +30,9 @@ float absf(const float value)
 
 float sanitized_scale(const float scale)
 {
-    return scale > 0.0f ? scale : 1.0f;
+    return isfinite(scale) && scale > 0.0f ? fminf(scale, 10.0f) : 1.0f;
 }
 
-float wrap_pi_local(float angle_rad)
-{
-    while (angle_rad > pi) {
-        angle_rad -= 2.0f * pi;
-    }
-    while (angle_rad < -pi) {
-        angle_rad += 2.0f * pi;
-    }
-    return angle_rad;
-}
-
-bool angle_in_range(
-    const float angle_rad,
-    const float angle_min_rad,
-    const float angle_max_rad)
-{
-    return angle_rad >= angle_min_rad && angle_rad <= angle_max_rad;
-}
 
 float constrain_angle(
     const float angle_rad,
@@ -82,19 +68,6 @@ MiniDP_ScrewPosition sanitize_screw_position(const MiniDP_ScrewPosition position
         return position;
     }
     return MiniDP_ScrewPosition::AFT;
-}
-
-float screw_position_yaw_sign(const MiniDP_ScrewPosition position)
-{
-    switch (position) {
-    case MiniDP_ScrewPosition::AFT:
-        return 1.0f;
-    case MiniDP_ScrewPosition::CENTER:
-        return 0.0f;
-    case MiniDP_ScrewPosition::FORWARD:
-        return -1.0f;
-    }
-    return 1.0f;
 }
 
 uint16_t sane_pwm(const uint16_t pwm, const uint16_t fallback)
@@ -244,9 +217,14 @@ void MiniDP_OutputManager::configure_dual_az_180_bow_frame()
 
 void MiniDP_OutputManager::apply_omni_plus_geometry()
 {
-    const float screw_yaw =
-        screw_position_yaw_sign(frame_geometry.screw_position) *
-        frame_geometry.screw_yaw_scale;
+    // Longitudinal screws create yaw through lateral offset, independent
+    // of forward/aft placement. Use the scale to disable their yaw authority.
+    const float screw_yaw = frame_geometry.screw_yaw_scale / frame_geometry.screw_half_span_m;
+    const float arm_sum = frame_geometry.aft_arm_m + frame_geometry.bow_arm_m;
+    configs[2].k_sway = 2.0f * frame_geometry.aft_arm_m / arm_sum;
+    configs[3].k_sway = 2.0f * frame_geometry.bow_arm_m / arm_sum;
+    configs[2].k_yaw = 1.0f / frame_geometry.bow_arm_m;
+    configs[3].k_yaw = -1.0f / frame_geometry.aft_arm_m;
 
     configs[0].k_yaw = screw_yaw;
     configs[1].k_yaw = -screw_yaw;
@@ -277,6 +255,8 @@ void MiniDP_OutputManager::init(const int16_t frame_type)
         azipod_configs[i].angle_min_rad = -half_pi;
         azipod_configs[i].angle_max_rad = half_pi;
         azipod_configs[i].allow_reverse_fold = true;
+        azipod_configs[i].steering_rate_rad_s = half_pi;
+        pod_angle_rad[i] = 0.0f;
     }
     if (!set_frame_type(frame_type)) {
         (void)set_frame_type(default_frame_type);
@@ -307,6 +287,8 @@ bool MiniDP_OutputManager::set_azipod_config(
         sanitized.angle_min_rad = center - half_pi;
         sanitized.angle_max_rad = center + half_pi;
     }
+    sanitized.steering_rate_rad_s = isfinite(sanitized.steering_rate_rad_s) ?
+        fminf(2.0f * pi, fmaxf(0.01f, sanitized.steering_rate_rad_s)) : half_pi;
     azipod_configs[index] = sanitized;
 
     if (configured_frame_type == int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW)) {
@@ -326,6 +308,12 @@ void MiniDP_OutputManager::set_frame_geometry(
         sanitize_screw_position(frame_geometry.screw_position);
     frame_geometry.screw_yaw_scale =
         sanitize_screw_yaw_scale(frame_geometry.screw_yaw_scale);
+    const auto arm = [](float value) {
+        return isfinite(value) ? fminf(100.0f, fmaxf(0.05f, value)) : 1.0f;
+    };
+    frame_geometry.aft_arm_m = arm(frame_geometry.aft_arm_m);
+    frame_geometry.bow_arm_m = arm(frame_geometry.bow_arm_m);
+    frame_geometry.screw_half_span_m = arm(frame_geometry.screw_half_span_m);
 
     switch (configured_frame_type) {
     case int16_t(MiniDP_FrameType::OMNI_PLUS):
@@ -345,8 +333,8 @@ bool MiniDP_OutputManager::set_actuator_config(
     }
 
     MiniDP_ActuatorConfig sanitized = config;
-    if (sanitized.pwm_channel >= max_actuators) {
-        sanitized.pwm_channel = index;
+    if (sanitized.pwm_channel >= 32U && sanitized.pwm_channel != output_none) {
+        return false;
     }
     sanitized.pwm_trim = sane_pwm(sanitized.pwm_trim, 1500U);
     sanitized.pwm_min = sane_pwm(sanitized.pwm_min, 1100U);
@@ -366,7 +354,7 @@ bool MiniDP_OutputManager::set_actuator_config(
     sanitized.min_effective_output =
         constrain_unit(absf(sanitized.min_effective_output));
 
-    if (sanitized.enabled) {
+    if (sanitized.enabled && sanitized.pwm_channel != output_none) {
         for (uint8_t i = 0; i < max_actuators; i++) {
             if (i != index &&
                 configs[i].enabled &&
@@ -377,6 +365,26 @@ bool MiniDP_OutputManager::set_actuator_config(
     }
 
     configs[index] = sanitized;
+    return true;
+}
+
+bool MiniDP_OutputManager::set_actuator_configs(
+    const MiniDP_ActuatorConfig (&new_configs)[max_actuators])
+{
+    // Validate the whole permutation before replacing any calibration.
+    MiniDP_ActuatorConfig saved[max_actuators];
+    for (uint8_t i = 0; i < max_actuators; i++) {
+        saved[i] = configs[i];
+        configs[i].enabled = false;
+    }
+    for (uint8_t i = 0; i < max_actuators; i++) {
+        if (!set_actuator_config(i, new_configs[i])) {
+            for (uint8_t j = 0; j < max_actuators; j++) {
+                configs[j] = saved[j];
+            }
+            return false;
+        }
+    }
     return true;
 }
 
@@ -416,12 +424,15 @@ void MiniDP_OutputManager::initialise_output_frame(
 
 const MiniDP_OutputFrame &MiniDP_OutputManager::update(
     const MiniDP_OutputState state,
-    const MiniDP_AxisCommand &command)
+    const MiniDP_AxisCommand &command, const float dt_s)
 {
+    output_dt_s = isfinite(dt_s) ? fminf(1.0f, fmaxf(0.0f, dt_s)) : 0.0f;
+    const MiniDP_AxisCommand safe_command{constrain_unit(command.surge),
+        constrain_unit(command.sway), constrain_unit(command.yaw)};
     switch (state) {
     case MiniDP_OutputState::ARMED_ACTIVE:
     case MiniDP_OutputState::ACTUATOR_TEST:
-        apply_active_outputs(state, command);
+        apply_active_outputs(state, safe_command);
         break;
     case MiniDP_OutputState::DISARMED:
     case MiniDP_OutputState::ARMED_NEUTRAL:
@@ -490,6 +501,8 @@ void MiniDP_OutputManager::set_safe_output(
 void MiniDP_OutputManager::apply_safe_outputs(const MiniDP_OutputState state)
 {
     initialise_output_frame(state);
+    // Hold the last steering demand on neutral/failsafe instead of recentering
+    // unexpectedly. Disarmed/kill PWM policies remain authoritative.
 
     for (uint8_t i = 0; i < max_actuators; i++) {
         switch (state) {
@@ -512,6 +525,32 @@ void MiniDP_OutputManager::apply_safe_outputs(const MiniDP_OutputState state)
         }
     }
 
+    if (configured_frame_type == int16_t(MiniDP_FrameType::DUAL_AZ_180_BOW)) {
+        for (uint8_t i = 0; i < 2; i++) {
+            const uint8_t motor = thruster_configs[i].output2;
+            auto &steering = output_frame.actuator[motor];
+            MiniDP_OutputSafeAction action = MiniDP_OutputSafeAction::SEND_NEUTRAL;
+            if (state == MiniDP_OutputState::DISARMED) {
+                action = configs[motor].disarmed_action;
+            } else if (state == MiniDP_OutputState::FAILSAFE) {
+                action = configs[motor].failsafe_action;
+            } else if (state == MiniDP_OutputState::KILL) {
+                action = configs[motor].kill_action;
+            }
+            if (!steering.pwm_enabled || action == MiniDP_OutputSafeAction::SEND_FAILSAFE) {
+                // With no position feedback, allow a full calibrated sweep to
+                // reacquire the commanded angle after PWM loss or an external
+                // steering command. Thrust remains neutral during this period.
+                pod_settle_s[i] = (thruster_configs[i].angle_max_rad -
+                    thruster_configs[i].angle_min_rad) / azipod_configs[i].steering_rate_rad_s;
+            }
+            if (steering.pwm_enabled && action == MiniDP_OutputSafeAction::SEND_NEUTRAL) {
+                steering.pwm_us = pwm_from_angle(configs[motor], pod_angle_rad[i],
+                    thruster_configs[i].angle_min_rad, thruster_configs[i].angle_max_rad);
+            }
+            output_frame.thruster[i].value2 = pod_angle_rad[i];
+        }
+    }
     sync_thruster_outputs_from_actuators();
 }
 
@@ -565,7 +604,7 @@ void MiniDP_OutputManager::apply_scalar_mixer_outputs(
         float demand = raw[i] / saturation_scale;
         if (absf(demand) < configs[i].deadband) {
             demand = 0.0f;
-        } else if (configs[i].min_effective_output > 0.0f &&
+        } else if (absf(demand) > 0.0f && configs[i].min_effective_output > 0.0f &&
                    absf(demand) < configs[i].min_effective_output) {
             demand = demand < 0.0f ?
                 -configs[i].min_effective_output :
@@ -593,9 +632,11 @@ void MiniDP_OutputManager::apply_dual_az_180_bow_outputs(
 
     float pod1_x = 0.5f * command.surge;
     float pod2_x = 0.5f * command.surge;
-    float pod1_y = 0.25f * command.sway + 0.25f * command.yaw;
-    float pod2_y = 0.25f * command.sway - 0.25f * command.yaw;
-    float bow = 0.5f * command.sway + 0.5f * command.yaw;
+    // Solve Fy=aft+bow and Mz=-aft_arm*aft+bow_arm*bow.
+    const float arm_sum = frame_geometry.aft_arm_m + frame_geometry.bow_arm_m;
+    float bow = (frame_geometry.aft_arm_m * command.sway + command.yaw) / arm_sum;
+    float pod1_y = 0.5f * (frame_geometry.bow_arm_m * command.sway - command.yaw) / arm_sum;
+    float pod2_y = pod1_y;
 
     float max_abs = sqrtf((pod1_x * pod1_x) + (pod1_y * pod1_y));
     const float pod2_abs = sqrtf((pod2_x * pod2_x) + (pod2_y * pod2_y));
@@ -619,12 +660,29 @@ void MiniDP_OutputManager::apply_dual_az_180_bow_outputs(
     set_azimuth_180_thruster_output(0U, pod1_x, pod1_y, saturated);
     set_azimuth_180_thruster_output(1U, pod2_x, pod2_y, saturated);
     set_fixed_thruster_output(2U, bow, saturated);
+    if (pod_in_transit[0] || pod_in_transit[1]) {
+        // Do not apply the other half of a force/moment allocation while a
+        // pod is still steering. Keep steering PWM active, all thrust neutral.
+        for (uint8_t i = 0; i < 3; i++) {
+            const uint8_t motor = thruster_configs[i].output1;
+            output_frame.actuator[motor].demand = 0.0f;
+            output_frame.actuator[motor].pwm_us = configs[motor].pwm_trim;
+            output_frame.thruster[i].force_x = 0.0f;
+            output_frame.thruster[i].force_y = 0.0f;
+            output_frame.thruster[i].value = 0.0f;
+            output_frame.thruster[i].pwm1_us = configs[motor].pwm_trim;
+        }
+    }
 }
 
 void MiniDP_OutputManager::apply_actuator_test_output(
     const MiniDP_ActuatorTestCommand &command)
 {
     initialise_output_frame(MiniDP_OutputState::ACTUATOR_TEST);
+    for (uint8_t i = 0; i < 2; i++) {
+        pod_settle_s[i] = (azipod_configs[i].angle_max_rad -
+            azipod_configs[i].angle_min_rad) / azipod_configs[i].steering_rate_rad_s;
+    }
 
     for (uint8_t i = 0; i < max_actuators; i++) {
         set_disabled_output(i);
@@ -675,7 +733,7 @@ void MiniDP_OutputManager::set_fixed_thruster_output(
 
     if (absf(demand) < configs[output_index].deadband) {
         demand = 0.0f;
-    } else if (configs[output_index].min_effective_output > 0.0f &&
+    } else if (absf(demand) > 0.0f && configs[output_index].min_effective_output > 0.0f &&
                absf(demand) < configs[output_index].min_effective_output) {
         demand = demand < 0.0f ?
             -configs[output_index].min_effective_output :
@@ -725,33 +783,62 @@ void MiniDP_OutputManager::set_azimuth_180_thruster_output(
         return;
     }
 
-    float thrust = sqrtf((force_x * force_x) + (force_y * force_y));
-    float angle_rad = thrust > 0.0f ? atan2f(force_y, force_x) : 0.0f;
+    const float magnitude = hypotf(force_x, force_y);
+    const float desired_angle = magnitude > 1.0e-6f ? atan2f(force_y, force_x) : pod_angle_rad[thruster_index];
+    float angle_rad = pod_angle_rad[thruster_index];
+    float thrust = 0.0f;
+    float best_cost = INFINITY;
+    // Project the requested vector onto each feasible direction. Consider
+    // reverse thrust too; choose a continuous solution near the fold boundary.
+    const float candidates[] = {
+        constrain_angle(desired_angle, thruster.angle_min_rad, thruster.angle_max_rad),
+        constrain_angle(MiniDP_Math::wrap_pi(desired_angle + pi), thruster.angle_min_rad, thruster.angle_max_rad),
+        thruster.angle_min_rad, thruster.angle_max_rad,
+        constrain_angle(angle_rad, thruster.angle_min_rad, thruster.angle_max_rad)
+    };
+    for (float candidate : candidates) {
+        float projected = force_x * cosf(candidate) + force_y * sinf(candidate);
+        if (!thruster.allow_reverse_fold) {
+            projected = fmaxf(0.0f, projected);
+        }
+        const float dx = force_x - projected * cosf(candidate);
+        const float dy = force_y - projected * sinf(candidate);
+        const float travel = (candidate - pod_angle_rad[thruster_index]) / pi;
+        const float cost = dx * dx + dy * dy + 0.0025f * magnitude * magnitude * travel * travel;
+        if (cost < best_cost) {
+            best_cost = cost;
+            angle_rad = candidate;
+            thrust = projected;
+        }
+    }
     uint16_t flags = thruster_flag_active;
-    if (saturated) {
+    const float max_step = azipod_configs[thruster_index].steering_rate_rad_s * output_dt_s;
+    const float old_angle = pod_angle_rad[thruster_index];
+    pod_angle_rad[thruster_index] = constrain_angle(angle_rad, old_angle - max_step, old_angle + max_step);
+    pod_settle_s[thruster_index] = fmaxf(0.0f, pod_settle_s[thruster_index] - output_dt_s);
+    const bool steering_in_transit = pod_settle_s[thruster_index] > 0.0f ||
+        fabsf(angle_rad - pod_angle_rad[thruster_index]) > 0.01f;
+    pod_in_transit[thruster_index] = steering_in_transit;
+    angle_rad = pod_angle_rad[thruster_index];
+    if (steering_in_transit) {
+        output_frame.saturated = true;
+        thrust = 0.0f;
+    }
+    const float residual = hypotf(force_x - thrust * cosf(angle_rad), force_y - thrust * sinf(angle_rad));
+    if (residual > 0.01f * magnitude + 1.0e-5f) {
+        flags |= thruster_flag_angle_limited;
+        output_frame.saturated = true;
+    }
+    if (saturated || output_frame.saturated) {
         flags |= thruster_flag_saturated;
     }
-
-    angle_rad = wrap_pi_local(angle_rad);
-    if (!angle_in_range(angle_rad, thruster.angle_min_rad, thruster.angle_max_rad)) {
-        const float folded_angle = wrap_pi_local(angle_rad + pi);
-        if (thruster.allow_reverse_fold &&
-            angle_in_range(folded_angle, thruster.angle_min_rad, thruster.angle_max_rad)) {
-            angle_rad = folded_angle;
-            thrust = -thrust;
-            flags |= thruster_flag_reverse_folded;
-        } else {
-            angle_rad = constrain_angle(
-                angle_rad,
-                thruster.angle_min_rad,
-                thruster.angle_max_rad);
-            flags |= thruster_flag_angle_limited;
-        }
+    if (thrust < 0.0f) {
+        flags |= thruster_flag_reverse_folded;
     }
 
     if (absf(thrust) < configs[thrust_output_index].deadband) {
         thrust = 0.0f;
-    } else if (configs[thrust_output_index].min_effective_output > 0.0f &&
+    } else if (absf(thrust) > 0.0f && configs[thrust_output_index].min_effective_output > 0.0f &&
                absf(thrust) < configs[thrust_output_index].min_effective_output) {
         thrust = thrust < 0.0f ?
             -configs[thrust_output_index].min_effective_output :
@@ -870,27 +957,12 @@ uint16_t MiniDP_OutputManager::pwm_from_angle(
     const float angle_min_rad,
     const float angle_max_rad) const
 {
-    angle_rad = constrain_angle(
-        config.reversed ? -angle_rad : angle_rad,
-        angle_min_rad,
-        angle_max_rad);
+    angle_rad = constrain_angle(angle_rad, angle_min_rad, angle_max_rad);
+    const float range = angle_rad >= 0.0f ? angle_max_rad : -angle_min_rad;
+    // Normalize in the physical range before reversing the electrical range.
+    const float demand = range > 0.0f ? angle_rad / range : 0.0f;
+    return pwm_from_demand(config, demand);
 
-    float pwm = config.pwm_trim;
-    if (angle_rad >= 0.0f) {
-        const float range = angle_max_rad > 0.0f ? angle_max_rad : half_pi;
-        pwm += (angle_rad / range) * float(config.pwm_max - config.pwm_trim);
-    } else {
-        const float range = angle_min_rad < 0.0f ? -angle_min_rad : half_pi;
-        pwm += (angle_rad / range) * float(config.pwm_trim - config.pwm_min);
-    }
-
-    if (pwm < config.pwm_min) {
-        pwm = config.pwm_min;
-    } else if (pwm > config.pwm_max) {
-        pwm = config.pwm_max;
-    }
-
-    return uint16_t(pwm + 0.5f);
 }
 
 const char *MiniDP_OutputManager::state_name(const MiniDP_OutputState state)

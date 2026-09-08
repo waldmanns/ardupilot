@@ -1,11 +1,10 @@
 #include "Controller.h"
+#include "ControlMath.h"
 
 #include <math.h>
 
 namespace {
 
-constexpr float pi = 3.14159265358979323846f;
-constexpr float two_pi = 2.0f * pi;
 constexpr float max_controller_dt_s = 1.0f;
 
 float constrain_unit(const float value)
@@ -27,7 +26,7 @@ float sanitize_non_negative(const float value)
     if (!isfinite(value) || value < 0.0f) {
         return 0.0f;
     }
-    return value;
+    return fminf(value, 100.0f);
 }
 
 float sanitize_unit_positive(const float value, const float fallback)
@@ -42,17 +41,6 @@ float sanitize_unit_positive(const float value, const float fallback)
         return 1.0f;
     }
     return value;
-}
-
-float wrap_pi(float angle_rad)
-{
-    while (angle_rad > pi) {
-        angle_rad -= two_pi;
-    }
-    while (angle_rad < -pi) {
-        angle_rad += two_pi;
-    }
-    return angle_rad;
 }
 
 float constrain_axis(const float value, const float limit)
@@ -181,6 +169,12 @@ void MiniDP_Controller::set_config(
     cfg.yaw_limit = sanitize_unit_positive(cfg.yaw_limit, 0.5f);
     cfg.position_i_limit = sanitize_unit_positive(cfg.position_i_limit, 0.2f);
     cfg.yaw_i_limit = sanitize_unit_positive(cfg.yaw_i_limit, 0.2f);
+    if (cfg.yaw_i <= 0.0f) {
+        yaw_i_output = 0.0f;
+    }
+    if (cfg.position_i <= 0.0f) {
+        position_i_n = position_i_e = 0.0f;
+    }
     yaw_i_output = constrain_float_range(
         yaw_i_output,
         -cfg.yaw_i_limit,
@@ -197,6 +191,7 @@ void MiniDP_Controller::reset()
     last_target_id = 0;
     last_mode = MiniDP_Mode::MANUAL;
     have_update = false;
+    output_limited = false;
 }
 
 MiniDP_AxisCommand MiniDP_Controller::update(
@@ -242,13 +237,20 @@ MiniDP_AxisCommand MiniDP_Controller::update_heading_hold(
     const float dt_s)
 {
     MiniDP_AxisCommand command{};
-    if (!target.yaw_valid || !state.yaw_valid) {
+    if (!target.yaw_valid || !state.yaw_valid || !isfinite(target.yaw_rad) ||
+        !isfinite(state.yaw_rad) || !isfinite(state.yaw_rate_rad_s)) {
         yaw_i_output = 0.0f;
         return command;
     }
 
-    const float yaw_error = wrap_pi(target.yaw_rad - state.yaw_rad);
-    yaw_i_output += cfg.yaw_i * yaw_error * dt_s;
+    const float yaw_error = MiniDP_Math::wrap_pi(MiniDP_Math::wrap_pi(target.yaw_rad) - MiniDP_Math::wrap_pi(state.yaw_rad));
+    const float yaw_pd = cfg.yaw_p * yaw_error - cfg.yaw_d * state.yaw_rate_rad_s;
+    const float yaw_increment = cfg.yaw_i * yaw_error * dt_s;
+    if ((!output_limited || yaw_i_output * yaw_increment < 0.0f) &&
+        (fabsf(yaw_pd + yaw_i_output + yaw_increment) <= cfg.yaw_limit ||
+         (yaw_pd + yaw_i_output) * yaw_increment < 0.0f)) {
+        yaw_i_output += yaw_increment;
+    }
     yaw_i_output = constrain_float_range(
         yaw_i_output,
         -cfg.yaw_i_limit,
@@ -270,7 +272,11 @@ MiniDP_AxisCommand MiniDP_Controller::update_dp_hold(
     if (!target.position_valid ||
         !state.position_valid ||
         !state.velocity_valid ||
-        !state.yaw_valid) {
+        !state.yaw_valid || !isfinite(state.yaw_rad) || !isfinite(target.pos_n_m) || !isfinite(target.pos_e_m) ||
+        !isfinite(state.pos_n_m) || !isfinite(state.pos_e_m) ||
+        !isfinite(state.vel_n_m_s) || !isfinite(state.vel_e_m_s) ||
+        fabsf(target.pos_n_m) > 2.0e7f || fabsf(target.pos_e_m) > 2.0e7f ||
+        fabsf(state.pos_n_m) > 2.0e7f || fabsf(state.pos_e_m) > 2.0e7f) {
         position_i_n = 0.0f;
         position_i_e = 0.0f;
         command.surge = 0.0f;
@@ -286,12 +292,25 @@ MiniDP_AxisCommand MiniDP_Controller::update_dp_hold(
         cfg.position_deadband_m,
         cfg.position_radius_m);
 
-    position_i_n += cfg.position_i * error_n * dt_s;
-    position_i_e += cfg.position_i * error_e * dt_s;
-    constrain_vector_length(position_i_n, position_i_e, cfg.position_i_limit);
-
     const float yaw_cos = cosf(state.yaw_rad);
     const float yaw_sin = sinf(state.yaw_rad);
+    const float pd_n = cfg.position_p * error_n - cfg.velocity_d * state.vel_n_m_s;
+    const float pd_e = cfg.position_p * error_e - cfg.velocity_d * state.vel_e_m_s;
+    const float raw_x = yaw_cos * (pd_n + position_i_n) + yaw_sin * (pd_e + position_i_e);
+    const float raw_y = -yaw_sin * (pd_n + position_i_n) + yaw_cos * (pd_e + position_i_e);
+    if (!output_limited || position_i_n * error_n + position_i_e * error_e < 0.0f) {
+        float increment_x = cfg.position_i * (yaw_cos * error_n + yaw_sin * error_e) * dt_s;
+        float increment_y = cfg.position_i * (-yaw_sin * error_n + yaw_cos * error_e) * dt_s;
+        if (fabsf(raw_x + increment_x) > cfg.surge_limit && raw_x * increment_x >= 0.0f) {
+            increment_x = 0.0f;
+        }
+        if (fabsf(raw_y + increment_y) > cfg.sway_limit && raw_y * increment_y >= 0.0f) {
+            increment_y = 0.0f;
+        }
+        position_i_n += yaw_cos * increment_x - yaw_sin * increment_y;
+        position_i_e += yaw_sin * increment_x + yaw_cos * increment_y;
+    }
+    constrain_vector_length(position_i_n, position_i_e, cfg.position_i_limit);
 
     const float error_surge =
         (yaw_cos * ((cfg.position_p * error_n) + position_i_n)) +
@@ -304,11 +323,13 @@ MiniDP_AxisCommand MiniDP_Controller::update_dp_hold(
     const float velocity_sway =
         (-yaw_sin * state.vel_n_m_s) + (yaw_cos * state.vel_e_m_s);
 
+    const float raw_surge = error_surge - cfg.velocity_d * velocity_surge;
+    const float raw_sway = error_sway - cfg.velocity_d * velocity_sway;
     command.surge = constrain_axis(
-        error_surge - (cfg.velocity_d * velocity_surge),
+        raw_surge,
         cfg.surge_limit);
     command.sway = constrain_axis(
-        error_sway - (cfg.velocity_d * velocity_sway),
+        raw_sway,
         cfg.sway_limit);
     return command;
 }

@@ -103,7 +103,9 @@ void MiniDP_AxisLimiter::set_config(
     cfg.surge_slew_rate = sanitize_slew_rate(cfg.surge_slew_rate);
     cfg.sway_slew_rate = sanitize_slew_rate(cfg.sway_slew_rate);
     cfg.yaw_slew_rate = sanitize_slew_rate(cfg.yaw_slew_rate);
-    current_command = apply_limits_only(current_command);
+    current_command.surge = fminf(cfg.surge_limit, fmaxf(-cfg.surge_limit, current_command.surge));
+    current_command.sway = fminf(cfg.sway_limit, fmaxf(-cfg.sway_limit, current_command.sway));
+    current_command.yaw = fminf(cfg.yaw_limit, fmaxf(-cfg.yaw_limit, current_command.yaw));
 }
 
 MiniDP_AxisCommand MiniDP_AxisLimiter::update(

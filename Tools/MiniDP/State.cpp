@@ -103,6 +103,9 @@ void MiniDP_StateSource::update(
         (void)gps.speed_accuracy(next.gps_sacc_m);
     }
 
+    next.yaw_valid = next.yaw_valid && isfinite(next.yaw_rad) && isfinite(next.yaw_rate_rad_s);
+    next.position_valid = next.position_valid && isfinite(next.pos_n_m) && isfinite(next.pos_e_m);
+    next.velocity_valid = next.velocity_valid && isfinite(next.vel_n_m_s) && isfinite(next.vel_e_m_s);
     update_reset_counter(ahrs, next);
     state = next;
 }

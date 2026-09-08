@@ -37,6 +37,7 @@ enum class MiniDP_ModeReject : uint8_t {
     FAILSAFE_LATCHED,
     UNSUPPORTED_MODE,
     TARGET_INVALID,
+    OUTPUT_UNAVAILABLE,
 };
 
 struct MiniDP_ModeConfig {

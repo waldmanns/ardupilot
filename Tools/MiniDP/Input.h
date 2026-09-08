@@ -31,6 +31,7 @@ struct MiniDP_InputConfig {
 struct MiniDP_RCInputFrame {
     bool healthy;
     uint8_t channel_count;
+    uint16_t valid_mask = UINT16_MAX;
     float norm[16];
     uint16_t pwm[16];
 };

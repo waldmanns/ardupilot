@@ -1,5 +1,6 @@
 #include "GCS_MAVLink.h"
 #include "MiniDP.h"
+#include "ControlMath.h"
 
 #include <AP_Common/AP_FWVersion.h>
 #include <AP_Math/AP_Math.h>
@@ -13,7 +14,7 @@ extern const AP_HAL::HAL &hal;
 namespace {
 
 constexpr uint16_t set_pos_type_mask_pos_ignore = (1U << 0) | (1U << 1);
-constexpr uint16_t set_pos_type_mask_acc_ignore = (1U << 6) | (1U << 7);
+constexpr uint16_t set_pos_type_mask_acc_ignore = (7U << 6);
 constexpr uint16_t set_pos_type_mask_yaw_ignore = 1U << 10;
 
 bool parse_uint8_param(
@@ -22,7 +23,7 @@ bool parse_uint8_param(
     const uint8_t max_value,
     uint8_t &parsed)
 {
-    if (value < float(min_value) || value > float(max_value)) {
+    if (!isfinite(value) || value < float(min_value) || value > float(max_value)) {
         return false;
     }
 
@@ -118,8 +119,7 @@ bool supported_global_position_frame(const uint8_t frame)
 
 bool body_position_frame(const uint8_t frame)
 {
-    return frame == MAV_FRAME_BODY_NED ||
-           frame == MAV_FRAME_BODY_OFFSET_NED;
+    return frame == MAV_FRAME_BODY_OFFSET_NED;
 }
 
 } // namespace
@@ -229,6 +229,21 @@ void GCS_MAVLINK_MiniDP::handle_message(const mavlink_message_t &msg)
 #endif
 
     switch (msg.msgid) {
+    case MAVLINK_MSG_ID_SET_MODE: {
+        mavlink_set_mode_t packet;
+        mavlink_msg_set_mode_decode(&msg, &packet);
+        if ((packet.base_mode & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) != 0) {
+            MiniDP_Mode mode;
+            if (mode_from_custom_mode(packet.custom_mode, mode)) {
+                if (minidp.request_mode(mode, MiniDP_ModeReason::MAVLINK_REQUEST).accepted) {
+                    sysid_mygcs_seen(AP_HAL::millis());
+                }
+            }
+            return;
+        }
+        // The shared path handles hardware safety switch commands.
+        break;
+    }
     case MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED:
         handle_set_position_target_local_ned(msg);
         return;
@@ -404,9 +419,7 @@ bool GCS_MAVLINK_MiniDP::try_send_message(const enum ap_message id)
 
 uint64_t GCS_MAVLINK_MiniDP::capabilities() const
 {
-    return MAV_PROTOCOL_CAPABILITY_MISSION_FLOAT |
-           MAV_PROTOCOL_CAPABILITY_MISSION_INT |
-           MAV_PROTOCOL_CAPABILITY_COMMAND_INT |
+    return MAV_PROTOCOL_CAPABILITY_COMMAND_INT |
            MAV_PROTOCOL_CAPABILITY_SET_POSITION_TARGET_LOCAL_NED |
            MAV_PROTOCOL_CAPABILITY_SET_POSITION_TARGET_GLOBAL_INT |
            GCS_MAVLINK::capabilities();
@@ -429,6 +442,7 @@ MAV_RESULT GCS_MAVLINK_MiniDP::request_dp_target_ne(
             MiniDP_ModeReason::MAVLINK_REQUEST);
 
     if (result.accepted) {
+        sysid_mygcs_seen(AP_HAL::millis());
         if (accepted_text != nullptr) {
             send_minidp_text(MAV_SEVERITY_INFO, accepted_text);
         }
@@ -664,10 +678,17 @@ void GCS_MAVLINK_MiniDP::handle_set_position_target_local_ned(
     const bool acc_ignore =
         (packet.type_mask & set_pos_type_mask_acc_ignore) ==
         set_pos_type_mask_acc_ignore;
-    if (!acc_ignore || (pos_ignore && yaw_ignore)) {
+    constexpr uint16_t unsupported_mask = (7U << 3) | (1U << 11);
+    if (!acc_ignore || (pos_ignore && yaw_ignore) ||
+        (packet.type_mask & unsupported_mask) != unsupported_mask ||
+        (!yaw_ignore && !isfinite(packet.yaw))) {
         return;
     }
 
+    if (!pos_ignore && (!isfinite(packet.x) || !isfinite(packet.y) ||
+        fabsf(packet.x) > 2.0e7f || fabsf(packet.y) > 2.0e7f)) {
+        return;
+    }
     const MiniDP_State &state = minidp.get_state();
     float pos_n_m = 0.0f;
     float pos_e_m = 0.0f;
@@ -679,6 +700,7 @@ void GCS_MAVLINK_MiniDP::handle_set_position_target_local_ned(
     } else {
         switch (packet.coordinate_frame) {
         case MAV_FRAME_LOCAL_NED:
+        case MAV_FRAME_BODY_NED:
             pos_n_m = packet.x;
             pos_e_m = packet.y;
             break;
@@ -691,7 +713,6 @@ void GCS_MAVLINK_MiniDP::handle_set_position_target_local_ned(
             pos_e_m = state.pos_e_m + packet.y;
             break;
 
-        case MAV_FRAME_BODY_NED:
         case MAV_FRAME_BODY_OFFSET_NED:
             if (!state.position_valid || !state.yaw_valid) {
                 return;
@@ -717,7 +738,7 @@ void GCS_MAVLINK_MiniDP::handle_set_position_target_local_ned(
         yaw_valid = true;
         yaw_rad = packet.yaw;
         if (body_position_frame(packet.coordinate_frame) && state.yaw_valid) {
-            yaw_rad = wrap_PI(state.yaw_rad + yaw_rad);
+            yaw_rad = MiniDP_Math::wrap_pi(state.yaw_rad + MiniDP_Math::wrap_pi(yaw_rad));
         }
     }
 
@@ -750,7 +771,10 @@ void GCS_MAVLINK_MiniDP::handle_set_position_target_global_int(
     const bool acc_ignore =
         (packet.type_mask & set_pos_type_mask_acc_ignore) ==
         set_pos_type_mask_acc_ignore;
-    if (!acc_ignore || (pos_ignore && yaw_ignore)) {
+    constexpr uint16_t unsupported_mask = (7U << 3) | (1U << 11);
+    if (!acc_ignore || (pos_ignore && yaw_ignore) ||
+        (packet.type_mask & unsupported_mask) != unsupported_mask ||
+        (!yaw_ignore && !isfinite(packet.yaw))) {
         return;
     }
 
@@ -823,7 +847,12 @@ uint8_t GCS_MAVLINK_MiniDP::send_available_mode(const uint8_t index) const
 MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_set_mode(
     const mavlink_command_int_t &packet)
 {
-    const uint8_t base_mode = uint8_t(packet.param1);
+    uint8_t base_mode;
+    uint8_t requested_number;
+    if (!parse_uint8_param(packet.param1, 0, UINT8_MAX, base_mode) ||
+        !parse_uint8_param(packet.param2, 0, 2, requested_number)) {
+        return MAV_RESULT_DENIED;
+    }
     if ((base_mode & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) == 0) {
         send_minidp_text(
             MAV_SEVERITY_WARNING,
@@ -832,7 +861,7 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_set_mode(
     }
 
     MiniDP_Mode requested_mode = MiniDP_Mode::MANUAL;
-    if (!mode_from_custom_mode(uint32_t(packet.param2), requested_mode)) {
+    if (!mode_from_custom_mode(requested_number, requested_mode)) {
         send_minidp_text(
             MAV_SEVERITY_WARNING,
             "Mode rejected: unsupported");
@@ -861,6 +890,7 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_set_mode(
         return MAV_RESULT_DENIED;
     }
 
+    sysid_mygcs_seen(AP_HAL::millis());
     send_minidp_text(MAV_SEVERITY_INFO, "Mode accepted");
     return MAV_RESULT_ACCEPTED;
 }
@@ -869,7 +899,7 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_motor_test(
     const mavlink_command_int_t &packet)
 {
     const int32_t motor_count = packet.x;
-    if (motor_count > 1) {
+    if (motor_count < 0 || motor_count > 1) {
         send_minidp_text(
             MAV_SEVERITY_WARNING,
             "Actuator test rejected: count");
@@ -885,7 +915,7 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_motor_test(
         return MAV_RESULT_DENIED;
     }
 
-    if (packet.param1 < 1.0f ||
+    if (!isfinite(packet.param1) || packet.param1 < 1.0f ||
         packet.param1 > float(MiniDP_OutputManager::max_actuators)) {
         send_minidp_text(
             MAV_SEVERITY_WARNING,
@@ -967,6 +997,9 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_do_reposition(
 MAV_RESULT GCS_MAVLINK_MiniDP::handle_mav_cmd_component_arm_disarm(
     const mavlink_command_int_t &packet)
 {
+    if (!isfinite(packet.param1) || !isfinite(packet.param2)) {
+        return MAV_RESULT_DENIED;
+    }
     const bool force = is_equal(packet.param2, 21196.0f);
 
     if (is_equal(packet.param1, 1.0f)) {
@@ -1006,10 +1039,8 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_preflight_reboot(
     const mavlink_command_int_t &packet,
     const mavlink_message_t &msg)
 {
-    if (is_equal(packet.param1, 1.0f) ||
-        is_equal(packet.param1, 3.0f)) {
-        AP_Param::flush();
-        hal.scheduler->delay(50);
+    if (!isfinite(packet.param1)) {
+        return MAV_RESULT_DENIED;
     }
     return GCS_MAVLINK::handle_preflight_reboot(packet, msg);
 }
@@ -1019,6 +1050,17 @@ MAV_RESULT GCS_MAVLINK_MiniDP::handle_command_int_packet(
     const mavlink_message_t &msg)
 {
     switch (packet.command) {
+    case MAV_CMD_RUN_PREARM_CHECKS: {
+        if (minidp.is_armed() || hal.util->get_soft_armed()) {
+            return MAV_RESULT_TEMPORARILY_REJECTED;
+        }
+        const auto result = minidp.check_arm();
+        if (!result.accepted) {
+            send_text(MAV_SEVERITY_WARNING, "PreArm: %s",
+                MiniDP_Arming::reject_name(result.rejection));
+        }
+        return result.accepted ? MAV_RESULT_ACCEPTED : MAV_RESULT_FAILED;
+    }
     case MAV_CMD_COMPONENT_ARM_DISARM:
         return handle_mav_cmd_component_arm_disarm(packet);
     case MAV_CMD_DO_SET_MODE:

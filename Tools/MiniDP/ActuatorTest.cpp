@@ -1,5 +1,7 @@
 #include "ActuatorTest.h"
 
+#include <math.h>
+
 namespace {
 
 float absf(const float value)
@@ -9,11 +11,11 @@ float absf(const float value)
 
 uint32_t timeout_ms_from_seconds(const float timeout_s)
 {
-    if (timeout_s <= 0.0f) {
+    if (!isfinite(timeout_s) || timeout_s <= 0.0f) {
         return 0;
     }
 
-    const float requested_ms = timeout_s * 1000.0f;
+    const float requested_ms = fminf(timeout_s, float(MiniDP_ActuatorTest::max_timeout_ms) * 0.001f) * 1000.0f;
     if (requested_ms >= float(MiniDP_ActuatorTest::max_timeout_ms)) {
         return MiniDP_ActuatorTest::max_timeout_ms;
     }
@@ -37,6 +39,10 @@ MiniDP_ActuatorTestStartResult MiniDP_ActuatorTest::start(
         timeout_ms_from_seconds(request.timeout_s);
     if (requested_timeout_ms == 0U) {
         return {false, MiniDP_ActuatorTestReject::INVALID_TIMEOUT};
+    }
+
+    if (!isfinite(request.throttle_value)) {
+        return {false, MiniDP_ActuatorTestReject::INVALID_THROTTLE_VALUE};
     }
 
     MiniDP_ActuatorTestCommand new_command{};

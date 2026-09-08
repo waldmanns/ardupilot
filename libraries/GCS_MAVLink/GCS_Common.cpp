@@ -720,7 +720,7 @@ void GCS_MAVLINK::send_mission_current(const class AP_Mission &mission, uint16_t
     }
 
 #if AP_VEHICLE_ENABLED
-    const uint8_t mission_mode = AP::vehicle()->current_mode_requires_mission() ? 1 : 0;
+    const uint8_t mission_mode = (AP::vehicle() != nullptr && AP::vehicle()->current_mode_requires_mission()) ? 1 : 0;
 #else
     const uint8_t mission_mode = 0;
 #endif
@@ -2875,7 +2875,7 @@ MAV_RESULT GCS_MAVLINK::_set_mode_common(const uint8_t _base_mode, const uint32_
     // only accept custom modes because there is no easy mapping from Mavlink flight modes to AC flight modes
 #if AP_VEHICLE_ENABLED
     if ((_base_mode & MAV_MODE_FLAG_CUSTOM_MODE_ENABLED) != 0) {
-        if (!AP::vehicle()->set_mode(_custom_mode, ModeReason::GCS_COMMAND)) {
+        if (AP::vehicle() == nullptr || !AP::vehicle()->set_mode(_custom_mode, ModeReason::GCS_COMMAND)) {
             // often we should be returning DENIED rather than FAILED
             // here.  Perhaps a "has_mode" callback on AP_::vehicle()
             // would do?
@@ -3641,10 +3641,19 @@ MAV_RESULT GCS_MAVLINK::handle_preflight_reboot(const mavlink_command_int_t &pac
     const bool hold_in_bootloader = is_equal(packet.param1, 3.0f);
 
 #if AP_VEHICLE_ENABLED
-    AP::vehicle()->reboot(hold_in_bootloader);  // not expected to return
-#else
-    hal.scheduler->reboot(hold_in_bootloader);
+    if (AP::vehicle() != nullptr) {
+        AP::vehicle()->reboot(hold_in_bootloader);  // not expected to return
+    }
 #endif
+    // Standalone applications have no AP_Vehicle. Preserve the same output
+    // and storage precautions before invoking the HAL reboot.
+    SRV_Channels::zero_rc_outputs();
+    hal.rcout->force_safety_on();
+    AP_Param::flush();
+    hal.scheduler->register_delay_callback(nullptr, 5);
+    hal.serial(0)->flush();
+    hal.scheduler->delay(200);
+    hal.scheduler->reboot(hold_in_bootloader);
 
     return MAV_RESULT_FAILED;
 }
@@ -5407,7 +5416,7 @@ void GCS_MAVLINK::handle_landing_target(const mavlink_message_t &msg)
 bool GCS_MAVLINK::set_home_to_current_location(bool _lock)
 {
 #if AP_VEHICLE_ENABLED
-    return AP::vehicle()->set_home_to_current_location(_lock);
+    return AP::vehicle() != nullptr && AP::vehicle()->set_home_to_current_location(_lock);
 #else
     return false;
 #endif
@@ -5415,7 +5424,7 @@ bool GCS_MAVLINK::set_home_to_current_location(bool _lock)
 
 bool GCS_MAVLINK::set_home(const Location& loc, bool _lock) {
 #if AP_VEHICLE_ENABLED
-    return AP::vehicle()->set_home(loc, _lock);
+    return AP::vehicle() != nullptr && AP::vehicle()->set_home(loc, _lock);
 #else
     return false;
 #endif
