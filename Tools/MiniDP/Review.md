@@ -1,4 +1,4 @@
-# MiniDP consistency review and corrections — 2026-09-08
+# MiniDP consistency review and corrections — 2026-09-09
 
 The initial review covered commit `2fc3748301`, all MiniDP modules, parameter
 storage, frame allocation, controller and authority logic, MAVLink, output
@@ -49,15 +49,20 @@ Additional corrections:
 - Normal propulsion requires a complete frame output assignment; individual
   tests can exercise assigned actuators. Unsupported mission capabilities are
   no longer advertised. SITL fault-injection parameters are registered.
+- MAVLink pre-arm checks use MiniDP's surface-vessel policy without changing
+  arming state or calling the generic vehicle mission/barometer checks. The
+  shared mission pre-arm check also guards the missing vehicle singleton.
 
 ## Validation
 
 - SITL firmware build: passed.
 - Nine C++ suites, **101 tests**: passed, including two planar vessel simulations
   using allocated forces, steering travel, drag, and steady external force/moment.
-- Isolated MAVLink SITL regression: initial suite passed; expanded receiver-loss
-  and reboot-persistence suite is being completed.
-- Hardware compile for the existing `revo-mini` target: being completed.
+- Isolated MAVLink SITL regression: passed, including receiver loss with sparse
+  overrides, pre-arm checks, failsafe recovery, saved calibration after reboot,
+  and applying a pending frame change only after reboot.
+- Hardware compile for the existing `revo-mini` target: passed (600,911 bytes
+  flash used; 382,108 bytes free).
 
 The planar model is a regression fixture, not an identified hull. It assumes
 symmetric pod placement and calibrated normalized thrust; it cannot establish
