@@ -1097,16 +1097,23 @@ A board without a verified SD card must not advertise an SD-backed storage capab
 
 Runtime limits exist so the client never hard-codes H743 or F405 performance assumptions.
 
-Typical fields include:
+Minimum RUNTIME_LIMIT record v1:
 
 ```text
-max_realtime_hz
-attitude_update_hz
-control_update_hz
-max_subscriptions
-max_payload
-max_file_chunk
+record_version       u8 = 1
+limit_id             u32
+capability_flags     u64
+max_payload          u16
+max_file_chunk       u16
+max_subscriptions    u16
+max_realtime_hz      u16
+control_update_hz    u16
+attitude_update_hz   u16
 ```
+
+The protocol-service record uses the canonical path
+`runtime_limit/protocol/0` for `limit_id`. A zero limit means that the
+corresponding optional service is not currently available.
 
 The values returned by `HELLO` are the fast connection summary. RUNTIME_LIMIT descriptors may carry additional service-specific details.
 

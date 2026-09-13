@@ -17,6 +17,7 @@ static constexpr int32_t protocol_baud_max = 921600;
 static constexpr uint32_t protocol_rx_space = 512;
 static constexpr uint32_t protocol_tx_space = 512;
 static constexpr uint32_t default_service_rate_hz = 100;
+static constexpr uint16_t max_realtime_rate_hz = default_service_rate_hz;
 static constexpr int16_t default_describe_page_records = 4;
 static constexpr int16_t min_describe_page_records = 1;
 static constexpr int16_t max_describe_page_records = 16;

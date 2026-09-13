@@ -47,6 +47,7 @@ struct BoardCapability {
     uint8_t pwm_timer_group_count;
     const TimerGroup *flex_timer_groups;
     uint8_t flex_timer_group_count;
+    int16_t heartbeat_led_gpio;
 };
 
 const BoardCapability &core_evo_h743_capability();

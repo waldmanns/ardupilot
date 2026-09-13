@@ -52,6 +52,7 @@ const Vektor::BoardCapability board_capabilities[] = {
         uint8_t(sizeof(core_evo_pwm_timer_groups) / sizeof(core_evo_pwm_timer_groups[0])),
         core_evo_flex_timer_groups,
         uint8_t(sizeof(core_evo_flex_timer_groups) / sizeof(core_evo_flex_timer_groups[0])),
+        -1, // assigned when the H743 ChibiOS hwdef maps its status LED
     },
     {
         Vektor::BoardProfile::CORE_REDUCED_F405,
@@ -78,6 +79,7 @@ const Vektor::BoardCapability board_capabilities[] = {
         uint8_t(sizeof(core_reduced_pwm_timer_groups) / sizeof(core_reduced_pwm_timer_groups[0])),
         nullptr,
         0,
+        0, // LED_BLUE is GPIO(0) in the revo-mini hwdef
     },
 };
 

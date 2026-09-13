@@ -17,11 +17,17 @@ This scaffold intentionally starts small. It provides:
 - a small runtime state service with loop timing and uptime observables;
 - a minimal AP_Param-backed system parameter set;
 - typed signal primitives with timestamp and quality;
+- a common component/field schema registry that owns stable IDs and emits the
+  protocol descriptor records;
 - Vektor Serial Protocol v1 framing with COBS, CRC-32/ISO-HDLC, `PING`,
   `HELLO`, paged `DESCRIBE` for board/endpoints/timer groups/protocol/runtime
   diagnostics/system parameters, typed diagnostic and parameter `GET`/
   `GET_MANY`, persistent parameter `SET`/`SET_MANY`, `GET_ALL_PARAMS`, and
   protocol `ERROR` responses;
+- stable schema/capability hashes over ID-sorted descriptor records, runtime
+  limit discovery, and startup rejection of zero or colliding object IDs;
+- bounded realtime `SUBSCRIBE`/`UNSUBSCRIBE` sessions and compact volatile
+  `TELEMETRY` for the built-in protocol/runtime observables;
 - a small duplicate-request cache that replays identical retries and rejects
   sequence reuse with changed payloads.
 

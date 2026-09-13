@@ -1,6 +1,7 @@
 #include "Vektor_SerialProtocol.h"
 
 #include "Config.h"
+#include "Vektor_Schema.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/Util.h>
@@ -18,292 +19,12 @@ static constexpr uint8_t flex_pwm_input = 1U << 0;
 static constexpr uint8_t flex_pwm_output = 1U << 1;
 static constexpr uint8_t flex_rpm_capture = 1U << 2;
 static constexpr uint8_t flex_digital_input = 1U << 4;
-static constexpr uint32_t field_readable = 1U << 0;
-static constexpr uint32_t field_writable = 1U << 1;
-static constexpr uint32_t field_persistent = 1U << 2;
-static constexpr uint32_t field_has_min = 1U << 4;
-static constexpr uint32_t field_has_max = 1U << 5;
-static constexpr uint32_t field_has_default = 1U << 6;
-static constexpr uint32_t field_apply_live = 1U << 7;
-static constexpr uint32_t field_apply_reboot = 1U << 9;
-static constexpr uint32_t param_live_flags =
-    field_readable | field_writable | field_persistent |
-    field_has_min | field_has_max | field_has_default |
-    field_apply_live;
-static constexpr const char *protocol_component_path = "component/system/0";
-static constexpr const char *runtime_component_path = "component/system/1";
-
-struct ComponentDescriptor {
-    const char *path;
-    const char *type_path;
-    const char *name;
-    const char *display_name;
-    uint16_t instance;
-    uint32_t flags;
-};
-
-const ComponentDescriptor component_descriptors[] = {
-    {
-        protocol_component_path,
-        "component_type/system/protocol",
-        "protocol",
-        "Protocol",
-        0,
-        0,
-    },
-    {
-        runtime_component_path,
-        "component_type/system/runtime",
-        "runtime",
-        "Runtime",
-        1,
-        0,
-    },
-};
-
-static constexpr uint16_t component_descriptor_count =
-    sizeof(component_descriptors) / sizeof(component_descriptors[0]);
-
-enum class FieldSlot : uint8_t {
-    RX_FRAMES,
-    RX_DROPS,
-    TX_DROPS,
-    UPTIME_MS,
-    LOOP_COUNT,
-    LOOP_DT_US,
-    LOOP_WORK_US,
-    LOOP_MAX_WORK_US,
-    SERVICE_RATE_HZ,
-    SYS_OPTIONS,
-    SYS_DESC_PAGE,
-    SYS_PROTOCOL_BAUD,
-};
-
-struct FieldDescriptor {
-    const char *path;
-    const char *owner_component_path;
-    const char *name;
-    const char *display_name;
-    const char *units;
-    Protocol::FieldKind kind;
-    Protocol::PrimitiveType type;
-    uint32_t flags;
-    int32_t min_value;
-    int32_t max_value;
-    int32_t default_value;
-    FieldSlot slot;
-};
-
-const FieldDescriptor field_descriptors[] = {
-    {
-        "component/system/0/observable/rx_frames",
-        protocol_component_path,
-        "rx_frames",
-        "RX Frames",
-        "",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::RX_FRAMES,
-    },
-    {
-        "component/system/0/observable/rx_drops",
-        protocol_component_path,
-        "rx_drops",
-        "RX Drops",
-        "",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::RX_DROPS,
-    },
-    {
-        "component/system/0/observable/tx_drops",
-        protocol_component_path,
-        "tx_drops",
-        "TX Drops",
-        "",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::TX_DROPS,
-    },
-    {
-        "component/system/1/observable/uptime_ms",
-        runtime_component_path,
-        "uptime_ms",
-        "Uptime",
-        "ms",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::UPTIME_MS,
-    },
-    {
-        "component/system/1/observable/loop_count",
-        runtime_component_path,
-        "loop_count",
-        "Loop Count",
-        "",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::LOOP_COUNT,
-    },
-    {
-        "component/system/1/observable/loop_dt_us",
-        runtime_component_path,
-        "loop_dt_us",
-        "Loop Delta",
-        "us",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::LOOP_DT_US,
-    },
-    {
-        "component/system/1/observable/loop_work_us",
-        runtime_component_path,
-        "loop_work_us",
-        "Loop Work",
-        "us",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::LOOP_WORK_US,
-    },
-    {
-        "component/system/1/observable/loop_max_work_us",
-        runtime_component_path,
-        "loop_max_work_us",
-        "Max Loop Work",
-        "us",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U32,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::LOOP_MAX_WORK_US,
-    },
-    {
-        "component/system/1/observable/service_rate_hz",
-        runtime_component_path,
-        "service_rate_hz",
-        "Service Rate",
-        "Hz",
-        Protocol::FieldKind::OBSERVABLE,
-        Protocol::PrimitiveType::U16,
-        field_readable,
-        0,
-        0,
-        0,
-        FieldSlot::SERVICE_RATE_HZ,
-    },
-    {
-        "component/system/0/parameter/sys_options",
-        protocol_component_path,
-        "sys_options",
-        "System Options",
-        "",
-        Protocol::FieldKind::PARAMETER,
-        Protocol::PrimitiveType::I32,
-        param_live_flags,
-        0,
-        INT32_MAX,
-        0,
-        FieldSlot::SYS_OPTIONS,
-    },
-    {
-        "component/system/0/parameter/sys_desc_page",
-        protocol_component_path,
-        "sys_desc_page",
-        "Descriptor Page Size",
-        "records",
-        Protocol::FieldKind::PARAMETER,
-        Protocol::PrimitiveType::I16,
-        param_live_flags,
-        Vektor::min_describe_page_records,
-        Vektor::max_describe_page_records,
-        Vektor::default_describe_page_records,
-        FieldSlot::SYS_DESC_PAGE,
-    },
-    {
-        "component/system/0/parameter/sys_protocol_baud",
-        protocol_component_path,
-        "sys_protocol_baud",
-        "Protocol Baud",
-        "baud",
-        Protocol::FieldKind::PARAMETER,
-        Protocol::PrimitiveType::I32,
-        field_readable | field_writable | field_persistent |
-        field_has_min | field_has_max | field_has_default |
-        field_apply_reboot,
-        Vektor::protocol_baud_min,
-        Vektor::protocol_baud_max,
-        Vektor::protocol_baud,
-        FieldSlot::SYS_PROTOCOL_BAUD,
-    },
-};
-
-static constexpr uint16_t field_descriptor_count =
-    sizeof(field_descriptors) / sizeof(field_descriptors[0]);
+static constexpr const char *protocol_runtime_limit_path =
+    "runtime_limit/protocol/0";
 
 uint32_t id_for_path(const char *path)
 {
     return Vektor::Protocol::fnv1a32(path);
-}
-
-const FieldDescriptor *field_descriptor_by_index(uint16_t index)
-{
-    if (index >= field_descriptor_count) {
-        return nullptr;
-    }
-    return &field_descriptors[index];
-}
-
-const ComponentDescriptor *component_descriptor_by_index(uint16_t index)
-{
-    if (index >= component_descriptor_count) {
-        return nullptr;
-    }
-    return &component_descriptors[index];
-}
-
-const FieldDescriptor *field_descriptor_by_id(uint32_t field_id)
-{
-    for (uint16_t i = 0; i < field_descriptor_count; i++) {
-        if (id_for_path(field_descriptors[i].path) == field_id) {
-            return &field_descriptors[i];
-        }
-    }
-    return nullptr;
-}
-
-bool field_is_parameter(const FieldDescriptor &field)
-{
-    return field.kind == Protocol::FieldKind::PARAMETER;
 }
 
 int32_t signed_raw_value(Protocol::PrimitiveType type, uint32_t raw)
@@ -314,20 +35,13 @@ int32_t signed_raw_value(Protocol::PrimitiveType type, uint32_t raw)
     return int32_t(raw);
 }
 
-bool write_typed_payload(Protocol::PayloadWriter &writer,
-                         Protocol::PrimitiveType type,
-                         uint32_t raw)
+uint32_t float_raw_value(float value)
 {
-    switch (type) {
-    case Protocol::PrimitiveType::U16:
-    case Protocol::PrimitiveType::I16:
-        return writer.u16(uint16_t(raw));
-    case Protocol::PrimitiveType::U32:
-    case Protocol::PrimitiveType::I32:
-        return writer.u32(raw);
-    default:
-        return false;
-    }
+    static_assert(sizeof(value) == sizeof(uint32_t),
+                  "Vektor FLOAT32 requires a 32-bit float");
+    uint32_t raw = 0;
+    memcpy(&raw, &value, sizeof(raw));
+    return raw;
 }
 
 void pwm_channel_path(uint8_t channel, char *path, uint8_t path_len)
@@ -376,17 +90,23 @@ namespace Vektor {
 void SerialProtocol::init(AP_HAL::UARTDriver *uart,
                           const BoardCapability &capability,
                           Parameters &parameters,
-                          const RuntimeState &runtime)
+                          const RuntimeState &runtime,
+                          const VspComponent &vsp)
 {
     _uart = uart;
     _capability = &capability;
     _parameters = &parameters;
     _runtime = &runtime;
+    _vsp = &vsp;
     _server_nonce = uint32_t(AP_HAL::micros64()) ^ uint32_t(device_id());
-    _ready = (_uart != nullptr) && Protocol::self_test();
+    _ready = (_uart != nullptr) &&
+             Protocol::self_test() &&
+             initialize_descriptor_identity();
     _hello_seen = false;
     _capture_response = false;
     _request_cache.reset();
+    _subscriptions.reset(1000000U / max_realtime_rate_hz);
+    _telemetry_sequence = 0;
 
     if (!_ready) {
         return;
@@ -434,6 +154,8 @@ void SerialProtocol::update()
             break;
         }
     }
+
+    service_telemetry(AP_HAL::micros64());
 }
 
 void SerialProtocol::handle_frame(const Protocol::FrameView &frame)
@@ -472,6 +194,12 @@ void SerialProtocol::handle_frame(const Protocol::FrameView &frame)
     case Protocol::MessageType::GET_ALL_PARAMS:
         handle_get_all_params(frame);
         break;
+    case Protocol::MessageType::SUBSCRIBE:
+        handle_subscribe(frame);
+        break;
+    case Protocol::MessageType::UNSUBSCRIBE:
+        handle_unsubscribe(frame);
+        break;
     default:
         if (Protocol::is_known_message_type(uint8_t(frame.message_type))) {
             send_error(frame,
@@ -509,8 +237,6 @@ void SerialProtocol::handle_hello(const Protocol::FrameView &frame)
 
     (void)client_proto_minor;
     (void)client_feature_flags;
-    _server_nonce ^= client_nonce;
-
     if (client_min_major > Protocol::MAJOR_VERSION ||
         client_max_major < Protocol::MAJOR_VERSION) {
         send_error(frame,
@@ -520,6 +246,12 @@ void SerialProtocol::handle_hello(const Protocol::FrameView &frame)
         return;
     }
 
+    _server_nonce ^= client_nonce;
+    _hello_seen = false;
+    _request_cache.reset();
+    _subscriptions.reset(1000000U / max_realtime_rate_hz);
+    _telemetry_sequence = 0;
+
     Protocol::PayloadWriter writer(_payload, sizeof(_payload));
     writer.u8(Protocol::MAJOR_VERSION);
     writer.u16(0); // server protocol minor
@@ -527,15 +259,15 @@ void SerialProtocol::handle_hello(const Protocol::FrameView &frame)
     writer.str8(_capability->product_name);
     writer.str8(_capability->hardware_revision);
     writer.u32(_capability->board_id);
-    writer.u64(0); // schema_hash: not stable yet
-    writer.u64(0); // capability_hash: not stable yet
+    writer.u64(_schema_hash);
+    writer.u64(_capability_hash);
     writer.u64(device_id());
     writer.u64(coarse_capability_flags());
     writer.u16(Protocol::MAX_PAYLOAD_SIZE);
     writer.u16(0); // max_file_chunk: file service not implemented yet
-    writer.u16(0); // max_subscriptions
-    writer.u16(0); // max_realtime_hz
-    writer.u16(0); // control_update_hz
+    writer.u16(SubscriptionTable::max_subscriptions);
+    writer.u16(max_realtime_rate_hz);
+    writer.u16(default_service_rate_hz);
     writer.u16(0); // attitude_update_hz
     writer.u32(_server_nonce);
 
@@ -618,8 +350,13 @@ void SerialProtocol::handle_describe(const Protocol::FrameView &frame)
     case Protocol::DescriptorDomain::TIMER_GROUP:
         send_timer_group_descriptions(frame.sequence, domain, cursor, max_records);
         return;
-    case Protocol::DescriptorDomain::STORAGE_AREA:
     case Protocol::DescriptorDomain::RUNTIME_LIMIT:
+        send_runtime_limit_descriptions(frame.sequence,
+                                        domain,
+                                        cursor,
+                                        max_records);
+        return;
+    case Protocol::DescriptorDomain::STORAGE_AREA:
     case Protocol::DescriptorDomain::ENUM_TABLE:
     case Protocol::DescriptorDomain::EVENT_TYPE:
     case Protocol::DescriptorDomain::ACTION_SCHEMA:
@@ -641,12 +378,12 @@ void SerialProtocol::handle_get(const Protocol::FrameView &frame)
         return;
     }
 
-    const FieldDescriptor *field = field_descriptor_by_id(field_id);
+    const FieldDescriptor *field = schema_registry().field_by_id(field_id);
     if (field == nullptr) {
         send_error(frame, Protocol::ErrorCode::BAD_ID, field_id, "unknown field");
         return;
     }
-    if ((field->flags & field_readable) == 0) {
+    if ((field->flags & FIELD_READABLE) == 0) {
         send_error(frame, Protocol::ErrorCode::WRITE_ONLY, field_id, "write-only field");
         return;
     }
@@ -673,7 +410,7 @@ void SerialProtocol::handle_set(const Protocol::FrameView &frame)
         return;
     }
 
-    const FieldDescriptor *field = field_descriptor_by_id(field_id);
+    const FieldDescriptor *field = schema_registry().field_by_id(field_id);
     if (field == nullptr) {
         send_error(frame, Protocol::ErrorCode::BAD_ID, field_id, "unknown field");
         return;
@@ -732,7 +469,7 @@ void SerialProtocol::handle_get_many(const Protocol::FrameView &frame)
             send_error(frame, Protocol::ErrorCode::BAD_LENGTH, 0, "bad GET_MANY");
             return;
         }
-        const FieldDescriptor *field = field_descriptor_by_id(field_ids[i]);
+        const FieldDescriptor *field = schema_registry().field_by_id(field_ids[i]);
         if (field == nullptr) {
             send_error(frame,
                        Protocol::ErrorCode::BAD_ID,
@@ -740,7 +477,7 @@ void SerialProtocol::handle_get_many(const Protocol::FrameView &frame)
                        "unknown field");
             return;
         }
-        if ((field->flags & field_readable) == 0) {
+        if ((field->flags & FIELD_READABLE) == 0) {
             send_error(frame,
                        Protocol::ErrorCode::WRITE_ONLY,
                        field_ids[i],
@@ -806,7 +543,7 @@ void SerialProtocol::handle_set_many(const Protocol::FrameView &frame)
         }
 
         const FieldDescriptor *field =
-            field_descriptor_by_id(pending[i].field_id);
+            schema_registry().field_by_id(pending[i].field_id);
         if (field == nullptr) {
             send_error(frame,
                        Protocol::ErrorCode::BAD_ID,
@@ -878,6 +615,197 @@ void SerialProtocol::handle_get_all_params(const Protocol::FrameView &frame)
         return;
     }
     send_all_parameters(frame.sequence);
+}
+
+void SerialProtocol::handle_subscribe(const Protocol::FrameView &frame)
+{
+    if (!_hello_seen) {
+        send_error(frame,
+                   Protocol::ErrorCode::INVALID_STATE,
+                   0,
+                   "HELLO required");
+        return;
+    }
+
+    Protocol::PayloadReader reader(frame.payload, frame.payload_len);
+    uint32_t requested_period_us = 0;
+    uint16_t count = 0;
+    if (!reader.u32(requested_period_us) || !reader.u16(count)) {
+        send_error(frame, Protocol::ErrorCode::BAD_LENGTH, 0, "bad SUBSCRIBE");
+        return;
+    }
+    if (count == 0 || count > SubscriptionTable::max_fields) {
+        send_error(frame,
+                   Protocol::ErrorCode::TOO_MANY_ITEMS,
+                   0,
+                   "invalid subscription field count");
+        return;
+    }
+
+    uint32_t field_ids[SubscriptionTable::max_fields];
+    for (uint16_t i = 0; i < count; i++) {
+        if (!reader.u32(field_ids[i])) {
+            send_error(frame,
+                       Protocol::ErrorCode::BAD_LENGTH,
+                       0,
+                       "bad SUBSCRIBE");
+            return;
+        }
+
+        const FieldDescriptor *field = schema_registry().field_by_id(field_ids[i]);
+        if (field == nullptr) {
+            send_error(frame,
+                       Protocol::ErrorCode::BAD_ID,
+                       field_ids[i],
+                       "unknown field");
+            return;
+        }
+        if ((field->flags & FIELD_READABLE) == 0 ||
+            (field->flags & FIELD_REALTIME) == 0) {
+            send_error(frame,
+                       Protocol::ErrorCode::NOT_AVAILABLE,
+                       field_ids[i],
+                       "field is not realtime");
+            return;
+        }
+        for (uint16_t j = 0; j < i; j++) {
+            if (field_ids[j] == field_ids[i]) {
+                send_error(frame,
+                           Protocol::ErrorCode::BAD_ID,
+                           field_ids[i],
+                           "duplicate field");
+                return;
+            }
+        }
+    }
+    if (reader.remaining() != 0) {
+        send_error(frame, Protocol::ErrorCode::BAD_LENGTH, 0, "bad SUBSCRIBE");
+        return;
+    }
+
+    const SubscriptionTable::Entry *subscription = nullptr;
+    const SubscriptionTable::AddResult result =
+        _subscriptions.add(requested_period_us,
+                           field_ids,
+                           count,
+                           AP_HAL::micros64(),
+                           subscription);
+    if (result == SubscriptionTable::AddResult::FULL) {
+        send_error(frame,
+                   Protocol::ErrorCode::SUBSCRIPTION_LIMIT,
+                   0,
+                   "subscription limit reached");
+        return;
+    }
+    if (result != SubscriptionTable::AddResult::OK || subscription == nullptr) {
+        send_error(frame,
+                   Protocol::ErrorCode::INTERNAL_ERROR,
+                   0,
+                   "failed SUBSCRIBE");
+        return;
+    }
+
+    Protocol::PayloadWriter writer(_payload, sizeof(_payload));
+    writer.u16(subscription->id);
+    writer.u32(subscription->period_us);
+    writer.u16(subscription->field_count);
+    for (uint16_t i = 0; i < subscription->field_count; i++) {
+        writer.u32(subscription->field_ids[i]);
+    }
+    if (!writer.ok()) {
+        _subscriptions.remove(subscription->id);
+        send_error(frame,
+                   Protocol::ErrorCode::INTERNAL_ERROR,
+                   0,
+                   "SUBSCRIBE payload overflow");
+        return;
+    }
+
+    send_payload(Protocol::MessageType::SUBSCRIBE,
+                 Protocol::FLAG_RESPONSE,
+                 frame.sequence,
+                 writer.data(),
+                 writer.length());
+}
+
+void SerialProtocol::handle_unsubscribe(const Protocol::FrameView &frame)
+{
+    Protocol::PayloadReader reader(frame.payload, frame.payload_len);
+    uint16_t subscription_id = 0;
+    if (!reader.u16(subscription_id) || reader.remaining() != 0) {
+        send_error(frame,
+                   Protocol::ErrorCode::BAD_LENGTH,
+                   0,
+                   "bad UNSUBSCRIBE");
+        return;
+    }
+    if (subscription_id == 0 || !_subscriptions.remove(subscription_id)) {
+        send_error(frame,
+                   Protocol::ErrorCode::BAD_ID,
+                   subscription_id,
+                   "unknown subscription");
+        return;
+    }
+
+    Protocol::PayloadWriter writer(_payload, sizeof(_payload));
+    writer.u16(subscription_id);
+    send_payload(Protocol::MessageType::UNSUBSCRIBE,
+                 Protocol::FLAG_RESPONSE,
+                 frame.sequence,
+                 writer.data(),
+                 writer.length());
+}
+
+void SerialProtocol::service_telemetry(uint64_t now_us)
+{
+    for (uint16_t i = 0; i < SubscriptionTable::max_subscriptions; i++) {
+        SubscriptionTable::Entry *subscription =
+            _subscriptions.claim_due(now_us);
+        if (subscription == nullptr) {
+            return;
+        }
+
+        Protocol::PayloadWriter writer(_payload, sizeof(_payload));
+        writer.u16(subscription->id);
+        writer.u16(subscription->sample_sequence++);
+        writer.u64(now_us);
+        const uint8_t quality_len =
+            uint8_t((subscription->field_count * 2U + 7U) / 8U);
+        writer.u8(quality_len);
+        uint8_t quality_mask[2] {};
+        for (uint16_t field = 0;
+             field < subscription->field_count;
+             field++) {
+            const uint8_t quality =
+                field_quality_code(subscription->field_ids[field]);
+            quality_mask[field / 4U] |=
+                uint8_t(quality << ((field % 4U) * 2U));
+        }
+        for (uint8_t quality_byte = 0;
+             quality_byte < quality_len;
+             quality_byte++) {
+            writer.u8(quality_mask[quality_byte]);
+        }
+        bool values_complete = true;
+        for (uint16_t field = 0;
+             field < subscription->field_count;
+             field++) {
+            if (!write_field_payload(writer, subscription->field_ids[field])) {
+                values_complete = false;
+                break;
+            }
+        }
+
+        if (!values_complete || !writer.ok()) {
+            _tx_drops++;
+            continue;
+        }
+        send_payload(Protocol::MessageType::TELEMETRY,
+                     Protocol::FLAG_VOLATILE,
+                     _telemetry_sequence++,
+                     writer.data(),
+                     writer.length());
+    }
 }
 
 bool SerialProtocol::replay_cached_response_or_reject(
@@ -954,46 +882,11 @@ bool SerialProtocol::send_board_description(uint16_t sequence,
                                             uint32_t cursor,
                                             uint16_t max_records)
 {
-    (void)max_records;
-    Protocol::PayloadWriter writer(_payload, sizeof(_payload));
-    writer.u8(domain);
-
-    if (cursor != 0) {
-        writer.u32(0);
-        writer.u16(0);
-        return send_payload(Protocol::MessageType::DESCRIBE,
-                            Protocol::FLAG_RESPONSE,
-                            sequence,
-                            writer.data(),
-                            writer.length());
-    }
-
-    uint8_t record[96];
-    Protocol::PayloadWriter record_writer(record, sizeof(record));
-    record_writer.u8(1); // record_version
-    record_writer.u32(_capability->board_id);
-    record_writer.str8(_capability->product_name);
-    record_writer.str8(_capability->hardware_revision);
-    record_writer.str8(_capability->product_name);
-    if (!record_writer.ok()) {
-        _tx_drops++;
-        return false;
-    }
-
-    writer.u32(0); // next_cursor
-    writer.u16(1); // record_count
-    writer.u16(record_writer.length());
-    writer.bytes(record_writer.data(), record_writer.length());
-    if (!writer.ok()) {
-        _tx_drops++;
-        return false;
-    }
-
-    return send_payload(Protocol::MessageType::DESCRIBE,
-                        Protocol::FLAG_RESPONSE,
-                        sequence,
-                        writer.data(),
-                        writer.length());
+    return send_description_page(sequence,
+                                 domain,
+                                 cursor,
+                                 max_records,
+                                 1);
 }
 
 bool SerialProtocol::send_endpoint_descriptions(uint16_t sequence,
@@ -1042,6 +935,18 @@ bool SerialProtocol::send_timer_group_descriptions(uint16_t sequence,
                                  cursor,
                                  max_records,
                                  timer_group_count());
+}
+
+bool SerialProtocol::send_runtime_limit_descriptions(uint16_t sequence,
+                                                     uint8_t domain,
+                                                     uint32_t cursor,
+                                                     uint16_t max_records)
+{
+    return send_description_page(sequence,
+                                 domain,
+                                 cursor,
+                                 max_records,
+                                 runtime_limit_count());
 }
 
 bool SerialProtocol::send_empty_description(uint16_t sequence, uint8_t domain)
@@ -1130,6 +1035,9 @@ bool SerialProtocol::build_descriptor_record(uint8_t domain,
                                              uint16_t record_capacity,
                                              uint16_t &record_len)
 {
+    if (domain == uint8_t(Protocol::DescriptorDomain::BOARD)) {
+        return build_board_record(index, record, record_capacity, record_len);
+    }
     if (domain == uint8_t(Protocol::DescriptorDomain::ENDPOINT)) {
         return build_endpoint_record(index, record, record_capacity, record_len);
     }
@@ -1142,9 +1050,35 @@ bool SerialProtocol::build_descriptor_record(uint8_t domain,
     if (domain == uint8_t(Protocol::DescriptorDomain::TIMER_GROUP)) {
         return build_timer_group_record(index, record, record_capacity, record_len);
     }
+    if (domain == uint8_t(Protocol::DescriptorDomain::RUNTIME_LIMIT)) {
+        return build_runtime_limit_record(index,
+                                          record,
+                                          record_capacity,
+                                          record_len);
+    }
 
     record_len = 0;
     return false;
+}
+
+bool SerialProtocol::build_board_record(uint16_t index,
+                                        uint8_t *record,
+                                        uint16_t record_capacity,
+                                        uint16_t &record_len)
+{
+    if (index != 0) {
+        record_len = 0;
+        return false;
+    }
+
+    Protocol::PayloadWriter writer(record, record_capacity);
+    writer.u8(1); // record_version
+    writer.u32(_capability->board_id);
+    writer.str8(_capability->product_name);
+    writer.str8(_capability->hardware_revision);
+    writer.str8(_capability->product_name);
+    record_len = writer.length();
+    return writer.ok();
 }
 
 bool SerialProtocol::build_component_record(uint16_t index,
@@ -1152,22 +1086,10 @@ bool SerialProtocol::build_component_record(uint16_t index,
                                             uint16_t record_capacity,
                                             uint16_t &record_len)
 {
-    const ComponentDescriptor *component = component_descriptor_by_index(index);
-    if (component == nullptr) {
-        record_len = 0;
-        return false;
-    }
-
-    Protocol::PayloadWriter writer(record, record_capacity);
-    writer.u8(1); // record_version
-    writer.u32(id_for_path(component->path));
-    writer.u32(id_for_path(component->type_path));
-    writer.u16(component->instance);
-    writer.u32(component->flags);
-    writer.str8(component->name);
-    writer.str8(component->display_name);
-    record_len = writer.length();
-    return writer.ok();
+    return schema_registry().build_component_record(index,
+                                                    record,
+                                                    record_capacity,
+                                                    record_len);
 }
 
 bool SerialProtocol::build_field_record(uint16_t index,
@@ -1175,44 +1097,10 @@ bool SerialProtocol::build_field_record(uint16_t index,
                                         uint16_t record_capacity,
                                         uint16_t &record_len)
 {
-    if (index >= field_count()) {
-        record_len = 0;
-        return false;
-    }
-
-    const FieldDescriptor *field = field_descriptor_by_index(index);
-    if (field == nullptr) {
-        record_len = 0;
-        return false;
-    }
-
-    Protocol::PayloadWriter writer(record, record_capacity);
-    writer.u8(1); // record_version
-    writer.u32(protocol_field_id(index));
-    writer.u32(id_for_path(field->owner_component_path));
-    writer.u8(uint8_t(field->kind));
-    writer.u8(uint8_t(field->type));
-    writer.u32(field->flags);
-    writer.str8(field->name);
-    writer.str8(field->display_name);
-    writer.str8(field->units);
-    if ((field->flags & field_has_min) != 0 &&
-        !write_typed_payload(writer, field->type, uint32_t(field->min_value))) {
-        record_len = 0;
-        return false;
-    }
-    if ((field->flags & field_has_max) != 0 &&
-        !write_typed_payload(writer, field->type, uint32_t(field->max_value))) {
-        record_len = 0;
-        return false;
-    }
-    if ((field->flags & field_has_default) != 0 &&
-        !write_typed_payload(writer, field->type, uint32_t(field->default_value))) {
-        record_len = 0;
-        return false;
-    }
-    record_len = writer.length();
-    return writer.ok();
+    return schema_registry().build_field_record(index,
+                                                record,
+                                                record_capacity,
+                                                record_len);
 }
 
 bool SerialProtocol::build_endpoint_record(uint16_t index,
@@ -1461,6 +1349,30 @@ bool SerialProtocol::build_timer_group_record(uint16_t index,
     return writer.ok();
 }
 
+bool SerialProtocol::build_runtime_limit_record(uint16_t index,
+                                                uint8_t *record,
+                                                uint16_t record_capacity,
+                                                uint16_t &record_len)
+{
+    if (index != 0) {
+        record_len = 0;
+        return false;
+    }
+
+    Protocol::PayloadWriter writer(record, record_capacity);
+    writer.u8(1); // record_version
+    writer.u32(id_for_path(protocol_runtime_limit_path));
+    writer.u64(coarse_capability_flags());
+    writer.u16(Protocol::MAX_PAYLOAD_SIZE);
+    writer.u16(0); // max_file_chunk: file service not implemented yet
+    writer.u16(SubscriptionTable::max_subscriptions);
+    writer.u16(max_realtime_rate_hz);
+    writer.u16(default_service_rate_hz);
+    writer.u16(0); // attitude_update_hz
+    record_len = writer.length();
+    return writer.ok();
+}
+
 bool SerialProtocol::send_payload(Protocol::MessageType message_type,
                                   uint8_t flags,
                                   uint16_t sequence,
@@ -1486,13 +1398,17 @@ bool SerialProtocol::send_payload(Protocol::MessageType message_type,
         return false;
     }
 
+    // Cache a direct response once it is fully encoded, before attempting the
+    // transport write. If the write is short, an identical retry can still
+    // recover without repeating a request side effect.
+    if ((flags & Protocol::FLAG_RESPONSE) != 0) {
+        remember_cached_response(_tx_encoded, encoded_len);
+    }
+
     const size_t written = _uart->write(_tx_encoded, encoded_len);
     if (written != encoded_len) {
         _tx_drops++;
         return false;
-    }
-    if ((flags & Protocol::FLAG_RESPONSE) != 0) {
-        remember_cached_response(_tx_encoded, encoded_len);
     }
     return true;
 }
@@ -1546,10 +1462,10 @@ bool SerialProtocol::send_all_parameters(uint16_t sequence)
     Protocol::PayloadWriter writer(_payload, sizeof(_payload));
     writer.u16(parameter_field_count());
     for (uint16_t i = 0; i < field_count(); i++) {
-        const FieldDescriptor *field = field_descriptor_by_index(i);
+        const FieldDescriptor *field = schema_registry().field_by_index(i);
         if (field == nullptr ||
             !field_is_parameter(*field) ||
-            (field->flags & field_readable) == 0) {
+            (field->flags & FIELD_READABLE) == 0) {
             continue;
         }
         if (!write_field_value(writer, protocol_field_id(i))) {
@@ -1573,7 +1489,20 @@ bool SerialProtocol::send_all_parameters(uint16_t sequence)
 bool SerialProtocol::write_field_value(Protocol::PayloadWriter &writer,
                                        uint32_t field_id) const
 {
-    const FieldDescriptor *field = field_descriptor_by_id(field_id);
+    const FieldDescriptor *field = schema_registry().field_by_id(field_id);
+    if (field == nullptr) {
+        return false;
+    }
+
+    writer.u32(field_id);
+    writer.u8(uint8_t(field->type));
+    return write_field_payload(writer, field_id);
+}
+
+bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
+                                         uint32_t field_id) const
+{
+    const FieldDescriptor *field = schema_registry().field_by_id(field_id);
     if (field == nullptr) {
         return false;
     }
@@ -1643,11 +1572,84 @@ bool SerialProtocol::write_field_value(Protocol::PayloadWriter &writer,
         }
         raw = uint32_t(_parameters->sys_protocol_baud.get());
         break;
+    case FieldSlot::VSP_X:
+        if (_vsp == nullptr) {
+            return false;
+        }
+        raw = float_raw_value(_vsp->input_x().value);
+        break;
+    case FieldSlot::VSP_Y:
+        if (_vsp == nullptr) {
+            return false;
+        }
+        raw = float_raw_value(_vsp->input_y().value);
+        break;
+    case FieldSlot::VSP_SERVO_A:
+        if (_vsp == nullptr) {
+            return false;
+        }
+        raw = float_raw_value(_vsp->servo_a().value);
+        break;
+    case FieldSlot::VSP_SERVO_B:
+        if (_vsp == nullptr) {
+            return false;
+        }
+        raw = float_raw_value(_vsp->servo_b().value);
+        break;
     }
 
-    writer.u32(field_id);
-    writer.u8(uint8_t(field->type));
     return write_typed_payload(writer, field->type, raw);
+}
+
+uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
+{
+    const FieldDescriptor *field = schema_registry().field_by_id(field_id);
+    if (field == nullptr) {
+        return 2; // INVALID
+    }
+
+    SignalQuality quality = SignalQuality::VALID;
+    switch (field->slot) {
+    case FieldSlot::VSP_X:
+        quality = _vsp == nullptr ? SignalQuality::INVALID :
+                                    _vsp->input_x().quality;
+        break;
+    case FieldSlot::VSP_Y:
+        quality = _vsp == nullptr ? SignalQuality::INVALID :
+                                    _vsp->input_y().quality;
+        break;
+    case FieldSlot::VSP_SERVO_A:
+        quality = _vsp == nullptr ? SignalQuality::INVALID :
+                                    _vsp->servo_a().quality;
+        break;
+    case FieldSlot::VSP_SERVO_B:
+        quality = _vsp == nullptr ? SignalQuality::INVALID :
+                                    _vsp->servo_b().quality;
+        break;
+    case FieldSlot::RX_FRAMES:
+    case FieldSlot::RX_DROPS:
+    case FieldSlot::TX_DROPS:
+    case FieldSlot::UPTIME_MS:
+    case FieldSlot::LOOP_COUNT:
+    case FieldSlot::LOOP_DT_US:
+    case FieldSlot::LOOP_WORK_US:
+    case FieldSlot::LOOP_MAX_WORK_US:
+    case FieldSlot::SERVICE_RATE_HZ:
+    case FieldSlot::SYS_OPTIONS:
+    case FieldSlot::SYS_DESC_PAGE:
+    case FieldSlot::SYS_PROTOCOL_BAUD:
+        break;
+    }
+
+    switch (quality) {
+    case SignalQuality::VALID:
+        return 0;
+    case SignalQuality::STALE:
+        return 1;
+    case SignalQuality::INVALID:
+        return 2;
+    }
+    return 2;
 }
 
 bool SerialProtocol::validate_parameter_value(uint32_t field_id,
@@ -1656,7 +1658,7 @@ bool SerialProtocol::validate_parameter_value(uint32_t field_id,
                                               Protocol::ErrorCode &code,
                                               const char *&detail) const
 {
-    const FieldDescriptor *field = field_descriptor_by_id(field_id);
+    const FieldDescriptor *field = schema_registry().field_by_id(field_id);
     if (field == nullptr) {
         code = Protocol::ErrorCode::BAD_ID;
         detail = "unknown field";
@@ -1667,7 +1669,7 @@ bool SerialProtocol::validate_parameter_value(uint32_t field_id,
         detail = "field is not a parameter";
         return false;
     }
-    if ((field->flags & field_writable) == 0) {
+    if ((field->flags & FIELD_WRITABLE) == 0) {
         code = Protocol::ErrorCode::READ_ONLY;
         detail = "parameter is read-only";
         return false;
@@ -1679,12 +1681,12 @@ bool SerialProtocol::validate_parameter_value(uint32_t field_id,
     }
 
     const int32_t value = signed_raw_value(field->type, raw);
-    if ((field->flags & field_has_min) != 0 && value < field->min_value) {
+    if ((field->flags & FIELD_HAS_MIN) != 0 && value < field->min_value) {
         code = Protocol::ErrorCode::OUT_OF_RANGE;
         detail = "below minimum";
         return false;
     }
-    if ((field->flags & field_has_max) != 0 && value > field->max_value) {
+    if ((field->flags & FIELD_HAS_MAX) != 0 && value > field->max_value) {
         code = Protocol::ErrorCode::OUT_OF_RANGE;
         detail = "above maximum";
         return false;
@@ -1699,7 +1701,7 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
                                            uint8_t type_id,
                                            uint32_t raw)
 {
-    const FieldDescriptor *field = field_descriptor_by_id(field_id);
+    const FieldDescriptor *field = schema_registry().field_by_id(field_id);
     if (_parameters == nullptr ||
         field == nullptr ||
         type_id != uint8_t(field->type) ||
@@ -1727,6 +1729,10 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
     case FieldSlot::LOOP_WORK_US:
     case FieldSlot::LOOP_MAX_WORK_US:
     case FieldSlot::SERVICE_RATE_HZ:
+    case FieldSlot::VSP_X:
+    case FieldSlot::VSP_Y:
+    case FieldSlot::VSP_SERVO_A:
+    case FieldSlot::VSP_SERVO_B:
         break;
     }
     return false;
@@ -1747,6 +1753,7 @@ bool SerialProtocol::read_typed_value(Protocol::PayloadReader &reader,
         return true;
     case Protocol::PrimitiveType::U32:
     case Protocol::PrimitiveType::I32:
+    case Protocol::PrimitiveType::FLOAT32:
         return reader.u32(raw);
     default:
         return false;
@@ -1773,6 +1780,196 @@ bool SerialProtocol::send_error(const Protocol::FrameView &request,
                         request.sequence,
                         writer.data(),
                         writer.length());
+}
+
+bool SerialProtocol::initialize_descriptor_identity()
+{
+    static const uint8_t schema_domains[] = {
+        uint8_t(Protocol::DescriptorDomain::COMPONENT),
+        uint8_t(Protocol::DescriptorDomain::FIELD),
+    };
+    static const uint8_t capability_domains[] = {
+        uint8_t(Protocol::DescriptorDomain::BOARD),
+        uint8_t(Protocol::DescriptorDomain::ENDPOINT),
+        uint8_t(Protocol::DescriptorDomain::TIMER_GROUP),
+        uint8_t(Protocol::DescriptorDomain::RUNTIME_LIMIT),
+    };
+
+    _schema_hash = 0;
+    _capability_hash = 0;
+    return validate_descriptor_ids() &&
+           calculate_descriptor_hash(schema_domains,
+                                     sizeof(schema_domains),
+                                     _schema_hash) &&
+           calculate_descriptor_hash(capability_domains,
+                                     sizeof(capability_domains),
+                                     _capability_hash);
+}
+
+bool SerialProtocol::validate_descriptor_ids()
+{
+    static constexpr uint16_t max_stable_ids = 96;
+    uint32_t stable_ids[max_stable_ids];
+    uint16_t count = 0;
+
+    auto append_id = [&](uint32_t id) {
+        if (count >= max_stable_ids) {
+            return false;
+        }
+        stable_ids[count++] = id;
+        return true;
+    };
+
+    const SchemaRegistry &registry = schema_registry();
+    for (uint16_t i = 0; i < registry.component_count(); i++) {
+        if (!append_id(registry.component_id(i)) ||
+            !append_id(registry.component_type_id(i))) {
+            return false;
+        }
+    }
+
+    static const uint8_t object_domains[] = {
+        uint8_t(Protocol::DescriptorDomain::FIELD),
+        uint8_t(Protocol::DescriptorDomain::ENDPOINT),
+        uint8_t(Protocol::DescriptorDomain::TIMER_GROUP),
+        uint8_t(Protocol::DescriptorDomain::RUNTIME_LIMIT),
+    };
+    for (uint8_t domain_index = 0;
+         domain_index < sizeof(object_domains);
+         domain_index++) {
+        const uint8_t domain = object_domains[domain_index];
+        for (uint16_t index = 0; index < descriptor_count(domain); index++) {
+            uint32_t id = 0;
+            if (!descriptor_id(domain, index, id) || !append_id(id)) {
+                return false;
+            }
+        }
+    }
+
+    return Protocol::stable_ids_unique_nonzero(stable_ids, count);
+}
+
+bool SerialProtocol::calculate_descriptor_hash(const uint8_t *domains,
+                                               uint8_t domains_count,
+                                               uint64_t &hash)
+{
+    if (domains == nullptr || domains_count == 0) {
+        hash = 0;
+        return false;
+    }
+
+    uint16_t total_records = 0;
+    for (uint8_t i = 0; i < domains_count; i++) {
+        total_records += descriptor_count(domains[i]);
+    }
+    if (total_records == 0) {
+        hash = 0;
+        return false;
+    }
+
+    hash = 0xCBF29CE484222325ULL;
+    uint32_t previous_id = 0;
+    bool have_previous = false;
+    for (uint16_t emitted = 0; emitted < total_records; emitted++) {
+        bool found = false;
+        uint32_t selected_id = 0;
+        uint8_t selected_domain = 0;
+        uint16_t selected_index = 0;
+
+        for (uint8_t domain_index = 0;
+             domain_index < domains_count;
+             domain_index++) {
+            const uint8_t domain = domains[domain_index];
+            for (uint16_t index = 0;
+                 index < descriptor_count(domain);
+                 index++) {
+                uint32_t id = 0;
+                if (!descriptor_id(domain, index, id)) {
+                    hash = 0;
+                    return false;
+                }
+                if (have_previous && id <= previous_id) {
+                    continue;
+                }
+                if (!found || id < selected_id) {
+                    found = true;
+                    selected_id = id;
+                    selected_domain = domain;
+                    selected_index = index;
+                }
+            }
+        }
+        if (!found) {
+            hash = 0;
+            return false;
+        }
+
+        uint8_t record[128];
+        uint16_t record_len = 0;
+        if (!build_descriptor_record(selected_domain,
+                                     selected_index,
+                                     record,
+                                     sizeof(record),
+                                     record_len)) {
+            hash = 0;
+            return false;
+        }
+        const uint8_t envelope[] = {
+            selected_domain,
+            uint8_t(record_len),
+            uint8_t(record_len >> 8),
+        };
+        hash = Protocol::fnv1a64_update(hash, envelope, sizeof(envelope));
+        hash = Protocol::fnv1a64_update(hash, record, record_len);
+        previous_id = selected_id;
+        have_previous = true;
+    }
+    return true;
+}
+
+bool SerialProtocol::descriptor_id(uint8_t domain,
+                                   uint16_t index,
+                                   uint32_t &id)
+{
+    uint8_t record[128];
+    uint16_t record_len = 0;
+    if (!build_descriptor_record(domain,
+                                 index,
+                                 record,
+                                 sizeof(record),
+                                 record_len)) {
+        return false;
+    }
+
+    Protocol::PayloadReader reader(record, record_len);
+    uint8_t record_version = 0;
+    return reader.u8(record_version) &&
+           record_version != 0 &&
+           reader.u32(id);
+}
+
+uint16_t SerialProtocol::descriptor_count(uint8_t domain) const
+{
+    switch (Protocol::DescriptorDomain(domain)) {
+    case Protocol::DescriptorDomain::BOARD:
+        return 1;
+    case Protocol::DescriptorDomain::COMPONENT:
+        return component_count();
+    case Protocol::DescriptorDomain::FIELD:
+        return field_count();
+    case Protocol::DescriptorDomain::ENDPOINT:
+        return endpoint_count();
+    case Protocol::DescriptorDomain::TIMER_GROUP:
+        return timer_group_count();
+    case Protocol::DescriptorDomain::RUNTIME_LIMIT:
+        return runtime_limit_count();
+    case Protocol::DescriptorDomain::STORAGE_AREA:
+    case Protocol::DescriptorDomain::ENUM_TABLE:
+    case Protocol::DescriptorDomain::EVENT_TYPE:
+    case Protocol::DescriptorDomain::ACTION_SCHEMA:
+        return 0;
+    }
+    return 0;
 }
 
 uint64_t SerialProtocol::coarse_capability_flags() const
@@ -1807,6 +2004,7 @@ uint64_t SerialProtocol::coarse_capability_flags() const
             flags |= 1ULL << 15; // CAP_DATAFLASH
         }
     }
+    flags |= 1ULL << 13; // CAP_REALTIME
     return flags;
 }
 
@@ -1840,6 +2038,11 @@ uint16_t SerialProtocol::timer_group_count() const
            _capability->flex_timer_group_count;
 }
 
+uint16_t SerialProtocol::runtime_limit_count() const
+{
+    return 1;
+}
+
 uint64_t SerialProtocol::device_id() const
 {
     uint8_t raw_id[16] {};
@@ -1852,25 +2055,12 @@ uint64_t SerialProtocol::device_id() const
 
 uint32_t SerialProtocol::protocol_field_id(uint16_t index) const
 {
-    const FieldDescriptor *field = field_descriptor_by_index(index);
-    if (field == nullptr) {
-        return 0;
-    }
-    return id_for_path(field->path);
+    return schema_registry().field_id(index);
 }
 
 uint16_t SerialProtocol::parameter_field_count() const
 {
-    uint16_t count = 0;
-    for (uint16_t i = 0; i < field_count(); i++) {
-        const FieldDescriptor *field = field_descriptor_by_index(i);
-        if (field != nullptr &&
-            field_is_parameter(*field) &&
-            (field->flags & field_readable) != 0) {
-            count++;
-        }
-    }
-    return count;
+    return schema_registry().parameter_count();
 }
 
 uint16_t SerialProtocol::descriptor_page_limit() const
@@ -1891,12 +2081,12 @@ uint16_t SerialProtocol::descriptor_page_limit() const
 
 uint16_t SerialProtocol::component_count() const
 {
-    return component_descriptor_count;
+    return schema_registry().component_count();
 }
 
 uint16_t SerialProtocol::field_count() const
 {
-    return field_descriptor_count;
+    return schema_registry().field_count();
 }
 
 } // namespace Vektor

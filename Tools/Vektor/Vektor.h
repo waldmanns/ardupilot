@@ -26,6 +26,7 @@ private:
     AP_Param param_loader{var_info};
     const BoardCapability *_active_capability;
     RuntimeState _runtime;
+    VspComponent _vsp;
     SerialProtocol _serial_protocol;
 };
 

@@ -2,6 +2,7 @@
 
 **Purpose:** canonical working base for future Vektor Core Evo hardware, firmware, protocol, and configurator work  
 **Generated from supplied project sources:** 2026-09-10  
+**Firmware status last synchronized:** 2026-09-13\
 **Status:** evidence-oriented consolidation, not a claim that the firmware or GUI already implements the design  
 **Primary platforms:** Vektor Core Evo STM32H743 and Vektor Core Reduced STM32F405
 
@@ -15,6 +16,7 @@ Status tags used throughout:
 
 - **[VERIFIED-HW]** Directly supported by the current H743 KiCad schematic, H743 CubeMX `.ioc`, or reduced-board ArduPilot `hwdef`.
 - **[DECIDED]** Explicit project direction from the current Vektor architecture notes, two-platform brief, protocol draft, or project discussion.
+- **[IMPLEMENTED]** Supported by source code and proportionate build or test evidence in the current repository.
 - **[DRAFT]** A proposed interface, rate, data structure, or behavior that is not proven by implementation in the supplied sources.
 - **[LEGACY-VRS]** Carried from the earlier CLIM6/VRS design. It remains useful as VSP/VRS domain knowledge, but its old G0B1 board-specific hardware details are not Vektor Core Evo hardware facts.
 - **[INFERENCE]** Engineering interpretation of verified source material. These items should be checked during implementation or bring-up.
@@ -26,7 +28,7 @@ For the **full H743 board**, the KiCad schematic is the strongest source for wha
 
 For the **reduced F405 board**, `reduced-board-hwdef.txt` is the current board-definition source of truth.
 
-For **firmware architecture and protocol**, the supplied markdown files describe design intent. No Vektor firmware source tree was supplied, so this document does not claim those systems already exist.
+For **firmware architecture and protocol**, the original supplied markdown files describe design intent. A Vektor firmware scaffold now exists under `Tools/Vektor`; Section 41 records which parts are implemented. `VEKTOR_SERIAL_PROTOCOL_TRUTH.md` is the canonical wire-level protocol specification and supersedes the historical draft summary in Part VII of this document.
 
 For **VSP/VRS control behavior**, the CLIM6 brief is useful domain history. Its STM32G0B1 hardware sections are superseded for Vektor Core Evo.
 
@@ -683,7 +685,7 @@ Default battery scales are defined as 10.1 for voltage and 17.0 for current.
 - selected ArduPilot libraries
 - an architecture closer in spirit to `AP_Periph` than to Rover or Plane
 
-**[IMPORTANT]** No actual Vektor application source code was supplied in this source set. Everything in Parts III through VI is architecture or protocol intent unless a hardware definition independently proves it.
+**[IMPLEMENTED]** A standalone `Vektor` Waf application now exists under `Tools/Vektor`. It builds for SITL and for the reduced `revo-mini` F405 target. The full H743 hardware build remains blocked on its dedicated ChibiOS hwdef. Architecture not identified as implemented in Section 41 remains design intent.
 
 ---
 
@@ -1051,6 +1053,8 @@ The earlier reference vessel used:
 
 # Part VII — Vektor Protocol truth base
 
+> **Historical summary:** Sections 29 through 36 below preserve the state of the original protocol draft. `VEKTOR_SERIAL_PROTOCOL_TRUTH.md` now freezes the v1 wire contract, including framing, CRC, IDs, flags, typed values, retry behavior, routing messages, telemetry quality, and timestamps. Use that document—not the unresolved markers below—for implementation and interoperability.
+
 ## 28. Protocol role
 
 **[DECIDED]** Vektor Protocol is the primary native service/configuration protocol for the Vektor configurator.
@@ -1403,54 +1407,44 @@ The following items should be treated as actionable before declaring the H743 bo
 
 ---
 
-## 41. Firmware architecture items still unproven
+## 41. Firmware implementation status
 
-No Vektor firmware repository was included, so the following remain design work rather than implementation facts:
+The current `Tools/Vektor` scaffold implements and tests:
 
-- common `vektor` application target for both boards
-- component registry implementation
-- typed signal storage and quality propagation
-- route validation and cycle handling
-- `AP_Param` wrapper/service
-- hardware capability registry
-- scheduler profiles
-- common attitude service across ICM-20602 and BMI088
-- VSP/VRS implementation
-- DroneCAN integration
-- Vektor Protocol codec and transport scheduler
-- MAVLink coexistence behavior
-- file-service backend abstraction
-- runtime descriptor generator
-- configurator protocol client
+- standalone `vektor` Waf application entry point;
+- reduced `revo-mini` F405 build selection and H743/F405 capability records;
+- bounded typed signal primitives with timestamps and quality;
+- a minimal `AP_Param`-backed system parameter set;
+- a common component/field schema registry used for stable-ID lookup,
+  parameter enumeration, and protocol descriptor generation;
+- runtime uptime and loop-timing observables;
+- Vektor Protocol v1 COBS framing, CRC-32/ISO-HDLC, bounded stream parsing, and the canonical frame vector;
+- `PING`, `HELLO`, paged board/component/field/endpoint/timer-group/runtime-limit `DESCRIBE`, `ERROR`, typed `GET`/`SET`, bulk parameter operations, and duplicate-request replay/conflict handling;
+- deterministic nonzero schema/capability hashes over ID-sorted descriptor records, with initialization-time stable-ID collision validation;
+- bounded `SUBSCRIBE`/`UNSUBSCRIBE` sessions and compact volatile `TELEMETRY` for the built-in realtime observables, with scheduler-rate negotiation and newest-sample behavior;
+- host tests covering codec/parser behavior, schema registry serialization, replay caching, runtime timing, subscription scheduling, and an end-to-end UART telemetry session.
 
-Future truth-base revisions should replace these intent statements with source-code references and tests once implementation exists.
+The following remain design or bring-up work rather than implemented product behavior:
+
+- full H743 ChibiOS hwdef and hardware build;
+- build-generated schema tables and build-time collision failure (the current common registry is hand-authored and validates IDs during initialization);
+- hardware endpoint drivers, scheduler profiles, and measured realtime limits;
+- common attitude service across ICM-20602 and BMI088;
+- VSP/VRS components and persistent signal routing with cycle validation;
+- action/event services, DroneCAN integration, and MAVLink coexistence;
+- logical file-service backends and low-priority logging;
+- configurator protocol client and UI.
 
 ---
 
-## 42. Protocol items that must be frozen before interoperability
+## 42. Remaining protocol implementation gaps
 
-At minimum:
+`VEKTOR_SERIAL_PROTOCOL_TRUTH.md` freezes the v1 interoperability details that were open in the original draft. The current firmware still needs:
 
-- exact version negotiation rules
-- packet delimiter handling
-- CRC32 variant and test vectors
-- message numeric IDs
-- flag bits
-- maximum payload size per transport
-- stable-ID generation algorithm
-- descriptor binary encoding
-- typed-value encoding
-- string/blob length encoding
-- timestamp format and wrap semantics
-- error numeric codes
-- routing mutation messages
-- action argument/result schema
-- operation IDs and cancellation behavior
-- transport behavior on USB CDC versus UART
-- MAVLink/Vektor port sharing or port-selection policy
-- file-area naming and path grammar
-- file chunk/window limits
-- schema/capability hash algorithm
+- route service handlers and persistent route validation;
+- action schemas, action/event handlers, and operation lifecycle behavior;
+- file-service handlers and board-specific chunk limits where storage is advertised;
+- a finalized physical USB/UART port-selection policy and MAVLink coexistence validation.
 
 ---
 
@@ -1615,8 +1609,8 @@ Do not assume any of the following without a newer verified source:
 - that the seven-row Flex header means seven Flex timer ports
 - that FDCAN means CAN FD is electrically supported
 - that the `.ioc` 2.6875 Mbit/s CAN calculation is the desired bus rate
-- that the current Vektor Protocol binary details are frozen
-- that a Vektor firmware implementation already exists
+- that every message defined by the frozen Vektor Protocol v1 wire contract is already implemented
+- that the existing firmware scaffold already drives the described physical endpoints or implements VSP/VRS
 - that an Avalonia GUI implementation already exists
 - that old STM32G0B1 CLIM6 pin mappings apply to Core Evo
 - that every Vektor application needs GPS, magnetometer, barometer, SD, MAVLink, or DroneCAN
@@ -1685,7 +1679,7 @@ This file should be updated when one of the following becomes available:
 - a newer KiCad schematic or PCB revision
 - the final H743 ArduPilot/ChibiOS hwdef
 - a revised reduced-board hwdef
-- actual Vektor firmware source
+- material changes to the Vektor firmware source or its verified test/build status
 - measured scheduler/latency results
 - a frozen Vektor Protocol specification with numeric encodings
 - DroneCAN implementation details
@@ -1707,8 +1701,7 @@ If only a small number of things are resolved next, these provide the greatest i
 4. Decide whether the full board actually receives an SD socket or other SPI3 storage.
 5. Freeze classic CAN bitrate and termination behavior for both H743 ports.
 6. Define SWD/reset manufacturing access.
-7. Implement the minimal Vektor Protocol codec and freeze CRC/message IDs with test vectors.
-8. Implement `HELLO`/`DESCRIBE` from the board capability registry.
-9. Prove the same VSP component and route model on both H743 and F405 builds.
+7. Implement the first VSP component with typed routable inputs and outputs.
+8. Implement and persist the route model, then prove the same VSP/route behavior on H743 and F405 builds.
+9. Replace the hand-authored schema registry arrays with build-generated tables and build-time collision checks.
 10. Measure actual control, attitude, USB, CAN, and file-transfer scheduling behavior before turning proposed rates into product claims.
-

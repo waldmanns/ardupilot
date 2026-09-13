@@ -3,10 +3,216 @@
 #include "Vektor_Protocol.h"
 #include "Vektor_RequestCache.h"
 #include "Vektor_Runtime.h"
+#include "Vektor_Schema.h"
+#include "Vektor_SerialProtocol.h"
+#include "Vektor_Subscription.h"
+#include "Vektor_Vsp.h"
+
+#include <AP_HAL/AP_HAL.h>
 
 #include <string.h>
+#include <unistd.h>
+
+const AP_HAL::HAL &hal = AP_HAL::get_HAL();
 
 namespace {
+
+class TestUart : public AP_HAL::UARTDriver {
+public:
+    TestUart()
+    {
+        lock_write_key = 0;
+        lock_read_key = 0;
+        parity = 0;
+        _last_options = 0;
+    }
+
+    bool is_initialized() override { return _initialized; }
+    bool tx_pending() override { return false; }
+    uint32_t txspace() override { return sizeof(_tx) - _tx_len; }
+
+    void reset()
+    {
+        lock_write_key = 0;
+        lock_read_key = 0;
+        parity = 0;
+        _last_options = 0;
+        _initialized = false;
+        _rx_offset = 0;
+        _rx_len = 0;
+        _tx_len = 0;
+    }
+
+    bool push_rx(const uint8_t *data, uint16_t length)
+    {
+        if (data == nullptr || length > sizeof(_rx) - _rx_len) {
+            return false;
+        }
+        memcpy(&_rx[_rx_len], data, length);
+        _rx_len += length;
+        return true;
+    }
+
+    void clear_tx() { _tx_len = 0; }
+    const uint8_t *tx_data() const { return _tx; }
+    uint16_t tx_length() const { return _tx_len; }
+
+protected:
+    void _begin(uint32_t, uint16_t, uint16_t) override
+    {
+        _initialized = true;
+    }
+
+    size_t _write(const uint8_t *buffer, size_t size) override
+    {
+        if (buffer == nullptr || size > sizeof(_tx) - _tx_len) {
+            return 0;
+        }
+        memcpy(&_tx[_tx_len], buffer, size);
+        _tx_len += size;
+        return size;
+    }
+
+    ssize_t _read(uint8_t *buffer, uint16_t count) override
+    {
+        const uint16_t available = _rx_len - _rx_offset;
+        const uint16_t to_read = count < available ? count : available;
+        if (to_read != 0) {
+            memcpy(buffer, &_rx[_rx_offset], to_read);
+            _rx_offset += to_read;
+        }
+        if (_rx_offset == _rx_len) {
+            _rx_offset = 0;
+            _rx_len = 0;
+        }
+        return to_read;
+    }
+
+    void _end() override { _initialized = false; }
+    void _flush() override {}
+    uint32_t _available() override { return _rx_len - _rx_offset; }
+
+    bool _discard_input() override
+    {
+        _rx_offset = 0;
+        _rx_len = 0;
+        return true;
+    }
+
+private:
+    bool _initialized = false;
+    uint8_t _rx[1024] {};
+    uint16_t _rx_offset = 0;
+    uint16_t _rx_len = 0;
+    uint8_t _tx[2048] {};
+    uint16_t _tx_len = 0;
+};
+
+bool push_request(TestUart &uart,
+                  Vektor::Protocol::MessageType type,
+                  uint16_t sequence,
+                  const uint8_t *payload,
+                  uint16_t payload_len)
+{
+    uint8_t decoded[Vektor::Protocol::MAX_DECODED_FRAME_SIZE];
+    uint8_t encoded[Vektor::Protocol::MAX_ENCODED_STREAM_SIZE];
+    uint16_t encoded_len = 0;
+    if (!Vektor::Protocol::build_frame(type,
+                                       0,
+                                       sequence,
+                                       payload,
+                                       payload_len,
+                                       decoded,
+                                       sizeof(decoded),
+                                       encoded,
+                                       sizeof(encoded),
+                                       encoded_len)) {
+        return false;
+    }
+    return uart.push_rx(encoded, encoded_len);
+}
+
+bool parse_single_frame(const TestUart &uart,
+                        Vektor::Protocol::Parser &parser,
+                        Vektor::Protocol::FrameView &frame)
+{
+    uint16_t frames = 0;
+    for (uint16_t i = 0; i < uart.tx_length(); i++) {
+        const Vektor::Protocol::ParseResult result =
+            parser.consume(uart.tx_data()[i], frame);
+        if (result == Vektor::Protocol::ParseResult::FRAME) {
+            frames++;
+        } else if (result != Vektor::Protocol::ParseResult::NONE &&
+                   result != Vektor::Protocol::ParseResult::EMPTY) {
+            return false;
+        }
+    }
+    return frames == 1;
+}
+
+bool skip_str8(Vektor::Protocol::PayloadReader &reader)
+{
+    uint8_t length = 0;
+    const uint8_t *bytes = nullptr;
+    return reader.u8(length) && reader.bytes(bytes, length);
+}
+
+bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
+                                 uint64_t &schema_hash,
+                                 uint64_t &capability_hash)
+{
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    parameters.sys_protocol_baud.set(Vektor::protocol_baud);
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::VspComponent vsp;
+    vsp.reset();
+    Vektor::SerialProtocol serial;
+    serial.init(&uart, capability, parameters, runtime, vsp);
+    if (!uart.is_initialized()) {
+        return false;
+    }
+    uart.clear_tx();
+
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter hello(payload, sizeof(payload));
+    hello.u8(1);
+    hello.u8(1);
+    hello.u16(0);
+    hello.u32(0);
+    hello.u32(1);
+    if (!push_request(uart,
+                      Vektor::Protocol::MessageType::HELLO,
+                      1,
+                      hello.data(),
+                      hello.length())) {
+        return false;
+    }
+    serial.update();
+
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    if (!parse_single_frame(uart, parser, response) ||
+        response.message_type != Vektor::Protocol::MessageType::HELLO) {
+        return false;
+    }
+
+    Vektor::Protocol::PayloadReader reader(response.payload,
+                                           response.payload_len);
+    uint8_t major = 0;
+    uint16_t minor = 0;
+    uint32_t board_id = 0;
+    return reader.u8(major) &&
+           reader.u16(minor) &&
+           skip_str8(reader) &&
+           skip_str8(reader) &&
+           skip_str8(reader) &&
+           reader.u32(board_id) &&
+           reader.u64(schema_hash) &&
+           reader.u64(capability_hash);
+}
 
 void expect_stream_parses(const uint8_t *stream,
                           uint16_t stream_len,
@@ -267,6 +473,116 @@ TEST(VektorProtocol, PayloadWriterMarksOverflow)
     EXPECT_FALSE(writer.ok());
 }
 
+TEST(VektorProtocol, Fnv64SupportsDeterministicIncrementalHashing)
+{
+    static const uint8_t value[] = "descriptor-stream";
+    const uint16_t value_len = sizeof(value) - 1;
+    const uint64_t one_shot = Vektor::Protocol::fnv1a64(value, value_len);
+
+    uint64_t incremental = 0xCBF29CE484222325ULL;
+    incremental = Vektor::Protocol::fnv1a64_update(incremental, value, 5);
+    incremental = Vektor::Protocol::fnv1a64_update(incremental,
+                                                   &value[5],
+                                                   value_len - 5);
+    EXPECT_EQ(incremental, one_shot);
+    EXPECT_NE(one_shot, 0U);
+}
+
+TEST(VektorProtocol, StableIdsMustBeUniqueAndNonzero)
+{
+    const uint32_t valid[] = { 1, 0x12345678, UINT32_MAX };
+    const uint32_t duplicate[] = { 1, 2, 1 };
+    const uint32_t zero[] = { 1, 0, 2 };
+
+    EXPECT_TRUE(Vektor::Protocol::stable_ids_unique_nonzero(valid, 3));
+    EXPECT_FALSE(Vektor::Protocol::stable_ids_unique_nonzero(duplicate, 3));
+    EXPECT_FALSE(Vektor::Protocol::stable_ids_unique_nonzero(zero, 3));
+    EXPECT_FALSE(Vektor::Protocol::stable_ids_unique_nonzero(nullptr, 1));
+    EXPECT_TRUE(Vektor::Protocol::stable_ids_unique_nonzero(nullptr, 0));
+}
+
+TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
+{
+    const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
+    EXPECT_EQ(registry.component_count(), 3);
+    EXPECT_EQ(registry.field_count(), 16);
+    EXPECT_EQ(registry.parameter_count(), 3);
+
+    EXPECT_EQ(registry.component_id(0),
+              Vektor::Protocol::fnv1a32("component/system/0"));
+    EXPECT_EQ(registry.component_type_id(0),
+              Vektor::Protocol::fnv1a32(
+                  "component_type/system/protocol"));
+    EXPECT_EQ(registry.component_id(registry.component_count()), 0U);
+
+    const uint32_t uptime_id = Vektor::Protocol::fnv1a32(
+        "component/system/1/observable/uptime_ms");
+    const Vektor::FieldDescriptor *uptime = registry.field_by_id(uptime_id);
+    ASSERT_NE(uptime, nullptr);
+    EXPECT_EQ(uptime->slot, Vektor::FieldSlot::UPTIME_MS);
+    EXPECT_EQ(uptime->kind, Vektor::Protocol::FieldKind::OBSERVABLE);
+    EXPECT_EQ(uptime->type, Vektor::Protocol::PrimitiveType::U32);
+    EXPECT_NE(uptime->flags & Vektor::FIELD_READABLE, 0U);
+    EXPECT_NE(uptime->flags & Vektor::FIELD_REALTIME, 0U);
+    EXPECT_EQ(registry.field_by_id(0), nullptr);
+
+    const uint32_t servo_a_id = Vektor::Protocol::fnv1a32(
+        "component/vsp/1/output/servo_a");
+    const Vektor::FieldDescriptor *servo_a =
+        registry.field_by_id(servo_a_id);
+    ASSERT_NE(servo_a, nullptr);
+    EXPECT_EQ(servo_a->kind, Vektor::Protocol::FieldKind::OUTPUT);
+    EXPECT_EQ(servo_a->type, Vektor::Protocol::PrimitiveType::FLOAT32);
+    EXPECT_NE(servo_a->flags & Vektor::FIELD_ROUTABLE, 0U);
+}
+
+TEST(VektorSchemaRegistry, SerializesCanonicalFieldRecord)
+{
+    const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
+    uint8_t record[128];
+    uint16_t record_len = 0;
+    ASSERT_TRUE(registry.build_field_record(3,
+                                            record,
+                                            sizeof(record),
+                                            record_len));
+
+    Vektor::Protocol::PayloadReader reader(record, record_len);
+    uint8_t version = 0;
+    uint32_t field_id = 0;
+    uint32_t owner_id = 0;
+    uint8_t kind = 0;
+    uint8_t type = 0;
+    uint32_t flags = 0;
+    ASSERT_TRUE(reader.u8(version));
+    ASSERT_TRUE(reader.u32(field_id));
+    ASSERT_TRUE(reader.u32(owner_id));
+    ASSERT_TRUE(reader.u8(kind));
+    ASSERT_TRUE(reader.u8(type));
+    ASSERT_TRUE(reader.u32(flags));
+    ASSERT_TRUE(skip_str8(reader));
+    ASSERT_TRUE(skip_str8(reader));
+    ASSERT_TRUE(skip_str8(reader));
+    EXPECT_EQ(reader.remaining(), 0);
+    EXPECT_EQ(version, 1);
+    EXPECT_EQ(field_id,
+              Vektor::Protocol::fnv1a32(
+                  "component/system/1/observable/uptime_ms"));
+    EXPECT_EQ(owner_id,
+              Vektor::Protocol::fnv1a32("component/system/1"));
+    EXPECT_EQ(kind,
+              uint8_t(Vektor::Protocol::FieldKind::OBSERVABLE));
+    EXPECT_EQ(type,
+              uint8_t(Vektor::Protocol::PrimitiveType::U32));
+    EXPECT_EQ(flags,
+              uint32_t(Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME));
+
+    EXPECT_FALSE(registry.build_field_record(registry.field_count(),
+                                             record,
+                                             sizeof(record),
+                                             record_len));
+    EXPECT_EQ(record_len, 0);
+}
+
 TEST(VektorRequestReplayCache, ReplaysIdenticalRequest)
 {
     Vektor::RequestReplayCache cache;
@@ -369,6 +685,368 @@ TEST(VektorRuntimeState, ClampsWideValues)
     EXPECT_EQ(runtime.max_loop_work_us(), UINT32_MAX);
     EXPECT_EQ(runtime.uptime_ms((uint64_t(UINT32_MAX) + 10ULL) * 1000ULL),
               UINT32_MAX);
+}
+
+TEST(VektorSubscriptionTable, NegotiatesRateAndSchedulesWithoutBacklog)
+{
+    Vektor::SubscriptionTable subscriptions;
+    subscriptions.reset(10000);
+    const uint32_t fields[] = { 0x11, 0x22 };
+    const Vektor::SubscriptionTable::Entry *created = nullptr;
+
+    EXPECT_EQ(subscriptions.add(10001,
+                                fields,
+                                2,
+                                1000,
+                                created),
+              Vektor::SubscriptionTable::AddResult::OK);
+    ASSERT_NE(created, nullptr);
+    EXPECT_EQ(created->id, 1);
+    EXPECT_EQ(created->period_us, 20000U);
+    EXPECT_EQ(created->field_count, 2);
+    EXPECT_EQ(created->field_ids[0], fields[0]);
+    EXPECT_EQ(created->field_ids[1], fields[1]);
+    EXPECT_EQ(subscriptions.claim_due(20999), nullptr);
+
+    Vektor::SubscriptionTable::Entry *due = subscriptions.claim_due(21000);
+    ASSERT_NE(due, nullptr);
+    EXPECT_EQ(due->id, created->id);
+    EXPECT_EQ(subscriptions.claim_due(21000), nullptr);
+
+    // Missing several periods produces one fresh sample, not a backlog.
+    due = subscriptions.claim_due(101000);
+    ASSERT_NE(due, nullptr);
+    EXPECT_EQ(subscriptions.claim_due(101000), nullptr);
+    EXPECT_EQ(due->next_sample_us, 121000U);
+}
+
+TEST(VektorSubscriptionTable, FastestRateAndRemoval)
+{
+    Vektor::SubscriptionTable subscriptions;
+    subscriptions.reset(5000);
+    const uint32_t field = 7;
+    const Vektor::SubscriptionTable::Entry *created = nullptr;
+
+    ASSERT_EQ(subscriptions.add(0, &field, 1, 0, created),
+              Vektor::SubscriptionTable::AddResult::OK);
+    ASSERT_NE(created, nullptr);
+    EXPECT_EQ(created->period_us, 5000U);
+    EXPECT_EQ(subscriptions.active_count(), 1);
+    EXPECT_NE(subscriptions.find(created->id), nullptr);
+    EXPECT_TRUE(subscriptions.remove(created->id));
+    EXPECT_EQ(subscriptions.active_count(), 0);
+    EXPECT_FALSE(subscriptions.remove(created->id));
+}
+
+TEST(VektorSubscriptionTable, EnforcesBoundsAndCapacity)
+{
+    Vektor::SubscriptionTable subscriptions;
+    subscriptions.reset(10000);
+    const uint32_t field = 1;
+    const Vektor::SubscriptionTable::Entry *created = nullptr;
+
+    EXPECT_EQ(subscriptions.add(10000, nullptr, 1, 0, created),
+              Vektor::SubscriptionTable::AddResult::INVALID_FIELD_COUNT);
+    EXPECT_EQ(subscriptions.add(10000, &field, 0, 0, created),
+              Vektor::SubscriptionTable::AddResult::INVALID_FIELD_COUNT);
+
+    for (uint16_t i = 0;
+         i < Vektor::SubscriptionTable::max_subscriptions;
+         i++) {
+        ASSERT_EQ(subscriptions.add(10000, &field, 1, 0, created),
+                  Vektor::SubscriptionTable::AddResult::OK);
+        ASSERT_NE(created, nullptr);
+        EXPECT_NE(created->id, 0);
+    }
+    EXPECT_EQ(subscriptions.add(10000, &field, 1, 0, created),
+              Vektor::SubscriptionTable::AddResult::FULL);
+    EXPECT_EQ(created, nullptr);
+}
+
+TEST(VektorSerialProtocol, DescriptorHashesAreStableAndBoardSpecific)
+{
+    uint64_t h743_schema = 0;
+    uint64_t h743_capability = 0;
+    uint64_t repeated_schema = 0;
+    uint64_t repeated_capability = 0;
+    uint64_t f405_schema = 0;
+    uint64_t f405_capability = 0;
+
+    ASSERT_TRUE(hello_hashes_for_capability(
+        Vektor::core_evo_h743_capability(), h743_schema, h743_capability));
+    ASSERT_TRUE(hello_hashes_for_capability(
+        Vektor::core_evo_h743_capability(),
+        repeated_schema,
+        repeated_capability));
+    ASSERT_TRUE(hello_hashes_for_capability(
+        Vektor::core_reduced_f405_capability(), f405_schema, f405_capability));
+
+    EXPECT_NE(h743_schema, 0U);
+    EXPECT_NE(h743_capability, 0U);
+    EXPECT_EQ(repeated_schema, h743_schema);
+    EXPECT_EQ(repeated_capability, h743_capability);
+    EXPECT_EQ(f405_schema, h743_schema);
+    EXPECT_NE(f405_capability, h743_capability);
+}
+
+TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
+{
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    parameters.sys_protocol_baud.set(Vektor::protocol_baud);
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::VspComponent vsp;
+    vsp.reset();
+    Vektor::SerialProtocol serial;
+    serial.init(&uart,
+                Vektor::core_evo_h743_capability(),
+                parameters,
+                runtime,
+                vsp);
+    ASSERT_TRUE(uart.is_initialized());
+    uart.clear_tx();
+
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter hello(payload, sizeof(payload));
+    hello.u8(1);
+    hello.u8(1);
+    hello.u16(0);
+    hello.u32(0);
+    hello.u32(0x12345678);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::HELLO,
+                             1,
+                             hello.data(),
+                             hello.length()));
+    serial.update();
+
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type, Vektor::Protocol::MessageType::HELLO);
+    EXPECT_EQ(response.flags, Vektor::Protocol::FLAG_RESPONSE);
+    EXPECT_EQ(response.sequence, 1);
+
+    Vektor::Protocol::PayloadReader hello_response(response.payload,
+                                                   response.payload_len);
+    uint8_t selected_major = 0;
+    uint16_t server_minor = 0;
+    uint32_t board_id = 0;
+    uint64_t schema_hash = 0;
+    uint64_t capability_hash = 0;
+    uint64_t ignored64 = 0;
+    uint64_t capability_flags = 0;
+    uint16_t max_payload = 0;
+    uint16_t max_file_chunk = 0;
+    uint16_t max_subscriptions = 0;
+    uint16_t max_realtime_hz = 0;
+    uint16_t control_update_hz = 0;
+    uint16_t attitude_update_hz = 0;
+    uint32_t server_nonce = 0;
+    ASSERT_TRUE(hello_response.u8(selected_major));
+    ASSERT_TRUE(hello_response.u16(server_minor));
+    ASSERT_TRUE(skip_str8(hello_response));
+    ASSERT_TRUE(skip_str8(hello_response));
+    ASSERT_TRUE(skip_str8(hello_response));
+    ASSERT_TRUE(hello_response.u32(board_id));
+    ASSERT_TRUE(hello_response.u64(schema_hash));
+    ASSERT_TRUE(hello_response.u64(capability_hash));
+    ASSERT_TRUE(hello_response.u64(ignored64)); // device ID
+    ASSERT_TRUE(hello_response.u64(capability_flags));
+    ASSERT_TRUE(hello_response.u16(max_payload));
+    ASSERT_TRUE(hello_response.u16(max_file_chunk));
+    ASSERT_TRUE(hello_response.u16(max_subscriptions));
+    ASSERT_TRUE(hello_response.u16(max_realtime_hz));
+    ASSERT_TRUE(hello_response.u16(control_update_hz));
+    ASSERT_TRUE(hello_response.u16(attitude_update_hz));
+    ASSERT_TRUE(hello_response.u32(server_nonce));
+    EXPECT_EQ(hello_response.remaining(), 0);
+    EXPECT_EQ(selected_major, Vektor::Protocol::MAJOR_VERSION);
+    EXPECT_EQ(server_minor, 0);
+    EXPECT_EQ(max_payload, Vektor::Protocol::MAX_PAYLOAD_SIZE);
+    EXPECT_EQ(max_file_chunk, 0);
+    EXPECT_EQ(max_subscriptions,
+              Vektor::SubscriptionTable::max_subscriptions);
+    EXPECT_EQ(max_realtime_hz, Vektor::max_realtime_rate_hz);
+    EXPECT_EQ(control_update_hz, Vektor::default_service_rate_hz);
+    EXPECT_EQ(attitude_update_hz, 0);
+    EXPECT_NE(capability_flags & (1ULL << 13), 0U);
+    EXPECT_NE(schema_hash, 0U);
+    EXPECT_NE(capability_hash, 0U);
+    EXPECT_NE(schema_hash, capability_hash);
+
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter describe(payload, sizeof(payload));
+    describe.u8(uint8_t(Vektor::Protocol::DescriptorDomain::RUNTIME_LIMIT));
+    describe.u32(0);
+    describe.u16(0);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::DESCRIBE,
+                             2,
+                             describe.data(),
+                             describe.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type, Vektor::Protocol::MessageType::DESCRIBE);
+    EXPECT_EQ(response.flags, Vektor::Protocol::FLAG_RESPONSE);
+    EXPECT_EQ(response.sequence, 2);
+
+    Vektor::Protocol::PayloadReader description(response.payload,
+                                                response.payload_len);
+    uint8_t descriptor_domain = 0;
+    uint32_t next_cursor = 1;
+    uint16_t record_count = 0;
+    uint16_t record_len = 0;
+    const uint8_t *record_bytes = nullptr;
+    ASSERT_TRUE(description.u8(descriptor_domain));
+    ASSERT_TRUE(description.u32(next_cursor));
+    ASSERT_TRUE(description.u16(record_count));
+    ASSERT_TRUE(description.u16(record_len));
+    ASSERT_TRUE(description.bytes(record_bytes, record_len));
+    EXPECT_EQ(description.remaining(), 0);
+    EXPECT_EQ(descriptor_domain,
+              uint8_t(Vektor::Protocol::DescriptorDomain::RUNTIME_LIMIT));
+    EXPECT_EQ(next_cursor, 0U);
+    EXPECT_EQ(record_count, 1);
+
+    Vektor::Protocol::PayloadReader runtime_limit(record_bytes, record_len);
+    uint8_t record_version = 0;
+    uint32_t limit_id = 0;
+    uint64_t limit_capability_flags = 0;
+    uint16_t limit_max_payload = 0;
+    uint16_t limit_max_file_chunk = 0;
+    uint16_t limit_max_subscriptions = 0;
+    uint16_t limit_max_realtime_hz = 0;
+    uint16_t limit_control_update_hz = 0;
+    uint16_t limit_attitude_update_hz = 0;
+    ASSERT_TRUE(runtime_limit.u8(record_version));
+    ASSERT_TRUE(runtime_limit.u32(limit_id));
+    ASSERT_TRUE(runtime_limit.u64(limit_capability_flags));
+    ASSERT_TRUE(runtime_limit.u16(limit_max_payload));
+    ASSERT_TRUE(runtime_limit.u16(limit_max_file_chunk));
+    ASSERT_TRUE(runtime_limit.u16(limit_max_subscriptions));
+    ASSERT_TRUE(runtime_limit.u16(limit_max_realtime_hz));
+    ASSERT_TRUE(runtime_limit.u16(limit_control_update_hz));
+    ASSERT_TRUE(runtime_limit.u16(limit_attitude_update_hz));
+    EXPECT_EQ(runtime_limit.remaining(), 0);
+    EXPECT_EQ(record_version, 1);
+    EXPECT_EQ(limit_id,
+              Vektor::Protocol::fnv1a32("runtime_limit/protocol/0"));
+    EXPECT_EQ(limit_capability_flags, capability_flags);
+    EXPECT_EQ(limit_max_payload, max_payload);
+    EXPECT_EQ(limit_max_file_chunk, max_file_chunk);
+    EXPECT_EQ(limit_max_subscriptions, max_subscriptions);
+    EXPECT_EQ(limit_max_realtime_hz, max_realtime_hz);
+    EXPECT_EQ(limit_control_update_hz, control_update_hz);
+    EXPECT_EQ(limit_attitude_update_hz, attitude_update_hz);
+
+    uart.clear_tx();
+    const uint32_t uptime_id = Vektor::Protocol::fnv1a32(
+        "component/system/1/observable/uptime_ms");
+    const uint32_t service_rate_id = Vektor::Protocol::fnv1a32(
+        "component/system/1/observable/service_rate_hz");
+    const uint32_t servo_a_id = Vektor::Protocol::fnv1a32(
+        "component/vsp/1/output/servo_a");
+    Vektor::Protocol::PayloadWriter subscribe(payload, sizeof(payload));
+    subscribe.u32(0); // fastest supported rate
+    subscribe.u16(3);
+    subscribe.u32(uptime_id);
+    subscribe.u32(service_rate_id);
+    subscribe.u32(servo_a_id);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::SUBSCRIBE,
+                             3,
+                             subscribe.data(),
+                             subscribe.length()));
+    serial.update();
+
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type, Vektor::Protocol::MessageType::SUBSCRIBE);
+    EXPECT_EQ(response.flags, Vektor::Protocol::FLAG_RESPONSE);
+    Vektor::Protocol::PayloadReader subscribe_response(response.payload,
+                                                       response.payload_len);
+    uint16_t subscription_id = 0;
+    uint32_t accepted_period_us = 0;
+    uint16_t field_count = 0;
+    uint32_t returned_field_id = 0;
+    ASSERT_TRUE(subscribe_response.u16(subscription_id));
+    ASSERT_TRUE(subscribe_response.u32(accepted_period_us));
+    ASSERT_TRUE(subscribe_response.u16(field_count));
+    EXPECT_NE(subscription_id, 0);
+    EXPECT_EQ(accepted_period_us,
+              1000000U / Vektor::max_realtime_rate_hz);
+    EXPECT_EQ(field_count, 3);
+    ASSERT_TRUE(subscribe_response.u32(returned_field_id));
+    EXPECT_EQ(returned_field_id, uptime_id);
+    ASSERT_TRUE(subscribe_response.u32(returned_field_id));
+    EXPECT_EQ(returned_field_id, service_rate_id);
+    ASSERT_TRUE(subscribe_response.u32(returned_field_id));
+    EXPECT_EQ(returned_field_id, servo_a_id);
+    EXPECT_EQ(subscribe_response.remaining(), 0);
+
+    uart.clear_tx();
+    usleep(20000);
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type, Vektor::Protocol::MessageType::TELEMETRY);
+    EXPECT_EQ(response.flags, Vektor::Protocol::FLAG_VOLATILE);
+    Vektor::Protocol::PayloadReader telemetry(response.payload,
+                                              response.payload_len);
+    uint16_t telemetry_subscription_id = 0;
+    uint16_t sample_sequence = 0;
+    uint64_t timestamp_us = 0;
+    uint8_t quality_len = 0;
+    uint8_t quality = 0xFF;
+    uint32_t uptime_ms = 0;
+    uint16_t service_rate_hz = 0;
+    uint32_t servo_a_raw = UINT32_MAX;
+    ASSERT_TRUE(telemetry.u16(telemetry_subscription_id));
+    ASSERT_TRUE(telemetry.u16(sample_sequence));
+    ASSERT_TRUE(telemetry.u64(timestamp_us));
+    ASSERT_TRUE(telemetry.u8(quality_len));
+    ASSERT_TRUE(telemetry.u8(quality));
+    ASSERT_TRUE(telemetry.u32(uptime_ms));
+    ASSERT_TRUE(telemetry.u16(service_rate_hz));
+    ASSERT_TRUE(telemetry.u32(servo_a_raw));
+    EXPECT_EQ(telemetry.remaining(), 0);
+    EXPECT_EQ(telemetry_subscription_id, subscription_id);
+    EXPECT_EQ(sample_sequence, 0);
+    EXPECT_NE(timestamp_us, 0U);
+    EXPECT_EQ(quality_len, 1);
+    EXPECT_EQ(quality, 0x20); // VSP output is INVALID until routed inputs exist
+    EXPECT_EQ(service_rate_hz, Vektor::default_service_rate_hz);
+    EXPECT_EQ(servo_a_raw, 0U);
+
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter unsubscribe(payload, sizeof(payload));
+    unsubscribe.u16(subscription_id);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::UNSUBSCRIBE,
+                             4,
+                             unsubscribe.data(),
+                             unsubscribe.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type,
+              Vektor::Protocol::MessageType::UNSUBSCRIBE);
+    EXPECT_EQ(response.flags, Vektor::Protocol::FLAG_RESPONSE);
+    Vektor::Protocol::PayloadReader unsubscribe_response(response.payload,
+                                                         response.payload_len);
+    uint16_t removed_id = 0;
+    ASSERT_TRUE(unsubscribe_response.u16(removed_id));
+    EXPECT_EQ(removed_id, subscription_id);
+    EXPECT_EQ(unsubscribe_response.remaining(), 0);
+
+    uart.clear_tx();
+    usleep(20000);
+    serial.update();
+    EXPECT_EQ(uart.tx_length(), 0);
 }
 
 AP_GTEST_MAIN()

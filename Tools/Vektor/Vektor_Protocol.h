@@ -234,7 +234,11 @@ private:
 
 uint32_t crc32_iso_hdlc(const uint8_t *data, uint32_t length);
 uint32_t fnv1a32(const char *path);
+uint64_t fnv1a64_update(uint64_t hash,
+                        const uint8_t *data,
+                        uint16_t length);
 uint64_t fnv1a64(const uint8_t *data, uint16_t length);
+bool stable_ids_unique_nonzero(const uint32_t *ids, uint16_t count);
 
 bool cobs_encode(const uint8_t *decoded,
                  uint16_t decoded_len,

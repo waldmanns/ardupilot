@@ -70,12 +70,39 @@ uint32_t fnv1a32(const char *path)
 
 uint64_t fnv1a64(const uint8_t *data, uint16_t length)
 {
-    uint64_t hash = 0xCBF29CE484222325ULL;
+    return fnv1a64_update(0xCBF29CE484222325ULL, data, length);
+}
+
+uint64_t fnv1a64_update(uint64_t hash,
+                        const uint8_t *data,
+                        uint16_t length)
+{
+    if (data == nullptr && length != 0) {
+        return hash;
+    }
     for (uint16_t i = 0; i < length; i++) {
         hash ^= data[i];
         hash *= 0x100000001B3ULL;
     }
     return hash;
+}
+
+bool stable_ids_unique_nonzero(const uint32_t *ids, uint16_t count)
+{
+    if (ids == nullptr && count != 0) {
+        return false;
+    }
+    for (uint16_t i = 0; i < count; i++) {
+        if (ids[i] == 0) {
+            return false;
+        }
+        for (uint16_t j = 0; j < i; j++) {
+            if (ids[j] == ids[i]) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool cobs_encode(const uint8_t *decoded,
