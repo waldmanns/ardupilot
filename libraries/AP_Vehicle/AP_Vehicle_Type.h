@@ -34,6 +34,7 @@
 #define APM_BUILD_Blimp      12
 #define APM_BUILD_Heli       13
 #define APM_BUILD_MiniDP     14
+#define APM_BUILD_Vektor     15
 // @LoggerEnumEnd
 
 #ifdef APM_BUILD_DIRECTORY

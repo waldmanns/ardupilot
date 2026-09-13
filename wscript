@@ -967,7 +967,7 @@ ardupilotwaf.build_command('check-all',
     doc='shortcut for `waf check --alltests`',
 )
 
-for name in (vehicles + ['bootloader','iofirmware','AP_Periph','replay','minidp']):
+for name in (vehicles + ['bootloader','iofirmware','AP_Periph','replay','minidp','vektor']):
     ardupilotwaf.build_command(name,
         program_group_list=name,
         doc='builds %s programs' % name,

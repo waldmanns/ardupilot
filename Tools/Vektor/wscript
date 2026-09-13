@@ -1,0 +1,29 @@
+# encoding: utf-8
+
+
+def build(bld):
+    bld.recurse('tests')
+
+    board_libraries = bld.env.AP_LIBRARIES[:]
+    platform_libraries = [
+        library
+        for library in board_libraries
+        if library in ('AP_HAL_ChibiOS', 'AP_HAL_SITL')
+    ]
+
+    # Keep this first scaffold close to the truth base: selected AP plumbing,
+    # board capability metadata, and no inherited vehicle model.
+    bld.env.AP_LIBRARIES = []
+    bld.ap_stlib(
+        name='Vektor_platform_libs',
+        ap_vehicle='Vektor',
+        ap_libraries=platform_libraries,
+        dynamic_source=[],
+    )
+    bld.env.AP_LIBRARIES = board_libraries
+
+    bld.ap_program(
+        program_name='Vektor',
+        program_groups=['bin', 'vektor'],
+        use=['Vektor_platform_libs', 'ap'],
+    )

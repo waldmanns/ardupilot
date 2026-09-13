@@ -1,0 +1,69 @@
+#include "Vektor_Runtime.h"
+
+#include <stdint.h>
+
+namespace Vektor {
+
+uint32_t RuntimeState::clamp_u32(uint64_t value)
+{
+    if (value > UINT32_MAX) {
+        return UINT32_MAX;
+    }
+    return uint32_t(value);
+}
+
+void RuntimeState::init(uint32_t service_rate_hz, uint64_t now_us)
+{
+    _boot_time_us = now_us;
+    _last_loop_start_us = 0;
+    _loop_count = 0;
+    _last_loop_dt_us = 0;
+    _last_loop_work_us = 0;
+    _max_loop_work_us = 0;
+    _service_rate_hz = service_rate_hz > UINT16_MAX ?
+        UINT16_MAX :
+        uint16_t(service_rate_hz);
+    _started = false;
+}
+
+void RuntimeState::begin_loop(uint64_t now_us)
+{
+    if (_started) {
+        _last_loop_dt_us = now_us >= _last_loop_start_us ?
+            clamp_u32(now_us - _last_loop_start_us) :
+            0;
+    } else {
+        _last_loop_dt_us = 0;
+        _started = true;
+    }
+
+    _last_loop_start_us = now_us;
+    if (_loop_count != UINT32_MAX) {
+        _loop_count++;
+    }
+}
+
+void RuntimeState::end_loop(uint64_t now_us)
+{
+    if (!_started) {
+        return;
+    }
+
+    _last_loop_work_us = now_us >= _last_loop_start_us ?
+        clamp_u32(now_us - _last_loop_start_us) :
+        0;
+
+    if (_last_loop_work_us > _max_loop_work_us) {
+        _max_loop_work_us = _last_loop_work_us;
+    }
+}
+
+uint32_t RuntimeState::uptime_ms(uint64_t now_us) const
+{
+    if (now_us < _boot_time_us) {
+        return 0;
+    }
+    return clamp_u32((now_us - _boot_time_us) / 1000U);
+}
+
+} // namespace Vektor
