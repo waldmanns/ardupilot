@@ -9,6 +9,9 @@ The canonical source for the current project facts is:
 Tools/Vektor/VEKTOR_CORE_EVO_TRUTH_BASE.md
 ```
 
+PC configurator implementation instructions for the currently available USB
+CDC protocol surface are in `Tools/Vektor/VEKTOR_PC_CLIENT_HANDOFF.md`.
+
 This scaffold intentionally starts small. It provides:
 
 - a `Vektor` application entry point;
