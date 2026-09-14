@@ -1,19 +1,27 @@
 #include "Vektor_Schema.h"
 
 #include "Config.h"
+#include "Vektor_SerialCatalog.h"
 
 #include <limits.h>
 
 namespace {
 
 namespace Protocol = Vektor::Protocol;
+namespace Catalog = Vektor::SerialCatalog;
 
-static constexpr const char *protocol_component_path = "component/system/0";
-static constexpr const char *runtime_component_path = "component/system/1";
-static constexpr const char *vsp_component_path = "component/vsp/1";
-static constexpr const char *rcin_component_path = "component/rcin/0";
-static constexpr const char *pwmin_component_path = "component/pwm_input/0";
-static constexpr const char *pwmout_component_path = "component/pwm_output/0";
+static constexpr const char *protocol_component_path =
+    Catalog::Component::PROTOCOL.path;
+static constexpr const char *runtime_component_path =
+    Catalog::Component::RUNTIME.path;
+static constexpr const char *attitude_component_path =
+    Catalog::Component::ATTITUDE.path;
+static constexpr const char *vsp_component_path = Catalog::Component::VSP.path;
+static constexpr const char *rcin_component_path = Catalog::Component::RCIN.path;
+static constexpr const char *pwmin_component_path =
+    Catalog::Component::PWM_INPUT.path;
+static constexpr const char *pwmout_component_path =
+    Catalog::Component::PWM_OUTPUT.path;
 static constexpr uint32_t parameter_live_flags =
     Vektor::FIELD_READABLE |
     Vektor::FIELD_WRITABLE |
@@ -46,6 +54,14 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
         "runtime",
         "Runtime",
         1,
+        0,
+    },
+    {
+        attitude_component_path,
+        "component_type/sensor/attitude",
+        "attitude0",
+        "Attitude",
+        0,
         0,
     },
     {
@@ -84,7 +100,7 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
 
 #define VEKTOR_RCIN_FIELD(CHANNEL)                                           \
     {                                                                        \
-        "component/rcin/0/output/channel_" #CHANNEL,                        \
+        Catalog::Output::RCIN_CHANNEL_##CHANNEL.path,                        \
         rcin_component_path,                                                 \
         "channel_" #CHANNEL,                                                \
         "Channel " #CHANNEL,                                                \
@@ -100,9 +116,25 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
         Vektor::FieldSlot::RCIN_CHANNEL_##CHANNEL,                           \
     }
 
+#define VEKTOR_RCIN_PWM_FIELD(CHANNEL)                                      \
+    {                                                                        \
+        Catalog::Observable::RCIN_CHANNEL_##CHANNEL##_US.path,               \
+        rcin_component_path,                                                 \
+        "channel_" #CHANNEL "_us",                                         \
+        "Channel " #CHANNEL " Pulse",                                      \
+        "us",                                                               \
+        Protocol::FieldKind::OBSERVABLE,                                     \
+        Protocol::PrimitiveType::U16,                                        \
+        Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME,                     \
+        0,                                                                   \
+        0,                                                                   \
+        0,                                                                   \
+        Vektor::FieldSlot::RCIN_PWM_##CHANNEL,                               \
+    }
+
 #define VEKTOR_PWMIN_PIN_FIELD(CHANNEL)                                      \
     {                                                                        \
-        "component/pwm_input/0/parameter/channel_" #CHANNEL "_pin",       \
+        Catalog::Parameter::PWMIN_CHANNEL_##CHANNEL##_PIN.path,              \
         pwmin_component_path,                                                \
         "channel_" #CHANNEL "_pin",                                      \
         "Channel " #CHANNEL " Pin",                                      \
@@ -118,7 +150,7 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
 
 #define VEKTOR_PWMIN_FIELD(CHANNEL)                                          \
     {                                                                        \
-        "component/pwm_input/0/output/channel_" #CHANNEL,                  \
+        Catalog::Output::PWMIN_CHANNEL_##CHANNEL.path,                       \
         pwmin_component_path,                                                \
         "channel_" #CHANNEL,                                               \
         "Channel " #CHANNEL,                                               \
@@ -136,7 +168,7 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
 
 #define VEKTOR_PWMOUT_FIELD(CHANNEL)                                         \
     {                                                                        \
-        "component/pwm_output/0/input/channel_" #CHANNEL,                  \
+        Catalog::Input::PWMOUT_CHANNEL_##CHANNEL.path,                       \
         pwmout_component_path,                                               \
         "channel_" #CHANNEL,                                               \
         "Channel " #CHANNEL,                                               \
@@ -152,9 +184,25 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
         Vektor::FieldSlot::PWMOUT_CHANNEL_##CHANNEL,                         \
     }
 
+#define VEKTOR_PWMOUT_PULSE_FIELD(CHANNEL)                                  \
+    {                                                                        \
+        Catalog::Output::PWMOUT_CHANNEL_##CHANNEL.path,                      \
+        pwmout_component_path,                                               \
+        "channel_" #CHANNEL,                                                \
+        "Channel " #CHANNEL " Pulse",                                      \
+        "us",                                                               \
+        Protocol::FieldKind::OUTPUT,                                         \
+        Protocol::PrimitiveType::U16,                                        \
+        Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME,                     \
+        0,                                                                   \
+        0,                                                                   \
+        0,                                                                   \
+        Vektor::FieldSlot::PWMOUT_PULSE_##CHANNEL,                           \
+    }
+
 const Vektor::FieldDescriptor field_descriptors[] = {
     {
-        "component/system/0/observable/rx_frames",
+        Catalog::Observable::RX_FRAMES.path,
         protocol_component_path,
         "rx_frames",
         "RX Frames",
@@ -168,7 +216,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::RX_FRAMES,
     },
     {
-        "component/system/0/observable/rx_drops",
+        Catalog::Observable::RX_DROPS.path,
         protocol_component_path,
         "rx_drops",
         "RX Drops",
@@ -182,7 +230,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::RX_DROPS,
     },
     {
-        "component/system/0/observable/tx_drops",
+        Catalog::Observable::TX_DROPS.path,
         protocol_component_path,
         "tx_drops",
         "TX Drops",
@@ -196,7 +244,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::TX_DROPS,
     },
     {
-        "component/system/1/observable/uptime_ms",
+        Catalog::Observable::UPTIME_MS.path,
         runtime_component_path,
         "uptime_ms",
         "Uptime",
@@ -210,7 +258,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::UPTIME_MS,
     },
     {
-        "component/system/1/observable/loop_count",
+        Catalog::Observable::LOOP_COUNT.path,
         runtime_component_path,
         "loop_count",
         "Loop Count",
@@ -224,7 +272,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::LOOP_COUNT,
     },
     {
-        "component/system/1/observable/loop_dt_us",
+        Catalog::Observable::LOOP_DT_US.path,
         runtime_component_path,
         "loop_dt_us",
         "Loop Delta",
@@ -238,7 +286,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::LOOP_DT_US,
     },
     {
-        "component/system/1/observable/loop_work_us",
+        Catalog::Observable::LOOP_WORK_US.path,
         runtime_component_path,
         "loop_work_us",
         "Loop Work",
@@ -252,7 +300,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::LOOP_WORK_US,
     },
     {
-        "component/system/1/observable/loop_max_work_us",
+        Catalog::Observable::LOOP_MAX_WORK_US.path,
         runtime_component_path,
         "loop_max_work_us",
         "Max Loop Work",
@@ -266,7 +314,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::LOOP_MAX_WORK_US,
     },
     {
-        "component/system/1/observable/service_rate_hz",
+        Catalog::Observable::SERVICE_RATE_HZ.path,
         runtime_component_path,
         "service_rate_hz",
         "Service Rate",
@@ -280,7 +328,77 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::SERVICE_RATE_HZ,
     },
     {
-        "component/system/0/parameter/sys_options",
+        Catalog::Observable::ATTITUDE_ROLL_DEG.path,
+        attitude_component_path,
+        "roll_deg",
+        "Roll",
+        "deg",
+        Protocol::FieldKind::OBSERVABLE,
+        Protocol::PrimitiveType::FLOAT32,
+        Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME,
+        0,
+        0,
+        0,
+        Vektor::FieldSlot::ATTITUDE_ROLL_DEG,
+    },
+    {
+        Catalog::Observable::ATTITUDE_PITCH_DEG.path,
+        attitude_component_path,
+        "pitch_deg",
+        "Pitch",
+        "deg",
+        Protocol::FieldKind::OBSERVABLE,
+        Protocol::PrimitiveType::FLOAT32,
+        Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME,
+        0,
+        0,
+        0,
+        Vektor::FieldSlot::ATTITUDE_PITCH_DEG,
+    },
+    {
+        Catalog::Observable::ATTITUDE_YAW_DEG.path,
+        attitude_component_path,
+        "yaw_deg",
+        "Yaw",
+        "deg",
+        Protocol::FieldKind::OBSERVABLE,
+        Protocol::PrimitiveType::FLOAT32,
+        Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME,
+        0,
+        0,
+        0,
+        Vektor::FieldSlot::ATTITUDE_YAW_DEG,
+    },
+    {
+        Catalog::Observable::ATTITUDE_QUATERNION.path,
+        attitude_component_path,
+        "quaternion",
+        "Quaternion",
+        "",
+        Protocol::FieldKind::OBSERVABLE,
+        Protocol::PrimitiveType::QUATERNIONF,
+        Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME,
+        0,
+        0,
+        0,
+        Vektor::FieldSlot::ATTITUDE_QUATERNION,
+    },
+    {
+        Catalog::Observable::ATTITUDE_BODY_RATES_RAD_S.path,
+        attitude_component_path,
+        "body_rates_rad_s",
+        "Body Rates",
+        "rad/s",
+        Protocol::FieldKind::OBSERVABLE,
+        Protocol::PrimitiveType::VECTOR3F,
+        Vektor::FIELD_READABLE | Vektor::FIELD_REALTIME,
+        0,
+        0,
+        0,
+        Vektor::FieldSlot::ATTITUDE_BODY_RATES_RAD_S,
+    },
+    {
+        Catalog::Parameter::SYS_OPTIONS.path,
         protocol_component_path,
         "sys_options",
         "System Options",
@@ -294,7 +412,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::SYS_OPTIONS,
     },
     {
-        "component/system/0/parameter/sys_desc_page",
+        Catalog::Parameter::SYS_DESC_PAGE.path,
         protocol_component_path,
         "sys_desc_page",
         "Descriptor Page Size",
@@ -308,7 +426,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::SYS_DESC_PAGE,
     },
     {
-        "component/system/0/parameter/sys_protocol_baud",
+        Catalog::Parameter::SYS_PROTOCOL_BAUD.path,
         protocol_component_path,
         "sys_protocol_baud",
         "Protocol Baud",
@@ -328,7 +446,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::SYS_PROTOCOL_BAUD,
     },
     {
-        "component/rcin/0/parameter/uart_port",
+        Catalog::Parameter::RCIN_UART_PORT.path,
         rcin_component_path,
         "uart_port",
         "Receiver UART",
@@ -348,7 +466,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::RCIN_PORT,
     },
     {
-        "component/rcin/0/parameter/timeout_ms",
+        Catalog::Parameter::RCIN_TIMEOUT_MS.path,
         rcin_component_path,
         "timeout_ms",
         "RC Input Timeout",
@@ -362,7 +480,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::RCIN_TIMEOUT_MS,
     },
     {
-        "component/rcin/0/parameter/protocol_mask",
+        Catalog::Parameter::RCIN_PROTOCOL_MASK.path,
         rcin_component_path,
         "protocol_mask",
         "Receiver Protocols",
@@ -376,7 +494,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::RCIN_PROTOCOLS,
     },
     {
-        "component/vsp/1/input/x",
+        Catalog::Input::VSP_X.path,
         vsp_component_path,
         "x",
         "X Command",
@@ -392,7 +510,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::VSP_X,
     },
     {
-        "component/vsp/1/input/y",
+        Catalog::Input::VSP_Y.path,
         vsp_component_path,
         "y",
         "Y Command",
@@ -408,7 +526,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::VSP_Y,
     },
     {
-        "component/vsp/1/output/servo_a",
+        Catalog::Output::VSP_SERVO_A.path,
         vsp_component_path,
         "servo_a",
         "Servo A",
@@ -424,7 +542,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::VSP_SERVO_A,
     },
     {
-        "component/vsp/1/output/servo_b",
+        Catalog::Output::VSP_SERVO_B.path,
         vsp_component_path,
         "servo_b",
         "Servo B",
@@ -455,6 +573,22 @@ const Vektor::FieldDescriptor field_descriptors[] = {
     VEKTOR_RCIN_FIELD(14),
     VEKTOR_RCIN_FIELD(15),
     VEKTOR_RCIN_FIELD(16),
+    VEKTOR_RCIN_PWM_FIELD(1),
+    VEKTOR_RCIN_PWM_FIELD(2),
+    VEKTOR_RCIN_PWM_FIELD(3),
+    VEKTOR_RCIN_PWM_FIELD(4),
+    VEKTOR_RCIN_PWM_FIELD(5),
+    VEKTOR_RCIN_PWM_FIELD(6),
+    VEKTOR_RCIN_PWM_FIELD(7),
+    VEKTOR_RCIN_PWM_FIELD(8),
+    VEKTOR_RCIN_PWM_FIELD(9),
+    VEKTOR_RCIN_PWM_FIELD(10),
+    VEKTOR_RCIN_PWM_FIELD(11),
+    VEKTOR_RCIN_PWM_FIELD(12),
+    VEKTOR_RCIN_PWM_FIELD(13),
+    VEKTOR_RCIN_PWM_FIELD(14),
+    VEKTOR_RCIN_PWM_FIELD(15),
+    VEKTOR_RCIN_PWM_FIELD(16),
     VEKTOR_PWMIN_PIN_FIELD(1),
     VEKTOR_PWMIN_PIN_FIELD(2),
     VEKTOR_PWMIN_PIN_FIELD(3),
@@ -462,7 +596,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
     VEKTOR_PWMIN_PIN_FIELD(5),
     VEKTOR_PWMIN_PIN_FIELD(6),
     {
-        "component/pwm_input/0/parameter/timeout_ms",
+        Catalog::Parameter::PWMIN_TIMEOUT_MS.path,
         pwmin_component_path,
         "timeout_ms",
         "Input Timeout",
@@ -476,7 +610,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMIN_TIMEOUT_MS,
     },
     {
-        "component/pwm_input/0/parameter/minimum_us",
+        Catalog::Parameter::PWMIN_MINIMUM_US.path,
         pwmin_component_path,
         "minimum_us",
         "Input Minimum",
@@ -490,7 +624,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMIN_MIN_US,
     },
     {
-        "component/pwm_input/0/parameter/trim_us",
+        Catalog::Parameter::PWMIN_TRIM_US.path,
         pwmin_component_path,
         "trim_us",
         "Input Trim",
@@ -504,7 +638,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMIN_TRIM_US,
     },
     {
-        "component/pwm_input/0/parameter/maximum_us",
+        Catalog::Parameter::PWMIN_MAXIMUM_US.path,
         pwmin_component_path,
         "maximum_us",
         "Input Maximum",
@@ -518,7 +652,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMIN_MAX_US,
     },
     {
-        "component/pwm_output/0/parameter/rate_hz",
+        Catalog::Parameter::PWMOUT_RATE_HZ.path,
         pwmout_component_path,
         "rate_hz",
         "Output Rate",
@@ -532,7 +666,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMOUT_RATE_HZ,
     },
     {
-        "component/pwm_output/0/parameter/minimum_us",
+        Catalog::Parameter::PWMOUT_MINIMUM_US.path,
         pwmout_component_path,
         "minimum_us",
         "Output Minimum",
@@ -546,7 +680,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMOUT_MIN_US,
     },
     {
-        "component/pwm_output/0/parameter/trim_us",
+        Catalog::Parameter::PWMOUT_TRIM_US.path,
         pwmout_component_path,
         "trim_us",
         "Output Trim",
@@ -560,7 +694,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMOUT_TRIM_US,
     },
     {
-        "component/pwm_output/0/parameter/maximum_us",
+        Catalog::Parameter::PWMOUT_MAXIMUM_US.path,
         pwmout_component_path,
         "maximum_us",
         "Output Maximum",
@@ -574,7 +708,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMOUT_MAX_US,
     },
     {
-        "component/pwm_output/0/parameter/reverse_mask",
+        Catalog::Parameter::PWMOUT_REVERSE_MASK.path,
         pwmout_component_path,
         "reverse_mask",
         "Reverse Mask",
@@ -588,7 +722,7 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::PWMOUT_REVERSE_MASK,
     },
     {
-        "component/pwm_output/0/parameter/failsafe_us",
+        Catalog::Parameter::PWMOUT_FAILSAFE_US.path,
         pwmout_component_path,
         "failsafe_us",
         "Failsafe Pulse",
@@ -619,12 +753,26 @@ const Vektor::FieldDescriptor field_descriptors[] = {
     VEKTOR_PWMOUT_FIELD(10),
     VEKTOR_PWMOUT_FIELD(11),
     VEKTOR_PWMOUT_FIELD(12),
+    VEKTOR_PWMOUT_PULSE_FIELD(1),
+    VEKTOR_PWMOUT_PULSE_FIELD(2),
+    VEKTOR_PWMOUT_PULSE_FIELD(3),
+    VEKTOR_PWMOUT_PULSE_FIELD(4),
+    VEKTOR_PWMOUT_PULSE_FIELD(5),
+    VEKTOR_PWMOUT_PULSE_FIELD(6),
+    VEKTOR_PWMOUT_PULSE_FIELD(7),
+    VEKTOR_PWMOUT_PULSE_FIELD(8),
+    VEKTOR_PWMOUT_PULSE_FIELD(9),
+    VEKTOR_PWMOUT_PULSE_FIELD(10),
+    VEKTOR_PWMOUT_PULSE_FIELD(11),
+    VEKTOR_PWMOUT_PULSE_FIELD(12),
 };
 
 #undef VEKTOR_RCIN_FIELD
+#undef VEKTOR_RCIN_PWM_FIELD
 #undef VEKTOR_PWMIN_PIN_FIELD
 #undef VEKTOR_PWMIN_FIELD
 #undef VEKTOR_PWMOUT_FIELD
+#undef VEKTOR_PWMOUT_PULSE_FIELD
 
 static constexpr uint16_t component_descriptor_count =
     sizeof(component_descriptors) / sizeof(component_descriptors[0]);
@@ -802,6 +950,18 @@ bool rcin_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
     return true;
 }
 
+bool rcin_pwm_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
+{
+    const uint8_t value = uint8_t(slot);
+    const uint8_t first = uint8_t(FieldSlot::RCIN_PWM_1);
+    const uint8_t last = uint8_t(FieldSlot::RCIN_PWM_16);
+    if (value < first || value > last) {
+        return false;
+    }
+    channel_index = value - first;
+    return true;
+}
+
 bool pwmin_pin_for_slot(FieldSlot slot, uint8_t &channel_index)
 {
     const uint8_t value = uint8_t(slot);
@@ -831,6 +991,18 @@ bool pwmout_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
     const uint8_t value = uint8_t(slot);
     const uint8_t first = uint8_t(FieldSlot::PWMOUT_CHANNEL_1);
     const uint8_t last = uint8_t(FieldSlot::PWMOUT_CHANNEL_12);
+    if (value < first || value > last) {
+        return false;
+    }
+    channel_index = value - first;
+    return true;
+}
+
+bool pwmout_pulse_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
+{
+    const uint8_t value = uint8_t(slot);
+    const uint8_t first = uint8_t(FieldSlot::PWMOUT_PULSE_1);
+    const uint8_t last = uint8_t(FieldSlot::PWMOUT_PULSE_12);
     if (value < first || value > last) {
         return false;
     }

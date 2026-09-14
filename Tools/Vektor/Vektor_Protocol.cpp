@@ -50,11 +50,6 @@ void write_u32_le(uint8_t *data, uint32_t value)
 namespace Vektor {
 namespace Protocol {
 
-uint32_t crc32_iso_hdlc(const uint8_t *data, uint32_t length)
-{
-    return ~crc_crc32(~0U, data, length);
-}
-
 uint32_t fnv1a32(const char *path)
 {
     uint32_t hash = 0x811C9DC5U;
@@ -66,6 +61,11 @@ uint32_t fnv1a32(const char *path)
         hash *= 0x01000193U;
     }
     return hash;
+}
+
+uint32_t crc32_iso_hdlc(const uint8_t *data, uint32_t length)
+{
+    return ~crc_crc32(~0U, data, length);
 }
 
 uint64_t fnv1a64(const uint8_t *data, uint16_t length)

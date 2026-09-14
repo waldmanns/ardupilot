@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Vektor_AssignmentMatrix.h"
+#include "Vektor_Attitude.h"
 #include "Vektor_Capability.h"
 #include "Vektor_Parameters.h"
 #include "Vektor_Protocol.h"
@@ -22,6 +23,7 @@ public:
               const BoardCapability &capability,
               Parameters &parameters,
               const RuntimeState &runtime,
+              const AttitudeSource &attitude,
               const VspComponent &vsp,
               const RcinSource &rcin,
               PwmInput &pwm_input,
@@ -167,6 +169,7 @@ private:
     const BoardCapability *_capability = nullptr;
     Parameters *_parameters = nullptr;
     const RuntimeState *_runtime = nullptr;
+    const AttitudeSource *_attitude = nullptr;
     const VspComponent *_vsp = nullptr;
     const RcinSource *_rcin = nullptr;
     PwmInput *_pwm_input = nullptr;

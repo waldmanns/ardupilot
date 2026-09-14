@@ -7,6 +7,7 @@ namespace Vektor {
 
 constexpr uint16_t SubscriptionTable::max_subscriptions;
 constexpr uint16_t SubscriptionTable::max_fields;
+constexpr uint8_t SubscriptionTable::max_quality_bytes;
 
 void SubscriptionTable::reset(uint32_t scheduler_period_us)
 {

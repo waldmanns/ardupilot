@@ -7,7 +7,11 @@ namespace Vektor {
 class SubscriptionTable {
 public:
     static constexpr uint16_t max_subscriptions = 4;
-    static constexpr uint16_t max_fields = 8;
+    // Large enough for attitude (Euler, quaternion, body rates), all sixteen
+    // RC inputs, and all twelve physical RC/PWM outputs in one sample.
+    static constexpr uint16_t max_fields = 40;
+    static constexpr uint8_t max_quality_bytes =
+        (max_fields * 2U + 7U) / 8U;
 
     enum class AddResult : uint8_t {
         OK,

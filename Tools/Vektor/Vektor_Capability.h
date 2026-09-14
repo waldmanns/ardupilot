@@ -4,11 +4,6 @@
 
 namespace Vektor {
 
-enum class BoardProfile : uint8_t {
-    CORE_EVO_H743 = 0,
-    CORE_REDUCED_F405 = 1,
-};
-
 enum CapabilityFlag : uint32_t {
     CAP_NATIVE_USB = 1U << 0,
     CAP_PWM_OUTPUTS = 1U << 1,
@@ -20,6 +15,8 @@ enum CapabilityFlag : uint32_t {
     CAP_STORAGE = 1U << 7,
     CAP_ONBOARD_IMU = 1U << 8,
     CAP_ONBOARD_COMPASS = 1U << 9,
+    CAP_SD_STORAGE = 1U << 10,
+    CAP_DATAFLASH_STORAGE = 1U << 11,
 };
 
 struct TimerGroup {
@@ -28,7 +25,6 @@ struct TimerGroup {
 };
 
 struct BoardCapability {
-    BoardProfile profile;
     const char *product_name;
     const char *hardware_revision;
     const char *mcu_name;
@@ -50,12 +46,7 @@ struct BoardCapability {
     int16_t heartbeat_led_gpio;
 };
 
-const BoardCapability &core_evo_h743_capability();
-const BoardCapability &core_reduced_f405_capability();
-const BoardCapability *supported_capabilities();
-uint8_t supported_capability_count();
 const BoardCapability &default_capability_for_build();
-const char *board_profile_name(BoardProfile profile);
 bool capability_has(const BoardCapability &capability, CapabilityFlag flag);
 
 } // namespace Vektor

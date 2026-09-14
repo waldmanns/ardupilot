@@ -576,11 +576,12 @@ where enabled by the board build.
 
 ## Current readable and realtime fields
 
-The six current components are:
+The seven current components are:
 
 ```text
 component/system/0       protocol service
 component/system/1       runtime service
+component/attitude/0     onboard attitude estimator
 component/vsp/1          VSP skeleton
 component/rcin/0         serial/receiver RC source
 component/pwm_input/0    GPIO PWM input source
@@ -599,6 +600,12 @@ component/system/1/observable/loop_dt_us
 component/system/1/observable/loop_work_us
 component/system/1/observable/loop_max_work_us
 component/system/1/observable/service_rate_hz
+component/attitude/0/observable/roll_deg
+component/attitude/0/observable/pitch_deg
+component/attitude/0/observable/yaw_deg
+component/attitude/0/observable/quaternion
+component/attitude/0/observable/body_rates_rad_s
+component/rcin/0/observable/channel_1_us through channel_16_us
 ```
 
 Current routable/readable FLOAT32 fields:
@@ -611,11 +618,15 @@ component/vsp/1/output/servo_b
 component/rcin/0/output/channel_1 through channel_16
 component/pwm_input/0/output/channel_1 through channel_6
 component/pwm_output/0/input/channel_1 through channel_12
+component/pwm_output/0/output/channel_1 through channel_12
 ```
 
-RCIN, PWM input, and PWM output values exposed to the client are normalized
-FLOAT32 values, normally `-1.0..+1.0`. Raw receiver/input pulse widths and
-physical output pulse widths are not currently separate protocol fields.
+Routable RCIN, PWM input, and PWM output-command values are normalized FLOAT32
+values, normally `-1.0..+1.0`. The RCIN observable channels and physical PWM
+output fields are U16 pulse widths in microseconds. An inactive output reports
+zero with INVALID quality. Attitude roll/pitch/yaw are FLOAT32 degrees;
+quaternion is `QUATERNIONF` in `w,x,y,z` order; body rates are `VECTOR3F` in
+`x,y,z` body axes and rad/s.
 
 The VSP control-law update remains intentionally empty. Its output fields stay
 invalid until that core is implemented manually; do not present them as a
@@ -641,7 +652,7 @@ field_ids            u32[field_count]
 Limits now:
 
 - four simultaneous subscriptions;
-- up to eight unique fields per subscription;
+- up to 40 unique fields per subscription;
 - fastest period 10000 microseconds (100 Hz);
 - a requested period of zero means fastest available;
 - slower periods are rounded up to the 100 Hz scheduler tick.
@@ -876,9 +887,10 @@ The initial PC client is ready for current firmware when all of these pass:
 - The VSP core is intentionally only a skeleton.
 - Raw RC/PWM pulse-width observables are not exposed; current channel fields are
   normalized FLOAT32 values.
-- The H743 product capability model exists, but its final ChibiOS hardware
-  definition is not available in this workspace. Build and test the first PC
-  integration against `revo-mini` and remain descriptor-driven for H743 later.
+- The final H743 ChibiOS hardware definition is not available in this
+  workspace, so no H743 capability record is compiled yet. Build and test the
+  first PC integration against `revo-mini` and remain descriptor-driven for
+  H743 later.
 - USB access permissions/driver installation are an OS packaging concern. On
   Linux, provide an appropriate udev rule or user-group instructions rather
   than requiring the application to run as root.

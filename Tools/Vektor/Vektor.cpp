@@ -6,6 +6,7 @@
  */
 
 #include "Vektor.h"
+#include "Vektor_SerialCatalog.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/AP_HAL_Boards.h>
@@ -24,6 +25,7 @@ void App::setup()
     load_parameters();
     _active_capability = &default_capability_for_build();
     _runtime.init(default_service_rate_hz, AP_HAL::micros64());
+    setup_attitude();
     _rcin.reset(uint32_t(g.rcin_timeout_ms.get()) * 1000U);
     setup_rcin_uart();
     pwm_output.reset();
@@ -40,6 +42,7 @@ void App::setup()
                           *_active_capability,
                           g,
                           _runtime,
+                          _attitude,
                           _vsp,
                           _rcin,
                           pwm_input,
@@ -51,6 +54,7 @@ void App::loop()
 {
     const uint64_t now_us = AP_HAL::micros64();
     _runtime.begin_loop(now_us);
+    update_attitude(now_us);
     update_rcin(now_us);
     pwm_input.update(now_us);
     apply_vsp_inputs();
@@ -59,6 +63,63 @@ void App::loop()
     _serial_protocol.update();
     _runtime.end_loop(AP_HAL::micros64());
     hal.scheduler->delay(1000U / default_service_rate_hz);
+}
+
+void App::setup_attitude()
+{
+    _attitude.reset();
+#if VEKTOR_ATTITUDE_ENABLED
+    if (!capability_has(*_active_capability, CAP_ONBOARD_IMU)) {
+        return;
+    }
+
+    board_config.init();
+    ins.init(attitude_update_rate_hz);
+    compass.init();
+    ahrs.set_ekf_type(AP_AHRS::EKFType::DCM);
+    ahrs.init();
+    ahrs.set_fly_forward(false);
+    ahrs.set_vehicle_class(AP_AHRS::VehicleClass::GROUND);
+    ahrs.reset();
+    _last_compass_update_us = 0;
+    _attitude_initialized = true;
+#endif
+}
+
+void App::update_attitude(uint64_t now_us)
+{
+#if VEKTOR_ATTITUDE_ENABLED
+    if (!_attitude_initialized) {
+        return;
+    }
+
+    ins.update();
+    if (_last_compass_update_us == 0 ||
+        now_us - _last_compass_update_us >= 100000U) {
+        (void)compass.read();
+        _last_compass_update_us = now_us;
+    }
+    ahrs.update(true);
+
+    ::Quaternion quaternion;
+    ahrs.get_quat_body_to_ned(quaternion);
+    const Vector3f &gyro = ahrs.get_gyro();
+    const AttitudeValue value {
+        ahrs.get_roll_deg(),
+        ahrs.get_pitch_deg(),
+        ahrs.get_yaw_deg(),
+        quaternion.q1,
+        quaternion.q2,
+        quaternion.q3,
+        quaternion.q4,
+        gyro.x,
+        gyro.y,
+        gyro.z,
+    };
+    _attitude.ingest(value, now_us, ahrs.healthy());
+#else
+    (void)now_us;
+#endif
 }
 
 void App::setup_rcin_uart()
@@ -152,9 +213,9 @@ SignalSample<float> App::assigned_float(uint32_t destination_id) const
 void App::apply_vsp_inputs()
 {
     const uint32_t x_id =
-        Protocol::fnv1a32("component/vsp/1/input/x");
+        SerialCatalog::Input::VSP_X.id;
     const uint32_t y_id =
-        Protocol::fnv1a32("component/vsp/1/input/y");
+        SerialCatalog::Input::VSP_Y.id;
     _vsp.set_inputs(assigned_float(x_id), assigned_float(y_id));
 }
 
@@ -167,12 +228,8 @@ void App::apply_pwm_outputs()
     const uint8_t count = MIN(_active_capability->pwm_outputs,
                               PwmOutput::max_channels);
     for (uint8_t channel = 0; channel < count; channel++) {
-        char path[48];
-        hal.util->snprintf(path,
-                           sizeof(path),
-                           "component/pwm_output/0/input/channel_%u",
-                           unsigned(channel + 1));
-        const uint32_t destination_id = Protocol::fnv1a32(path);
+        const uint32_t destination_id =
+            SerialCatalog::Input::PWMOUT_CHANNELS[channel]->id;
         if (assignments.to_destination(destination_id) != nullptr) {
             assigned_mask |= 1U << channel;
             _pwm_commands[channel] = assigned_float(destination_id);

@@ -21,6 +21,12 @@ public:
         k_param_assignments,
         k_param_pwm_input,
         k_param_pwm_output,
+#if VEKTOR_ATTITUDE_ENABLED
+        k_param_board_config,
+        k_param_ins,
+        k_param_compass,
+        k_param_ahrs,
+#endif
     };
 
     AP_Int16 format_version;

@@ -68,6 +68,14 @@ const AP_Param::Info App::var_info[] = {
     // Normalized-to-pulse output bank configuration.
     GOBJECT(pwm_output, "PWM", PwmOutput),
 
+#if VEKTOR_ATTITUDE_ENABLED
+    // Standard ArduPilot sensor calibration and attitude-estimator settings.
+    GOBJECT(board_config, "BRD_", AP_BoardConfig),
+    GOBJECT(ins, "INS", AP_InertialSensor),
+    GOBJECT(compass, "COMPASS_", Compass),
+    GOBJECT(ahrs, "AHRS_", AP_AHRS),
+#endif
+
     AP_VAREND
 };
 

@@ -1,9 +1,17 @@
 #pragma once
 
+#include <AP_AHRS/AP_AHRS_config.h>
+
 #include <stdint.h>
 
 #define VEKTOR_FIRMWARE_NAME "Vektor"
 #define VEKTOR_TRUTH_BASE_FILE "Tools/Vektor/VEKTOR_CORE_EVO_TRUTH_BASE.md"
+
+#if AP_AHRS_DCM_ENABLED && AP_INERTIALSENSOR_ENABLED
+#define VEKTOR_ATTITUDE_ENABLED 1
+#else
+#define VEKTOR_ATTITUDE_ENABLED 0
+#endif
 
 namespace Vektor {
 
@@ -18,6 +26,12 @@ static constexpr uint32_t protocol_rx_space = 512;
 static constexpr uint32_t protocol_tx_space = 512;
 static constexpr uint32_t default_service_rate_hz = 100;
 static constexpr uint16_t max_realtime_rate_hz = default_service_rate_hz;
+static constexpr uint16_t attitude_update_rate_hz =
+#if VEKTOR_ATTITUDE_ENABLED
+    default_service_rate_hz;
+#else
+    0;
+#endif
 static constexpr int16_t default_describe_page_records = 4;
 static constexpr int16_t min_describe_page_records = 1;
 static constexpr int16_t max_describe_page_records = 16;

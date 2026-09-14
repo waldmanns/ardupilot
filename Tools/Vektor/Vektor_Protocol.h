@@ -233,6 +233,22 @@ private:
 };
 
 uint32_t crc32_iso_hdlc(const uint8_t *data, uint32_t length);
+namespace detail {
+
+constexpr uint32_t fnv1a32_update(const char *path, uint32_t hash)
+{
+    return *path == '\0' ? hash :
+        fnv1a32_update(path + 1,
+                       (hash ^ uint8_t(*path)) * 0x01000193U);
+}
+
+} // namespace detail
+
+constexpr uint32_t fnv1a32_constexpr(const char *path)
+{
+    return path == nullptr ? 0x811C9DC5U :
+        detail::fnv1a32_update(path, 0x811C9DC5U);
+}
 uint32_t fnv1a32(const char *path);
 uint64_t fnv1a64_update(uint64_t hash,
                         const uint8_t *data,

@@ -1,6 +1,7 @@
 #include <AP_gtest.h>
 
 #include "Vektor_AssignmentMatrix.h"
+#include "Vektor_Attitude.h"
 #include "Vektor_Protocol.h"
 #include "Vektor_PwmInput.h"
 #include "Vektor_PwmOutput.h"
@@ -8,6 +9,7 @@
 #include "Vektor_RequestCache.h"
 #include "Vektor_Runtime.h"
 #include "Vektor_Schema.h"
+#include "Vektor_SerialCatalog.h"
 #include "Vektor_SerialProtocol.h"
 #include "Vektor_Subscription.h"
 #include "Vektor_Vsp.h"
@@ -21,6 +23,98 @@
 const AP_HAL::HAL &hal = AP_HAL::get_HAL();
 
 namespace {
+
+constexpr Vektor::TimerGroup h743_pwm_timer_groups[] = {
+    { "TIM2", 2 },
+    { "TIM4", 4 },
+    { "TIM8", 4 },
+    { "TIM1", 2 },
+};
+
+constexpr Vektor::TimerGroup h743_flex_timer_groups[] = {
+    { "TIM5", 2 },
+    { "TIM3", 4 },
+};
+
+constexpr Vektor::TimerGroup f405_pwm_timer_groups[] = {
+    { "TIM3", 2 },
+    { "TIM2", 4 },
+};
+
+constexpr Vektor::BoardCapability h743_test_capability {
+    "Vektor Core Evo H743",
+    "test",
+    "STM32H743VIT6",
+    0,
+    12,
+    6,
+    1,
+    4,
+    2,
+    1,
+    0,
+    "ICM-20602",
+    "MMC5983MA",
+    Vektor::CAP_NATIVE_USB |
+        Vektor::CAP_PWM_OUTPUTS |
+        Vektor::CAP_FLEX_TIMER_CHANNELS |
+        Vektor::CAP_DEDICATED_RECEIVER_ROW |
+        Vektor::CAP_EXTERNAL_UARTS |
+        Vektor::CAP_CLASSIC_CAN |
+        Vektor::CAP_ADC_OBSERVABLES |
+        Vektor::CAP_ONBOARD_IMU |
+        Vektor::CAP_ONBOARD_COMPASS,
+    h743_pwm_timer_groups,
+    4,
+    h743_flex_timer_groups,
+    2,
+    -1,
+};
+
+constexpr Vektor::BoardCapability f405_test_capability {
+    "Vektor Core Reduced F405",
+    "revo-mini",
+    "STM32F405xx",
+    124,
+    6,
+    0,
+    0,
+    3,
+    0,
+    3,
+    2,
+    "BMI088",
+    "Onboard Compass",
+    Vektor::CAP_NATIVE_USB |
+        Vektor::CAP_PWM_OUTPUTS |
+        Vektor::CAP_EXTERNAL_UARTS |
+        Vektor::CAP_ADC_OBSERVABLES |
+        Vektor::CAP_STORAGE |
+        Vektor::CAP_ONBOARD_IMU |
+        Vektor::CAP_SD_STORAGE |
+        Vektor::CAP_DATAFLASH_STORAGE,
+    f405_pwm_timer_groups,
+    2,
+    nullptr,
+    0,
+    0,
+};
+
+template<typename ReferenceType, size_t count>
+void expect_catalog_fields_match_schema(
+    const ReferenceType *const (&references)[count])
+{
+    const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
+    for (const ReferenceType *reference : references) {
+        ASSERT_NE(reference, nullptr);
+        const Vektor::FieldDescriptor *field =
+            registry.field_by_id(reference->id);
+        ASSERT_NE(field, nullptr) << reference->path;
+        EXPECT_STREQ(field->path, reference->path);
+        EXPECT_EQ(reference->id, Vektor::Protocol::fnv1a32(reference->path));
+        EXPECT_EQ(reference->type, field->type);
+    }
+}
 
 class TestUart : public AP_HAL::UARTDriver {
 public:
@@ -172,6 +266,8 @@ bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
     parameters.sys_protocol_baud.set(Vektor::protocol_baud);
     Vektor::RuntimeState runtime;
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    attitude.reset();
     Vektor::VspComponent vsp;
     vsp.reset();
     Vektor::RcinSource rcin;
@@ -184,6 +280,7 @@ bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
                 capability,
                 parameters,
                 runtime,
+                attitude,
                 vsp,
                 rcin,
                 pwm_input,
@@ -522,8 +619,8 @@ TEST(VektorProtocol, StableIdsMustBeUniqueAndNonzero)
 TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
 {
     const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
-    EXPECT_EQ(registry.component_count(), 6);
-    EXPECT_EQ(registry.field_count(), 69);
+    EXPECT_EQ(registry.component_count(), 7);
+    EXPECT_EQ(registry.field_count(), 102);
     EXPECT_EQ(registry.parameter_count(), 22);
 
     EXPECT_EQ(registry.component_id(0),
@@ -577,6 +674,27 @@ TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
     ASSERT_NE(pwmout_channel, nullptr);
     EXPECT_EQ(pwmout_channel->kind, Vektor::Protocol::FieldKind::INPUT);
     EXPECT_NE(pwmout_channel->flags & Vektor::FIELD_ROUTABLE, 0U);
+
+    const Vektor::FieldDescriptor *attitude_quaternion = registry.field_by_id(
+        Vektor::SerialCatalog::Observable::ATTITUDE_QUATERNION.id);
+    ASSERT_NE(attitude_quaternion, nullptr);
+    EXPECT_EQ(attitude_quaternion->kind,
+              Vektor::Protocol::FieldKind::OBSERVABLE);
+    EXPECT_EQ(attitude_quaternion->type,
+              Vektor::Protocol::PrimitiveType::QUATERNIONF);
+    EXPECT_NE(attitude_quaternion->flags & Vektor::FIELD_REALTIME, 0U);
+
+    const Vektor::FieldDescriptor *rcin_pwm = registry.field_by_id(
+        Vektor::SerialCatalog::Observable::RCIN_CHANNEL_1_US.id);
+    ASSERT_NE(rcin_pwm, nullptr);
+    EXPECT_EQ(rcin_pwm->type, Vektor::Protocol::PrimitiveType::U16);
+
+    const Vektor::FieldDescriptor *pwmout_pulse = registry.field_by_id(
+        Vektor::SerialCatalog::Output::PWMOUT_CHANNEL_1.id);
+    ASSERT_NE(pwmout_pulse, nullptr);
+    EXPECT_EQ(pwmout_pulse->kind, Vektor::Protocol::FieldKind::OUTPUT);
+    EXPECT_EQ(pwmout_pulse->type, Vektor::Protocol::PrimitiveType::U16);
+    EXPECT_EQ(pwmout_pulse->flags & Vektor::FIELD_ROUTABLE, 0U);
 }
 
 TEST(VektorSchemaRegistry, SerializesCanonicalFieldRecord)
@@ -624,6 +742,70 @@ TEST(VektorSchemaRegistry, SerializesCanonicalFieldRecord)
                                              sizeof(record),
                                              record_len));
     EXPECT_EQ(record_len, 0);
+}
+
+TEST(VektorSerialCatalog, MatchesCompleteSchemaRegistry)
+{
+    namespace Catalog = Vektor::SerialCatalog;
+
+    const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
+    EXPECT_EQ(Catalog::Component::COUNT, registry.component_count());
+    EXPECT_EQ(Catalog::Parameter::COUNT, registry.parameter_count());
+    EXPECT_EQ(Catalog::FIELD_COUNT, registry.field_count());
+
+    for (uint16_t i = 0; i < Catalog::Component::COUNT; i++) {
+        const Catalog::Reference *reference = Catalog::Component::ALL[i];
+        ASSERT_NE(reference, nullptr);
+        const Vektor::ComponentDescriptor *component =
+            registry.component_by_index(i);
+        ASSERT_NE(component, nullptr);
+        EXPECT_STREQ(reference->path, component->path);
+        EXPECT_EQ(reference->id, registry.component_id(i));
+    }
+
+    expect_catalog_fields_match_schema(Catalog::Parameter::ALL);
+    expect_catalog_fields_match_schema(Catalog::Observable::ALL);
+    expect_catalog_fields_match_schema(Catalog::Input::ALL);
+    expect_catalog_fields_match_schema(Catalog::Output::ALL);
+
+    EXPECT_EQ(Catalog::Stream::ATTITUDE_COUNT, 5);
+    EXPECT_EQ(Catalog::Stream::RC_INPUT_NORMALIZED_COUNT, 16);
+    EXPECT_EQ(Catalog::Stream::RC_INPUT_PWM_US_COUNT, 16);
+    EXPECT_EQ(Catalog::Stream::RC_OUTPUT_PWM_US_COUNT, 12);
+    EXPECT_EQ(Catalog::Stream::RC_OUTPUT_COMMAND_NORMALIZED_COUNT, 12);
+    EXPECT_EQ(Catalog::Stream::ATTITUDE_RC_IO_COUNT, 33);
+    EXPECT_LE(Catalog::Stream::ATTITUDE_RC_IO_COUNT,
+              Vektor::SubscriptionTable::max_fields);
+
+    for (const Catalog::ParameterReference *parameter :
+         Catalog::Parameter::ALL) {
+        ASSERT_NE(parameter, nullptr);
+        EXPECT_NE(parameter->ap_param_name, nullptr);
+        EXPECT_NE(parameter->ap_param_name[0], '\0');
+    }
+}
+
+TEST(VektorAttitudeSource, TracksEstimatorValueAndQuality)
+{
+    Vektor::AttitudeSource attitude;
+    attitude.reset();
+    EXPECT_EQ(attitude.quality(), Vektor::SignalQuality::INVALID);
+
+    const Vektor::AttitudeValue value {
+        10.0F, -20.0F, 30.0F,
+        1.0F, 0.0F, 0.0F, 0.0F,
+        0.1F, 0.2F, 0.3F,
+    };
+    attitude.ingest(value, 1234, true);
+    EXPECT_EQ(attitude.quality(), Vektor::SignalQuality::VALID);
+    EXPECT_EQ(attitude.timestamp_us(), 1234U);
+    EXPECT_FLOAT_EQ(attitude.value().roll_deg, 10.0F);
+    EXPECT_FLOAT_EQ(attitude.value().body_rate_z_rad_s, 0.3F);
+
+    Vektor::AttitudeValue invalid = value;
+    invalid.yaw_deg = NAN;
+    attitude.ingest(invalid, 2345, true);
+    EXPECT_EQ(attitude.quality(), Vektor::SignalQuality::INVALID);
 }
 
 TEST(VektorRcinSource, TracksFreshStaleAndFailsafeQuality)
@@ -992,13 +1174,13 @@ TEST(VektorSerialProtocol, DescriptorHashesAreStableAndBoardSpecific)
     uint64_t f405_capability = 0;
 
     ASSERT_TRUE(hello_hashes_for_capability(
-        Vektor::core_evo_h743_capability(), h743_schema, h743_capability));
+        h743_test_capability, h743_schema, h743_capability));
     ASSERT_TRUE(hello_hashes_for_capability(
-        Vektor::core_evo_h743_capability(),
+        h743_test_capability,
         repeated_schema,
         repeated_capability));
     ASSERT_TRUE(hello_hashes_for_capability(
-        Vektor::core_reduced_f405_capability(), f405_schema, f405_capability));
+        f405_test_capability, f405_schema, f405_capability));
 
     EXPECT_NE(h743_schema, 0U);
     EXPECT_NE(h743_capability, 0U);
@@ -1016,6 +1198,8 @@ TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
     parameters.sys_protocol_baud.set(Vektor::protocol_baud);
     Vektor::RuntimeState runtime;
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    attitude.reset();
     Vektor::VspComponent vsp;
     vsp.reset();
     Vektor::RcinSource rcin;
@@ -1025,9 +1209,10 @@ TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
     Vektor::AssignmentMatrix assignments;
     Vektor::SerialProtocol serial;
     serial.init(&uart,
-                Vektor::core_evo_h743_capability(),
+                h743_test_capability,
                 parameters,
                 runtime,
+                attitude,
                 vsp,
                 rcin,
                 pwm_input,
@@ -1154,18 +1339,39 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     parameters.sys_protocol_baud.set(Vektor::protocol_baud);
     Vektor::RuntimeState runtime;
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    attitude.reset();
+    const Vektor::AttitudeValue attitude_value {
+        10.0F, -20.0F, 30.0F,
+        1.0F, 0.0F, 0.0F, 0.0F,
+        0.1F, 0.2F, 0.3F,
+    };
+    attitude.ingest(attitude_value, AP_HAL::micros64(), true);
     Vektor::VspComponent vsp;
     vsp.reset();
     Vektor::RcinSource rcin;
     rcin.reset();
+    const float rcin_values[] = { 0.25F };
+    const uint16_t rcin_pwm[] = { 1600 };
+    rcin.ingest_normalized(rcin_values,
+                           rcin_pwm,
+                           1,
+                           false,
+                           AP_HAL::micros64());
     Vektor::PwmInput pwm_input;
     Vektor::PwmOutput pwm_output;
+    pwm_output.init(1, 0);
+    const Vektor::SignalSample<float> pwm_commands[] = {
+        { 0.5F, AP_HAL::micros64(), Vektor::SignalQuality::VALID },
+    };
+    pwm_output.update(pwm_commands, 1, 1U);
     Vektor::AssignmentMatrix assignments;
     Vektor::SerialProtocol serial;
     serial.init(&uart,
-                Vektor::core_evo_h743_capability(),
+                h743_test_capability,
                 parameters,
                 runtime,
+                attitude,
                 vsp,
                 rcin,
                 pwm_input,
@@ -1237,7 +1443,7 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
               Vektor::SubscriptionTable::max_subscriptions);
     EXPECT_EQ(max_realtime_hz, Vektor::max_realtime_rate_hz);
     EXPECT_EQ(control_update_hz, Vektor::default_service_rate_hz);
-    EXPECT_EQ(attitude_update_hz, 0);
+    EXPECT_EQ(attitude_update_hz, Vektor::attitude_update_rate_hz);
     EXPECT_NE(capability_flags & (1ULL << 11), 0U);
     EXPECT_NE(capability_flags & (1ULL << 13), 0U);
     EXPECT_NE(schema_hash, 0U);
@@ -1317,12 +1523,21 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
         "component/system/1/observable/service_rate_hz");
     const uint32_t servo_a_id = Vektor::Protocol::fnv1a32(
         "component/vsp/1/output/servo_a");
+    const uint32_t attitude_quaternion_id =
+        Vektor::SerialCatalog::Observable::ATTITUDE_QUATERNION.id;
+    const uint32_t rcin_pwm_id =
+        Vektor::SerialCatalog::Observable::RCIN_CHANNEL_1_US.id;
+    const uint32_t pwmout_pulse_id =
+        Vektor::SerialCatalog::Output::PWMOUT_CHANNEL_1.id;
     Vektor::Protocol::PayloadWriter subscribe(payload, sizeof(payload));
     subscribe.u32(0); // fastest supported rate
-    subscribe.u16(3);
+    subscribe.u16(6);
     subscribe.u32(uptime_id);
     subscribe.u32(service_rate_id);
     subscribe.u32(servo_a_id);
+    subscribe.u32(attitude_quaternion_id);
+    subscribe.u32(rcin_pwm_id);
+    subscribe.u32(pwmout_pulse_id);
     ASSERT_TRUE(push_request(uart,
                              Vektor::Protocol::MessageType::SUBSCRIBE,
                              3,
@@ -1346,13 +1561,19 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     EXPECT_NE(subscription_id, 0);
     EXPECT_EQ(accepted_period_us,
               1000000U / Vektor::max_realtime_rate_hz);
-    EXPECT_EQ(field_count, 3);
+    EXPECT_EQ(field_count, 6);
     ASSERT_TRUE(subscribe_response.u32(returned_field_id));
     EXPECT_EQ(returned_field_id, uptime_id);
     ASSERT_TRUE(subscribe_response.u32(returned_field_id));
     EXPECT_EQ(returned_field_id, service_rate_id);
     ASSERT_TRUE(subscribe_response.u32(returned_field_id));
     EXPECT_EQ(returned_field_id, servo_a_id);
+    ASSERT_TRUE(subscribe_response.u32(returned_field_id));
+    EXPECT_EQ(returned_field_id, attitude_quaternion_id);
+    ASSERT_TRUE(subscribe_response.u32(returned_field_id));
+    EXPECT_EQ(returned_field_id, rcin_pwm_id);
+    ASSERT_TRUE(subscribe_response.u32(returned_field_id));
+    EXPECT_EQ(returned_field_id, pwmout_pulse_id);
     EXPECT_EQ(subscribe_response.remaining(), 0);
 
     uart.clear_tx();
@@ -1368,26 +1589,47 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     uint16_t sample_sequence = 0;
     uint64_t timestamp_us = 0;
     uint8_t quality_len = 0;
-    uint8_t quality = 0xFF;
+    uint8_t quality_0 = 0xFF;
+    uint8_t quality_1 = 0xFF;
     uint32_t uptime_ms = 0;
     uint16_t service_rate_hz = 0;
     uint32_t servo_a_raw = UINT32_MAX;
+    uint32_t quaternion_w_raw = 0;
+    uint32_t quaternion_x_raw = UINT32_MAX;
+    uint32_t quaternion_y_raw = UINT32_MAX;
+    uint32_t quaternion_z_raw = UINT32_MAX;
+    uint16_t received_rcin_pwm = 0;
+    uint16_t received_pwmout_pulse = 0;
     ASSERT_TRUE(telemetry.u16(telemetry_subscription_id));
     ASSERT_TRUE(telemetry.u16(sample_sequence));
     ASSERT_TRUE(telemetry.u64(timestamp_us));
     ASSERT_TRUE(telemetry.u8(quality_len));
-    ASSERT_TRUE(telemetry.u8(quality));
+    ASSERT_TRUE(telemetry.u8(quality_0));
+    ASSERT_TRUE(telemetry.u8(quality_1));
     ASSERT_TRUE(telemetry.u32(uptime_ms));
     ASSERT_TRUE(telemetry.u16(service_rate_hz));
     ASSERT_TRUE(telemetry.u32(servo_a_raw));
+    ASSERT_TRUE(telemetry.u32(quaternion_w_raw));
+    ASSERT_TRUE(telemetry.u32(quaternion_x_raw));
+    ASSERT_TRUE(telemetry.u32(quaternion_y_raw));
+    ASSERT_TRUE(telemetry.u32(quaternion_z_raw));
+    ASSERT_TRUE(telemetry.u16(received_rcin_pwm));
+    ASSERT_TRUE(telemetry.u16(received_pwmout_pulse));
     EXPECT_EQ(telemetry.remaining(), 0);
     EXPECT_EQ(telemetry_subscription_id, subscription_id);
     EXPECT_EQ(sample_sequence, 0);
     EXPECT_NE(timestamp_us, 0U);
-    EXPECT_EQ(quality_len, 1);
-    EXPECT_EQ(quality, 0x20); // VSP output is INVALID until routed inputs exist
+    EXPECT_EQ(quality_len, 2);
+    EXPECT_EQ(quality_0, 0x20); // VSP output is INVALID until routed inputs exist
+    EXPECT_EQ(quality_1, 0x00);
     EXPECT_EQ(service_rate_hz, Vektor::default_service_rate_hz);
     EXPECT_EQ(servo_a_raw, 0U);
+    EXPECT_EQ(quaternion_w_raw, 0x3F800000U);
+    EXPECT_EQ(quaternion_x_raw, 0U);
+    EXPECT_EQ(quaternion_y_raw, 0U);
+    EXPECT_EQ(quaternion_z_raw, 0U);
+    EXPECT_EQ(received_rcin_pwm, 1600);
+    EXPECT_EQ(received_pwmout_pulse, 1750);
 
     uart.clear_tx();
     Vektor::Protocol::PayloadWriter unsubscribe(payload, sizeof(payload));
@@ -1414,6 +1656,69 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     usleep(20000);
     serial.update();
     EXPECT_EQ(uart.tx_length(), 0);
+
+    // The complete attitude + raw RC input + physical RC output programming
+    // aid fits in one negotiated subscription and one telemetry frame.
+    Vektor::Protocol::PayloadWriter full_subscribe(payload, sizeof(payload));
+    full_subscribe.u32(0);
+    full_subscribe.u16(
+        Vektor::SerialCatalog::Stream::ATTITUDE_RC_IO_COUNT);
+    for (const Vektor::SerialCatalog::Reference *field :
+         Vektor::SerialCatalog::Stream::ATTITUDE_RC_IO) {
+        full_subscribe.u32(field->id);
+    }
+    ASSERT_TRUE(full_subscribe.ok());
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::SUBSCRIBE,
+                             5,
+                             full_subscribe.data(),
+                             full_subscribe.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type,
+              Vektor::Protocol::MessageType::SUBSCRIBE);
+
+    Vektor::Protocol::PayloadReader full_response(response.payload,
+                                                  response.payload_len);
+    uint16_t full_subscription_id = 0;
+    uint32_t full_period_us = 0;
+    uint16_t full_field_count = 0;
+    ASSERT_TRUE(full_response.u16(full_subscription_id));
+    ASSERT_TRUE(full_response.u32(full_period_us));
+    ASSERT_TRUE(full_response.u16(full_field_count));
+    EXPECT_EQ(full_period_us, 1000000U / Vektor::max_realtime_rate_hz);
+    EXPECT_EQ(full_field_count,
+              Vektor::SerialCatalog::Stream::ATTITUDE_RC_IO_COUNT);
+
+    uart.clear_tx();
+    usleep(20000);
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type,
+              Vektor::Protocol::MessageType::TELEMETRY);
+    Vektor::Protocol::PayloadReader full_telemetry(response.payload,
+                                                   response.payload_len);
+    uint16_t ignored_subscription_id = 0;
+    uint16_t ignored_sample_sequence = 0;
+    uint64_t ignored_timestamp_us = 0;
+    uint8_t full_quality_len = 0;
+    const uint8_t *full_quality = nullptr;
+    const uint8_t *full_values = nullptr;
+    ASSERT_TRUE(full_telemetry.u16(ignored_subscription_id));
+    ASSERT_TRUE(full_telemetry.u16(ignored_sample_sequence));
+    ASSERT_TRUE(full_telemetry.u64(ignored_timestamp_us));
+    ASSERT_TRUE(full_telemetry.u8(full_quality_len));
+    ASSERT_EQ(full_quality_len, 9);
+    ASSERT_TRUE(full_telemetry.bytes(full_quality, full_quality_len));
+    ASSERT_TRUE(full_telemetry.bytes(full_values, 96));
+    EXPECT_EQ(full_telemetry.remaining(), 0);
+    EXPECT_EQ(ignored_subscription_id, full_subscription_id);
+    EXPECT_EQ(ignored_sample_sequence, 0);
+    EXPECT_NE(ignored_timestamp_us, 0U);
+    EXPECT_NE(full_quality, nullptr);
+    EXPECT_NE(full_values, nullptr);
 }
 
 AP_GTEST_MAIN()

@@ -2,140 +2,227 @@
 
 #include <AP_HAL/AP_HAL_Boards.h>
 
-#include <string.h>
+/*
+ * hwdef supplies the physical board facts.  Values which are safe to infer
+ * use the generated HAL macros; connector-specific values default to zero so
+ * an unannotated board never advertises hardware merely because its MCU has a
+ * matching peripheral.
+ */
+#ifndef VEKTOR_PRODUCT_NAME
+#if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
+#define VEKTOR_PRODUCT_NAME CHIBIOS_BOARD_NAME
+#else
+#define VEKTOR_PRODUCT_NAME HAL_BOARD_NAME
+#endif
+#endif
+
+#ifndef VEKTOR_HARDWARE_REVISION
+#define VEKTOR_HARDWARE_REVISION "unknown"
+#endif
+
+#ifndef VEKTOR_MCU_NAME
+#define VEKTOR_MCU_NAME "unknown"
+#endif
+
+#ifndef VEKTOR_BOARD_ID
+#ifdef APJ_BOARD_ID
+#define VEKTOR_BOARD_ID APJ_BOARD_ID
+#else
+#define VEKTOR_BOARD_ID 0
+#endif
+#endif
+
+#ifndef VEKTOR_PWM_OUTPUT_COUNT
+#ifdef HAL_PWM_COUNT
+#define VEKTOR_PWM_OUTPUT_COUNT HAL_PWM_COUNT
+#else
+#define VEKTOR_PWM_OUTPUT_COUNT 0
+#endif
+#endif
+
+#ifndef VEKTOR_FLEX_TIMER_CHANNEL_COUNT
+#define VEKTOR_FLEX_TIMER_CHANNEL_COUNT 0
+#endif
+
+#ifndef VEKTOR_DEDICATED_RECEIVER_ROW_COUNT
+#define VEKTOR_DEDICATED_RECEIVER_ROW_COUNT 0
+#endif
+
+#ifndef VEKTOR_UART_ENDPOINT_COUNT
+#define VEKTOR_UART_ENDPOINT_COUNT 0
+#endif
+
+#ifndef VEKTOR_CAN_PORT_COUNT
+#ifdef HAL_NUM_CAN_IFACES
+#define VEKTOR_CAN_PORT_COUNT HAL_NUM_CAN_IFACES
+#else
+#define VEKTOR_CAN_PORT_COUNT 0
+#endif
+#endif
+
+#ifndef VEKTOR_ADC_OBSERVABLE_COUNT
+#define VEKTOR_ADC_OBSERVABLE_COUNT 0
+#endif
+
+#ifndef VEKTOR_HAS_NATIVE_USB
+#if defined(HAL_USE_SERIAL_USB) && HAL_USE_SERIAL_USB
+#define VEKTOR_HAS_NATIVE_USB 1
+#else
+#define VEKTOR_HAS_NATIVE_USB 0
+#endif
+#endif
+
+#ifndef VEKTOR_HAS_ONBOARD_IMU
+#ifdef HAL_INS_PROBE_LIST
+#define VEKTOR_HAS_ONBOARD_IMU 1
+#else
+#define VEKTOR_HAS_ONBOARD_IMU 0
+#endif
+#endif
+
+#ifndef VEKTOR_HAS_ONBOARD_COMPASS
+#ifdef HAL_MAG_PROBE_LIST
+#define VEKTOR_HAS_ONBOARD_COMPASS 1
+#else
+#define VEKTOR_HAS_ONBOARD_COMPASS 0
+#endif
+#endif
+
+#ifndef VEKTOR_IMU_NAME
+#define VEKTOR_IMU_NAME "Onboard IMU"
+#endif
+
+#ifndef VEKTOR_COMPASS_NAME
+#define VEKTOR_COMPASS_NAME "Onboard Compass"
+#endif
+
+#ifndef VEKTOR_HAS_SD_STORAGE
+#if (defined(HAL_WITH_SPI_SDCARD) && HAL_WITH_SPI_SDCARD) || \
+    (defined(HAL_USE_SDC) && HAL_USE_SDC)
+#define VEKTOR_HAS_SD_STORAGE 1
+#else
+#define VEKTOR_HAS_SD_STORAGE 0
+#endif
+#endif
+
+#ifndef VEKTOR_HAS_DATAFLASH_STORAGE
+#if defined(HAL_WITH_SPI_DATAFLASH) && HAL_WITH_SPI_DATAFLASH
+#define VEKTOR_HAS_DATAFLASH_STORAGE 1
+#else
+#define VEKTOR_HAS_DATAFLASH_STORAGE 0
+#endif
+#endif
+
+#ifndef VEKTOR_STORAGE_AREA_COUNT
+#define VEKTOR_STORAGE_AREA_COUNT \
+    (VEKTOR_HAS_SD_STORAGE + VEKTOR_HAS_DATAFLASH_STORAGE)
+#endif
+
+#ifndef VEKTOR_PWM_TIMER_GROUP_COUNT
+#define VEKTOR_PWM_TIMER_GROUP_COUNT 0
+#endif
+
+#ifndef VEKTOR_FLEX_TIMER_GROUP_COUNT
+#define VEKTOR_FLEX_TIMER_GROUP_COUNT 0
+#endif
+
+#ifndef VEKTOR_HEARTBEAT_LED_GPIO
+#define VEKTOR_HEARTBEAT_LED_GPIO -1
+#endif
 
 namespace {
 
-const Vektor::TimerGroup core_evo_pwm_timer_groups[] = {
-    { "TIM2", 2 },
-    { "TIM4", 4 },
-    { "TIM8", 4 },
-    { "TIM1", 2 },
-};
-
-const Vektor::TimerGroup core_evo_flex_timer_groups[] = {
-    { "TIM5", 2 },
-    { "TIM3", 4 },
-};
-
-const Vektor::TimerGroup core_reduced_pwm_timer_groups[] = {
-    { "TIM3", 2 },
-    { "TIM2", 4 },
-};
-
-const Vektor::BoardCapability board_capabilities[] = {
-    {
-        Vektor::BoardProfile::CORE_EVO_H743,
-        "Vektor Core Evo H743",
-        "unassigned",
-        "STM32H743VIT6",
-        0,
-        12,
-        6,
-        1,
-        4,
-        2,
-        1,
-        0,
-        "ICM-20602",
-        "MMC5983MA",
-        Vektor::CAP_NATIVE_USB |
-        Vektor::CAP_PWM_OUTPUTS |
-        Vektor::CAP_FLEX_TIMER_CHANNELS |
-        Vektor::CAP_DEDICATED_RECEIVER_ROW |
-        Vektor::CAP_EXTERNAL_UARTS |
-        Vektor::CAP_CLASSIC_CAN |
-        Vektor::CAP_ADC_OBSERVABLES |
-        Vektor::CAP_ONBOARD_IMU |
-        Vektor::CAP_ONBOARD_COMPASS,
-        core_evo_pwm_timer_groups,
-        uint8_t(sizeof(core_evo_pwm_timer_groups) / sizeof(core_evo_pwm_timer_groups[0])),
-        core_evo_flex_timer_groups,
-        uint8_t(sizeof(core_evo_flex_timer_groups) / sizeof(core_evo_flex_timer_groups[0])),
-        -1, // assigned when the H743 ChibiOS hwdef maps its status LED
-    },
-    {
-        Vektor::BoardProfile::CORE_REDUCED_F405,
-        "Vektor Core Reduced F405",
-        "revo-mini",
-        "STM32F405xx",
-        124,
-        6,
-        0,
-        0,
-        3,
-        0,
-        3,
-        2,
-        "BMI088",
-        "external I2C probe",
-        Vektor::CAP_NATIVE_USB |
-        Vektor::CAP_PWM_OUTPUTS |
-        Vektor::CAP_EXTERNAL_UARTS |
-        Vektor::CAP_ADC_OBSERVABLES |
-        Vektor::CAP_STORAGE |
-        Vektor::CAP_ONBOARD_IMU,
-        core_reduced_pwm_timer_groups,
-        uint8_t(sizeof(core_reduced_pwm_timer_groups) / sizeof(core_reduced_pwm_timer_groups[0])),
-        nullptr,
-        0,
-        0, // LED_BLUE is GPIO(0) in the revo-mini hwdef
-    },
-};
-
-bool chibios_board_is(const char *expected)
-{
-#if defined(CHIBIOS_BOARD_NAME)
-    return strcmp(CHIBIOS_BOARD_NAME, expected) == 0;
-#else
-    (void)expected;
-    return false;
+#if VEKTOR_PWM_TIMER_GROUP_COUNT > 0
+#ifndef VEKTOR_PWM_TIMER_GROUPS
+#error "VEKTOR_PWM_TIMER_GROUPS is required when timer groups are advertised"
 #endif
-}
+constexpr Vektor::TimerGroup pwm_timer_groups[] = {
+    VEKTOR_PWM_TIMER_GROUPS
+};
+static_assert(sizeof(pwm_timer_groups) / sizeof(pwm_timer_groups[0]) ==
+                  VEKTOR_PWM_TIMER_GROUP_COUNT,
+              "VEKTOR PWM timer group count does not match its hwdef list");
+#define VEKTOR_PWM_TIMER_GROUP_PTR pwm_timer_groups
+#else
+constexpr const Vektor::TimerGroup *pwm_timer_groups = nullptr;
+#define VEKTOR_PWM_TIMER_GROUP_PTR pwm_timer_groups
+#endif
+
+#if VEKTOR_FLEX_TIMER_GROUP_COUNT > 0
+#ifndef VEKTOR_FLEX_TIMER_GROUPS
+#error "VEKTOR_FLEX_TIMER_GROUPS is required when timer groups are advertised"
+#endif
+constexpr Vektor::TimerGroup flex_timer_groups[] = {
+    VEKTOR_FLEX_TIMER_GROUPS
+};
+static_assert(sizeof(flex_timer_groups) / sizeof(flex_timer_groups[0]) ==
+                  VEKTOR_FLEX_TIMER_GROUP_COUNT,
+              "VEKTOR Flex timer group count does not match its hwdef list");
+#define VEKTOR_FLEX_TIMER_GROUP_PTR flex_timer_groups
+#else
+constexpr const Vektor::TimerGroup *flex_timer_groups = nullptr;
+#define VEKTOR_FLEX_TIMER_GROUP_PTR flex_timer_groups
+#endif
+
+static_assert(VEKTOR_PWM_OUTPUT_COUNT <= UINT8_MAX, "too many Vektor PWM outputs");
+static_assert(VEKTOR_FLEX_TIMER_CHANNEL_COUNT <= UINT8_MAX, "too many Vektor Flex channels");
+static_assert(VEKTOR_DEDICATED_RECEIVER_ROW_COUNT <= UINT8_MAX, "too many Vektor receiver rows");
+static_assert(VEKTOR_UART_ENDPOINT_COUNT <= UINT8_MAX, "too many Vektor UART endpoints");
+static_assert(VEKTOR_CAN_PORT_COUNT <= UINT8_MAX, "too many Vektor CAN ports");
+static_assert(VEKTOR_ADC_OBSERVABLE_COUNT <= UINT8_MAX, "too many Vektor ADC observables");
+static_assert(VEKTOR_STORAGE_AREA_COUNT <= UINT8_MAX, "too many Vektor storage areas");
+static_assert(VEKTOR_PWM_TIMER_GROUP_COUNT <= UINT8_MAX, "too many Vektor PWM timer groups");
+static_assert(VEKTOR_FLEX_TIMER_GROUP_COUNT <= UINT8_MAX, "too many Vektor Flex timer groups");
+
+constexpr uint32_t capability_flags =
+    (VEKTOR_HAS_NATIVE_USB ? uint32_t(Vektor::CAP_NATIVE_USB) : 0U) |
+    (VEKTOR_PWM_OUTPUT_COUNT > 0 ? uint32_t(Vektor::CAP_PWM_OUTPUTS) : 0U) |
+    (VEKTOR_FLEX_TIMER_CHANNEL_COUNT > 0 ?
+         uint32_t(Vektor::CAP_FLEX_TIMER_CHANNELS) : 0U) |
+    (VEKTOR_DEDICATED_RECEIVER_ROW_COUNT > 0 ?
+         uint32_t(Vektor::CAP_DEDICATED_RECEIVER_ROW) : 0U) |
+    (VEKTOR_UART_ENDPOINT_COUNT > 0 ?
+         uint32_t(Vektor::CAP_EXTERNAL_UARTS) : 0U) |
+    (VEKTOR_CAN_PORT_COUNT > 0 ? uint32_t(Vektor::CAP_CLASSIC_CAN) : 0U) |
+    (VEKTOR_ADC_OBSERVABLE_COUNT > 0 ?
+         uint32_t(Vektor::CAP_ADC_OBSERVABLES) : 0U) |
+    (VEKTOR_STORAGE_AREA_COUNT > 0 ? uint32_t(Vektor::CAP_STORAGE) : 0U) |
+    (VEKTOR_HAS_ONBOARD_IMU ? uint32_t(Vektor::CAP_ONBOARD_IMU) : 0U) |
+    (VEKTOR_HAS_ONBOARD_COMPASS ?
+         uint32_t(Vektor::CAP_ONBOARD_COMPASS) : 0U) |
+    (VEKTOR_HAS_SD_STORAGE ? uint32_t(Vektor::CAP_SD_STORAGE) : 0U) |
+    (VEKTOR_HAS_DATAFLASH_STORAGE ?
+         uint32_t(Vektor::CAP_DATAFLASH_STORAGE) : 0U);
+
+constexpr Vektor::BoardCapability build_capability {
+    VEKTOR_PRODUCT_NAME,
+    VEKTOR_HARDWARE_REVISION,
+    VEKTOR_MCU_NAME,
+    VEKTOR_BOARD_ID,
+    VEKTOR_PWM_OUTPUT_COUNT,
+    VEKTOR_FLEX_TIMER_CHANNEL_COUNT,
+    VEKTOR_DEDICATED_RECEIVER_ROW_COUNT,
+    VEKTOR_UART_ENDPOINT_COUNT,
+    VEKTOR_CAN_PORT_COUNT,
+    VEKTOR_ADC_OBSERVABLE_COUNT,
+    VEKTOR_STORAGE_AREA_COUNT,
+    VEKTOR_IMU_NAME,
+    VEKTOR_COMPASS_NAME,
+    capability_flags,
+    VEKTOR_PWM_TIMER_GROUP_PTR,
+    VEKTOR_PWM_TIMER_GROUP_COUNT,
+    VEKTOR_FLEX_TIMER_GROUP_PTR,
+    VEKTOR_FLEX_TIMER_GROUP_COUNT,
+    VEKTOR_HEARTBEAT_LED_GPIO,
+};
 
 } // namespace
 
 namespace Vektor {
 
-const BoardCapability &core_evo_h743_capability()
-{
-    return board_capabilities[0];
-}
-
-const BoardCapability &core_reduced_f405_capability()
-{
-    return board_capabilities[1];
-}
-
-const BoardCapability *supported_capabilities()
-{
-    return board_capabilities;
-}
-
-uint8_t supported_capability_count()
-{
-    return uint8_t(sizeof(board_capabilities) / sizeof(board_capabilities[0]));
-}
-
 const BoardCapability &default_capability_for_build()
 {
-    if (chibios_board_is("revo-mini")) {
-        return core_reduced_f405_capability();
-    }
-
-    return core_evo_h743_capability();
-}
-
-const char *board_profile_name(BoardProfile profile)
-{
-    switch (profile) {
-    case BoardProfile::CORE_EVO_H743:
-        return "core-evo-h743";
-    case BoardProfile::CORE_REDUCED_F405:
-        return "core-reduced-f405";
-    }
-
-    return "unknown";
+    return build_capability;
 }
 
 bool capability_has(const BoardCapability &capability, CapabilityFlag flag)

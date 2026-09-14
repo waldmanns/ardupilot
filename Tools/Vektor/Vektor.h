@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "Vektor_AssignmentMatrix.h"
+#include "Vektor_Attitude.h"
 #include "Vektor_Capability.h"
 #include "Vektor_Parameters.h"
 #include "Vektor_PwmInput.h"
@@ -12,6 +13,18 @@
 
 #include <RC_Channel/RC_Channel.h>
 #include <SRV_Channel/SRV_Channel.h>
+
+#if VEKTOR_ATTITUDE_ENABLED
+#include <AP_AHRS/AP_AHRS.h>
+#include <AP_Baro/AP_Baro.h>
+#include <AP_BoardConfig/AP_BoardConfig.h>
+#include <AP_Compass/AP_Compass.h>
+#include <AP_GPS/AP_GPS.h>
+#include <AP_InertialSensor/AP_InertialSensor.h>
+#if HAL_LOGGING_ENABLED
+#include <AP_Logger/AP_Logger.h>
+#endif
+#endif
 
 #include <stdint.h>
 
@@ -45,11 +58,24 @@ public:
     AssignmentMatrix assignments;
     PwmInput pwm_input;
     PwmOutput pwm_output;
+#if VEKTOR_ATTITUDE_ENABLED
+    AP_BoardConfig board_config;
+    AP_InertialSensor ins;
+    Compass compass;
+    AP_GPS gps;
+    AP_Baro barometer;
+#if HAL_LOGGING_ENABLED
+    AP_Logger logger;
+#endif
+    AP_AHRS ahrs;
+#endif
     static const AP_Param::Info var_info[];
 
 private:
     void load_parameters();
     void setup_rcin_uart();
+    void setup_attitude();
+    void update_attitude(uint64_t now_us);
     void update_rcin(uint64_t now_us);
     void apply_vsp_inputs();
     void apply_pwm_outputs();
@@ -61,10 +87,15 @@ private:
     SRV_Channels _servo_channels;
     const BoardCapability *_active_capability;
     RuntimeState _runtime;
+    AttitudeSource _attitude;
     RcinSource _rcin;
     VspComponent _vsp;
     SignalSample<float> _pwm_commands[PwmOutput::max_channels] {};
     SerialProtocol _serial_protocol;
+#if VEKTOR_ATTITUDE_ENABLED
+    uint64_t _last_compass_update_us = 0;
+    bool _attitude_initialized = false;
+#endif
 };
 
 extern App vektor;

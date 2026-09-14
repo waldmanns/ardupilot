@@ -16,8 +16,10 @@ This scaffold intentionally starts small. It provides:
 
 - a `Vektor` application entry point;
 - a folder-local waf program definition;
-- a board capability model for the H743 Core Evo and F405 Reduced targets;
+- a compile-time board capability model populated from the selected hwdef;
 - a small runtime state service with loop timing and uptime observables;
+- a standard ArduPilot INS/DCM attitude estimator with realtime Euler,
+  quaternion, and body-rate telemetry on IMU-equipped boards;
 - a minimal AP_Param-backed system parameter set;
 - typed signal primitives with timestamp and quality;
 - a 16-channel RC input source with AP_RCProtocol UART autodetection,
@@ -36,7 +38,8 @@ This scaffold intentionally starts small. It provides:
 - stable schema/capability hashes over ID-sorted descriptor records, runtime
   limit discovery, and startup rejection of zero or colliding object IDs;
 - bounded realtime `SUBSCRIBE`/`UNSUBSCRIBE` sessions and compact volatile
-  `TELEMETRY` for the built-in protocol/runtime observables;
+  `TELEMETRY` for attitude, RC input, physical RC/PWM output, and runtime
+  observables;
 - a bounded persistent assignment matrix with type, direction, multiplicity,
   stable route-ID, and component-cycle validation, exposed through
   `ROUTE_LIST`, `ROUTE_SET`, and `ROUTE_DELETE`;
@@ -97,6 +100,46 @@ timestamped routing path. On the reduced F405 target only PWM output channels
 1 through 6 are accepted; the full-board capability permits channels 1
 through 12 once its H743 hwdef is available.
 
+For firmware-side tools and C++ client utilities,
+`Vektor_SerialCatalog.h` exposes every built-in component, parameter,
+observable, input, and output as a canonical path, compile-time stable ID, and
+wire primitive type. Parameter entries also expose their short `AP_Param`
+name. For example:
+
+```cpp
+#include "Vektor_SerialCatalog.h"
+
+using namespace Vektor;
+
+// GET/SET payload field_id
+writer.u32(SerialCatalog::Parameter::PWMOUT_RATE_HZ.id);
+
+// Complete SUBSCRIBE payload: fastest rate, field count, ordered IDs.
+writer.u32(0);
+writer.u16(SerialCatalog::Stream::ATTITUDE_RC_IO_COUNT);
+for (const auto *field : SerialCatalog::Stream::ATTITUDE_RC_IO) {
+    writer.u32(field->id);
+}
+
+// ROUTE_SET source_id -> destination_id
+writer.u32(SerialCatalog::Output::RCIN_CHANNEL_1.id);
+writer.u32(SerialCatalog::Input::PWMOUT_CHANNEL_1.id);
+```
+
+The corresponding ArduPilot parameter label is available as
+`SerialCatalog::Parameter::PWMOUT_RATE_HZ.ap_param_name`. Serial clients should
+still prefer IDs returned by `DESCRIBE`; the catalog is a programming aid for
+the schema compiled with this source tree.
+
+One `SUBSCRIBE` accepts up to 40 fields, enough for all five attitude fields,
+all sixteen raw RC inputs, and all twelve physical RC/PWM outputs together.
+The attitude group contains roll/pitch/yaw in degrees, a `QUATERNIONF` ordered
+`w,x,y,z`, and a `VECTOR3F` body rate in rad/s. RC pulse streams use `U16`
+microseconds. Normalized RC input and output-command groups remain available
+as `RC_INPUT_NORMALIZED` and `RC_OUTPUT_COMMAND_NORMALIZED`; smaller clients
+can request `ATTITUDE`, `RC_INPUT_PWM_US`, or `RC_OUTPUT_PWM_US` separately.
+Every telemetry field carries its two-bit valid/stale/invalid quality state.
+
 Build the current configured board with:
 
 ```text
@@ -112,5 +155,8 @@ build/sitl/tests/test_vektor_protocol
 ```
 
 The current `revo-mini` hwdef represents the reduced F405 target facts captured
-in the truth base. The full H743 target still needs its ChibiOS hwdef before it
-can be built as hardware firmware.
+in the truth base. Generic facts (board ID, USB, PWM, CAN, sensor probes, and
+storage backends) come from generated HAL macros. Connector-specific facts use
+`VEKTOR_*` definitions in `hwdef.dat`; unspecified facts default to absent so a
+new board cannot inherit another board's capabilities. The full H743 target
+still needs its ChibiOS hwdef before it can be built as hardware firmware.
