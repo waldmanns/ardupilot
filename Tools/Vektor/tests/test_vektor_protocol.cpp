@@ -2,6 +2,8 @@
 
 #include "Vektor_AssignmentMatrix.h"
 #include "Vektor_Protocol.h"
+#include "Vektor_PwmInput.h"
+#include "Vektor_PwmOutput.h"
 #include "Vektor_Rcin.h"
 #include "Vektor_RequestCache.h"
 #include "Vektor_Runtime.h"
@@ -174,6 +176,8 @@ bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
     vsp.reset();
     Vektor::RcinSource rcin;
     rcin.reset();
+    Vektor::PwmInput pwm_input;
+    Vektor::PwmOutput pwm_output;
     Vektor::AssignmentMatrix assignments;
     Vektor::SerialProtocol serial;
     serial.init(&uart,
@@ -182,6 +186,8 @@ bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
                 runtime,
                 vsp,
                 rcin,
+                pwm_input,
+                pwm_output,
                 assignments);
     if (!uart.is_initialized()) {
         return false;
@@ -516,9 +522,9 @@ TEST(VektorProtocol, StableIdsMustBeUniqueAndNonzero)
 TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
 {
     const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
-    EXPECT_EQ(registry.component_count(), 4);
-    EXPECT_EQ(registry.field_count(), 35);
-    EXPECT_EQ(registry.parameter_count(), 6);
+    EXPECT_EQ(registry.component_count(), 6);
+    EXPECT_EQ(registry.field_count(), 69);
+    EXPECT_EQ(registry.parameter_count(), 22);
 
     EXPECT_EQ(registry.component_id(0),
               Vektor::Protocol::fnv1a32("component/system/0"));
@@ -557,6 +563,20 @@ TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
     EXPECT_EQ(rcin_channel->type,
               Vektor::Protocol::PrimitiveType::FLOAT32);
     EXPECT_NE(rcin_channel->flags & Vektor::FIELD_ROUTABLE, 0U);
+
+    const Vektor::FieldDescriptor *pwmin_channel = registry.field_by_id(
+        Vektor::Protocol::fnv1a32(
+            "component/pwm_input/0/output/channel_1"));
+    ASSERT_NE(pwmin_channel, nullptr);
+    EXPECT_EQ(pwmin_channel->kind, Vektor::Protocol::FieldKind::OUTPUT);
+    EXPECT_NE(pwmin_channel->flags & Vektor::FIELD_ROUTABLE, 0U);
+
+    const Vektor::FieldDescriptor *pwmout_channel = registry.field_by_id(
+        Vektor::Protocol::fnv1a32(
+            "component/pwm_output/0/input/channel_1"));
+    ASSERT_NE(pwmout_channel, nullptr);
+    EXPECT_EQ(pwmout_channel->kind, Vektor::Protocol::FieldKind::INPUT);
+    EXPECT_NE(pwmout_channel->flags & Vektor::FIELD_ROUTABLE, 0U);
 }
 
 TEST(VektorSchemaRegistry, SerializesCanonicalFieldRecord)
@@ -658,6 +678,61 @@ TEST(VektorRcinSource, NormalizesPwmAndRejectsInvalidPulses)
     EXPECT_EQ(rcin.channel(3)->quality, Vektor::SignalQuality::INVALID);
 }
 
+TEST(VektorPwmInput, NormalizesIndependentPulsesAndTracksFreshness)
+{
+    Vektor::PwmInput input;
+    input.ingest_pulse(0, 1250, 1000);
+    input.ingest_pulse(1, 1750, 1000);
+    input.update(1000);
+
+    ASSERT_NE(input.channel(0), nullptr);
+    EXPECT_FLOAT_EQ(input.channel(0)->value, -0.5F);
+    EXPECT_FLOAT_EQ(input.channel(1)->value, 0.5F);
+    EXPECT_EQ(input.channel(0)->quality, Vektor::SignalQuality::VALID);
+    EXPECT_EQ(input.raw_pwm(1), 1750);
+
+    input.update(101001);
+    EXPECT_EQ(input.channel(0)->quality, Vektor::SignalQuality::STALE);
+
+    input.ingest_pulse(0, 2500, 102000);
+    input.update(102000);
+    EXPECT_EQ(input.channel(0)->quality, Vektor::SignalQuality::INVALID);
+}
+
+TEST(VektorPwmOutput, MapsNormalizedCommandsToCalibratedPulses)
+{
+    EXPECT_EQ(Vektor::PwmOutput::normalized_to_pwm(
+                  -1.0F, 1000, 1500, 2000, false),
+              1000);
+    EXPECT_EQ(Vektor::PwmOutput::normalized_to_pwm(
+                  0.0F, 1000, 1500, 2000, false),
+              1500);
+    EXPECT_EQ(Vektor::PwmOutput::normalized_to_pwm(
+                  0.5F, 1000, 1500, 2000, false),
+              1750);
+    EXPECT_EQ(Vektor::PwmOutput::normalized_to_pwm(
+                  1.0F, 1000, 1500, 2000, true),
+              1000);
+    EXPECT_TRUE(Vektor::PwmOutput::supported_rate(330));
+    EXPECT_FALSE(Vektor::PwmOutput::supported_rate(250));
+
+    Vektor::PwmOutput output;
+    output.init(2, 1U << 1);
+    const Vektor::SignalSample<float> commands[] = {
+        { 0.5F, 1000, Vektor::SignalQuality::VALID },
+        { -0.5F, 1000, Vektor::SignalQuality::VALID },
+    };
+    output.update(commands, 2, (1U << 0) | (1U << 1));
+    EXPECT_TRUE(output.active(0));
+    EXPECT_EQ(output.pwm_us(0), 1750);
+    EXPECT_FALSE(output.active(1));
+    EXPECT_EQ(output.pwm_us(1), 0);
+
+    output.update(commands, 2, 0);
+    EXPECT_FALSE(output.active(0));
+    EXPECT_EQ(output.pwm_us(0), 0);
+}
+
 TEST(VektorAssignmentMatrix, ValidatesReplacesAndRemovesAssignments)
 {
     const uint32_t channel_1 = Vektor::Protocol::fnv1a32(
@@ -668,6 +743,12 @@ TEST(VektorAssignmentMatrix, ValidatesReplacesAndRemovesAssignments)
         "component/vsp/1/input/x");
     const uint32_t servo_a = Vektor::Protocol::fnv1a32(
         "component/vsp/1/output/servo_a");
+    const uint32_t pwm_input_1 = Vektor::Protocol::fnv1a32(
+        "component/pwm_input/0/output/channel_1");
+    const uint32_t pwm_output_1 = Vektor::Protocol::fnv1a32(
+        "component/pwm_output/0/input/channel_1");
+    const uint32_t pwm_output_7 = Vektor::Protocol::fnv1a32(
+        "component/pwm_output/0/input/channel_7");
 
     Vektor::AssignmentMatrix assignments;
     const Vektor::AssignmentMatrix::Entry *accepted = nullptr;
@@ -702,6 +783,23 @@ TEST(VektorAssignmentMatrix, ValidatesReplacesAndRemovesAssignments)
     EXPECT_EQ(assignments.count(), 0);
     EXPECT_EQ(assignments.by_id(route_id), nullptr);
     EXPECT_FALSE(assignments.remove(route_id));
+
+    EXPECT_EQ(assignments.set(channel_1, pwm_output_1, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::OK);
+    EXPECT_EQ(assignments.set(pwm_input_1, pwm_output_1, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::OK);
+    ASSERT_NE(accepted, nullptr);
+    EXPECT_EQ(assignments.count(), 1);
+    EXPECT_EQ(accepted->source_output_id, pwm_input_1);
+
+    assignments.configure_channel_limits(Vektor::PwmInput::max_channels, 6);
+    EXPECT_EQ(assignments.set(channel_1, pwm_output_7, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::BAD_DESTINATION);
+    assignments.configure_channel_limits(Vektor::PwmInput::max_channels,
+                                         6,
+                                         1U << 0);
+    EXPECT_EQ(assignments.set(channel_1, pwm_output_1, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::BAD_DESTINATION);
 }
 
 TEST(VektorRequestReplayCache, ReplaysIdenticalRequest)
@@ -922,6 +1020,8 @@ TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
     vsp.reset();
     Vektor::RcinSource rcin;
     rcin.reset();
+    Vektor::PwmInput pwm_input;
+    Vektor::PwmOutput pwm_output;
     Vektor::AssignmentMatrix assignments;
     Vektor::SerialProtocol serial;
     serial.init(&uart,
@@ -930,6 +1030,8 @@ TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
                 runtime,
                 vsp,
                 rcin,
+                pwm_input,
+                pwm_output,
                 assignments);
     ASSERT_TRUE(uart.is_initialized());
     uart.clear_tx();
@@ -956,7 +1058,7 @@ TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
     const uint32_t source_id = Vektor::Protocol::fnv1a32(
         "component/rcin/0/output/channel_1");
     const uint32_t destination_id = Vektor::Protocol::fnv1a32(
-        "component/vsp/1/input/x");
+        "component/pwm_output/0/input/channel_1");
 
     uart.clear_tx();
     Vektor::Protocol::PayloadWriter route_set(payload, sizeof(payload));
@@ -1056,6 +1158,8 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     vsp.reset();
     Vektor::RcinSource rcin;
     rcin.reset();
+    Vektor::PwmInput pwm_input;
+    Vektor::PwmOutput pwm_output;
     Vektor::AssignmentMatrix assignments;
     Vektor::SerialProtocol serial;
     serial.init(&uart,
@@ -1064,6 +1168,8 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
                 runtime,
                 vsp,
                 rcin,
+                pwm_input,
+                pwm_output,
                 assignments);
     ASSERT_TRUE(uart.is_initialized());
     uart.clear_tx();

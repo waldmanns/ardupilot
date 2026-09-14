@@ -24,9 +24,17 @@ void App::setup()
     load_parameters();
     _active_capability = &default_capability_for_build();
     _runtime.init(default_service_rate_hz, AP_HAL::micros64());
-    assignments.load_persistent();
     _rcin.reset(uint32_t(g.rcin_timeout_ms.get()) * 1000U);
     setup_rcin_uart();
+    pwm_output.reset();
+    pwm_output.init(_active_capability->pwm_outputs, 0);
+    pwm_input.reset();
+    pwm_input.init();
+    pwm_output.set_reserved_channel_mask(pwm_input.reserved_output_mask());
+    assignments.configure_channel_limits(PwmInput::max_channels,
+                                         _active_capability->pwm_outputs,
+                                         pwm_input.reserved_output_mask());
+    assignments.load_persistent();
     _vsp.reset();
     _serial_protocol.init(hal.serial(0),
                           *_active_capability,
@@ -34,6 +42,8 @@ void App::setup()
                           _runtime,
                           _vsp,
                           _rcin,
+                          pwm_input,
+                          pwm_output,
                           assignments);
 }
 
@@ -42,8 +52,10 @@ void App::loop()
     const uint64_t now_us = AP_HAL::micros64();
     _runtime.begin_loop(now_us);
     update_rcin(now_us);
-    apply_assignments();
+    pwm_input.update(now_us);
+    apply_vsp_inputs();
     _vsp.update(now_us);
+    apply_pwm_outputs();
     _serial_protocol.update();
     _runtime.end_loop(AP_HAL::micros64());
     hal.scheduler->delay(1000U / default_service_rate_hz);
@@ -120,22 +132,53 @@ SignalSample<float> App::assigned_float(uint32_t destination_id) const
     const FieldDescriptor *source =
         schema_registry().field_by_id(route->source_output_id);
     uint8_t channel_index = 0;
-    if (source == nullptr ||
-        !rcin_channel_for_slot(source->slot, channel_index)) {
+    if (source == nullptr) {
         return {};
     }
 
-    const SignalSample<float> *sample = _rcin.channel(channel_index);
+    const SignalSample<float> *sample = nullptr;
+    if (rcin_channel_for_slot(source->slot, channel_index)) {
+        sample = _rcin.channel(channel_index);
+    } else if (pwmin_channel_for_slot(source->slot, channel_index)) {
+        sample = pwm_input.channel(channel_index);
+    } else if (source->slot == FieldSlot::VSP_SERVO_A) {
+        sample = &_vsp.servo_a();
+    } else if (source->slot == FieldSlot::VSP_SERVO_B) {
+        sample = &_vsp.servo_b();
+    }
     return sample == nullptr ? SignalSample<float> {} : *sample;
 }
 
-void App::apply_assignments()
+void App::apply_vsp_inputs()
 {
     const uint32_t x_id =
         Protocol::fnv1a32("component/vsp/1/input/x");
     const uint32_t y_id =
         Protocol::fnv1a32("component/vsp/1/input/y");
     _vsp.set_inputs(assigned_float(x_id), assigned_float(y_id));
+}
+
+void App::apply_pwm_outputs()
+{
+    for (uint8_t channel = 0; channel < PwmOutput::max_channels; channel++) {
+        _pwm_commands[channel] = {};
+    }
+    uint32_t assigned_mask = 0;
+    const uint8_t count = MIN(_active_capability->pwm_outputs,
+                              PwmOutput::max_channels);
+    for (uint8_t channel = 0; channel < count; channel++) {
+        char path[48];
+        hal.util->snprintf(path,
+                           sizeof(path),
+                           "component/pwm_output/0/input/channel_%u",
+                           unsigned(channel + 1));
+        const uint32_t destination_id = Protocol::fnv1a32(path);
+        if (assignments.to_destination(destination_id) != nullptr) {
+            assigned_mask |= 1U << channel;
+            _pwm_commands[channel] = assigned_float(destination_id);
+        }
+    }
+    pwm_output.update(_pwm_commands, count, assigned_mask);
 }
 
 } // namespace Vektor

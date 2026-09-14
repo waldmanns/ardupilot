@@ -14,6 +14,8 @@ def build(bld):
             '../Vektor_Protocol.cpp',
             '../Vektor_AssignmentMatrix.cpp',
             '../Vektor_Capability.cpp',
+            '../Vektor_PwmInput.cpp',
+            '../Vektor_PwmOutput.cpp',
             '../Vektor_Rcin.cpp',
             '../Vektor_RequestCache.cpp',
             '../Vektor_Runtime.cpp',

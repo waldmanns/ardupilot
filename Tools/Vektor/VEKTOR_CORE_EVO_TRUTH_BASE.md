@@ -1423,6 +1423,8 @@ The current `Tools/Vektor` scaffold implements and tests:
 - deterministic nonzero schema/capability hashes over ID-sorted descriptor records, with initialization-time stable-ID collision validation;
 - bounded `SUBSCRIBE`/`UNSUBSCRIBE` sessions and compact volatile `TELEMETRY` for the built-in realtime observables, with scheduler-rate negotiation and newest-sample behavior;
 - a 16-channel RC input component backed by HAL/AP_RCProtocol, with selectable receiver UART, serial receiver autodetection, standard RC calibration, frame freshness/failsafe quality, and normalized routable outputs;
+- six configurable GPIO edge-capture PWM inputs with independent freshness/quality and normalized routable outputs;
+- a board-count-limited PWM output bank with normalized routable inputs, shared pulse/rate calibration, reversal, configurable failsafe pulse, unrouted-channel disable, and PWM-input pin conflict rejection;
 - a bounded `AP_Param`-persistent assignment matrix with stable route IDs, one-source-per-input replacement, type/direction validation, and component-cycle rejection;
 - `ROUTE_LIST`, `ROUTE_SET`, and `ROUTE_DELETE` protocol handlers and the `CAP_ROUTING` capability bit;
 - host tests covering codec/parser behavior, schema registry serialization, RC input quality and normalization, assignment validation, route protocol operations, replay caching, runtime timing, subscription scheduling, and an end-to-end UART telemetry session.
@@ -1431,7 +1433,7 @@ The following remain design or bring-up work rather than implemented product beh
 
 - full H743 ChibiOS hwdef and hardware build;
 - build-generated schema tables and build-time collision failure (the current common registry is hand-authored and validates IDs during initialization);
-- hardware endpoint drivers beyond the UART RC input frontend, scheduler profiles, and measured realtime limits;
+- hardware endpoint drivers beyond the UART RC input, GPIO PWM capture, and primary PWM output frontends, scheduler profiles, and measured realtime limits;
 - common attitude service across ICM-20602 and BMI088;
 - VSP/VRS control-law behavior (the VSP core remains an intentional skeleton);
 - action/event services, DroneCAN integration, and MAVLink coexistence;

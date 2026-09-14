@@ -12,6 +12,8 @@ static constexpr const char *protocol_component_path = "component/system/0";
 static constexpr const char *runtime_component_path = "component/system/1";
 static constexpr const char *vsp_component_path = "component/vsp/1";
 static constexpr const char *rcin_component_path = "component/rcin/0";
+static constexpr const char *pwmin_component_path = "component/pwm_input/0";
+static constexpr const char *pwmout_component_path = "component/pwm_output/0";
 static constexpr uint32_t parameter_live_flags =
     Vektor::FIELD_READABLE |
     Vektor::FIELD_WRITABLE |
@@ -20,6 +22,14 @@ static constexpr uint32_t parameter_live_flags =
     Vektor::FIELD_HAS_MAX |
     Vektor::FIELD_HAS_DEFAULT |
     Vektor::FIELD_APPLY_LIVE;
+static constexpr uint32_t parameter_reboot_flags =
+    Vektor::FIELD_READABLE |
+    Vektor::FIELD_WRITABLE |
+    Vektor::FIELD_PERSISTENT |
+    Vektor::FIELD_HAS_MIN |
+    Vektor::FIELD_HAS_MAX |
+    Vektor::FIELD_HAS_DEFAULT |
+    Vektor::FIELD_APPLY_REBOOT;
 
 const Vektor::ComponentDescriptor component_descriptors[] = {
     {
@@ -54,6 +64,22 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
         0,
         0,
     },
+    {
+        pwmin_component_path,
+        "component_type/input/pwm",
+        "pwmin0",
+        "PWM Input",
+        0,
+        0,
+    },
+    {
+        pwmout_component_path,
+        "component_type/output/pwm",
+        "pwmout0",
+        "PWM Output",
+        0,
+        0,
+    },
 };
 
 #define VEKTOR_RCIN_FIELD(CHANNEL)                                           \
@@ -72,6 +98,58 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
         0,                                                                   \
         0,                                                                   \
         Vektor::FieldSlot::RCIN_CHANNEL_##CHANNEL,                           \
+    }
+
+#define VEKTOR_PWMIN_PIN_FIELD(CHANNEL)                                      \
+    {                                                                        \
+        "component/pwm_input/0/parameter/channel_" #CHANNEL "_pin",       \
+        pwmin_component_path,                                                \
+        "channel_" #CHANNEL "_pin",                                      \
+        "Channel " #CHANNEL " Pin",                                      \
+        "GPIO",                                                             \
+        Protocol::FieldKind::PARAMETER,                                       \
+        Protocol::PrimitiveType::I16,                                         \
+        parameter_reboot_flags,                                               \
+        -1,                                                                  \
+        UINT8_MAX,                                                           \
+        -1,                                                                  \
+        Vektor::FieldSlot::PWMIN_PIN_##CHANNEL,                              \
+    }
+
+#define VEKTOR_PWMIN_FIELD(CHANNEL)                                          \
+    {                                                                        \
+        "component/pwm_input/0/output/channel_" #CHANNEL,                  \
+        pwmin_component_path,                                                \
+        "channel_" #CHANNEL,                                               \
+        "Channel " #CHANNEL,                                               \
+        "normalized",                                                       \
+        Protocol::FieldKind::OUTPUT,                                          \
+        Protocol::PrimitiveType::FLOAT32,                                     \
+        Vektor::FIELD_READABLE |                                             \
+        Vektor::FIELD_REALTIME |                                             \
+        Vektor::FIELD_ROUTABLE,                                              \
+        0,                                                                   \
+        0,                                                                   \
+        0,                                                                   \
+        Vektor::FieldSlot::PWMIN_CHANNEL_##CHANNEL,                          \
+    }
+
+#define VEKTOR_PWMOUT_FIELD(CHANNEL)                                         \
+    {                                                                        \
+        "component/pwm_output/0/input/channel_" #CHANNEL,                  \
+        pwmout_component_path,                                               \
+        "channel_" #CHANNEL,                                               \
+        "Channel " #CHANNEL,                                               \
+        "normalized",                                                       \
+        Protocol::FieldKind::INPUT,                                           \
+        Protocol::PrimitiveType::FLOAT32,                                     \
+        Vektor::FIELD_READABLE |                                             \
+        Vektor::FIELD_REALTIME |                                             \
+        Vektor::FIELD_ROUTABLE,                                              \
+        0,                                                                   \
+        0,                                                                   \
+        0,                                                                   \
+        Vektor::FieldSlot::PWMOUT_CHANNEL_##CHANNEL,                         \
     }
 
 const Vektor::FieldDescriptor field_descriptors[] = {
@@ -377,9 +455,176 @@ const Vektor::FieldDescriptor field_descriptors[] = {
     VEKTOR_RCIN_FIELD(14),
     VEKTOR_RCIN_FIELD(15),
     VEKTOR_RCIN_FIELD(16),
+    VEKTOR_PWMIN_PIN_FIELD(1),
+    VEKTOR_PWMIN_PIN_FIELD(2),
+    VEKTOR_PWMIN_PIN_FIELD(3),
+    VEKTOR_PWMIN_PIN_FIELD(4),
+    VEKTOR_PWMIN_PIN_FIELD(5),
+    VEKTOR_PWMIN_PIN_FIELD(6),
+    {
+        "component/pwm_input/0/parameter/timeout_ms",
+        pwmin_component_path,
+        "timeout_ms",
+        "Input Timeout",
+        "ms",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::pwmin_timeout_ms_min,
+        Vektor::pwmin_timeout_ms_max,
+        Vektor::default_pwmin_timeout_ms,
+        Vektor::FieldSlot::PWMIN_TIMEOUT_MS,
+    },
+    {
+        "component/pwm_input/0/parameter/minimum_us",
+        pwmin_component_path,
+        "minimum_us",
+        "Input Minimum",
+        "PWM",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::pwm_calibration_min_us,
+        Vektor::pwm_calibration_max_us,
+        Vektor::default_pwm_min_us,
+        Vektor::FieldSlot::PWMIN_MIN_US,
+    },
+    {
+        "component/pwm_input/0/parameter/trim_us",
+        pwmin_component_path,
+        "trim_us",
+        "Input Trim",
+        "PWM",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::pwm_calibration_min_us,
+        Vektor::pwm_calibration_max_us,
+        Vektor::default_pwm_trim_us,
+        Vektor::FieldSlot::PWMIN_TRIM_US,
+    },
+    {
+        "component/pwm_input/0/parameter/maximum_us",
+        pwmin_component_path,
+        "maximum_us",
+        "Input Maximum",
+        "PWM",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::pwm_calibration_min_us,
+        Vektor::pwm_calibration_max_us,
+        Vektor::default_pwm_max_us,
+        Vektor::FieldSlot::PWMIN_MAX_US,
+    },
+    {
+        "component/pwm_output/0/parameter/rate_hz",
+        pwmout_component_path,
+        "rate_hz",
+        "Output Rate",
+        "Hz",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        50,
+        330,
+        Vektor::default_pwm_rate_hz,
+        Vektor::FieldSlot::PWMOUT_RATE_HZ,
+    },
+    {
+        "component/pwm_output/0/parameter/minimum_us",
+        pwmout_component_path,
+        "minimum_us",
+        "Output Minimum",
+        "PWM",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::pwm_calibration_min_us,
+        Vektor::pwm_calibration_max_us,
+        Vektor::default_pwm_min_us,
+        Vektor::FieldSlot::PWMOUT_MIN_US,
+    },
+    {
+        "component/pwm_output/0/parameter/trim_us",
+        pwmout_component_path,
+        "trim_us",
+        "Output Trim",
+        "PWM",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::pwm_calibration_min_us,
+        Vektor::pwm_calibration_max_us,
+        Vektor::default_pwm_trim_us,
+        Vektor::FieldSlot::PWMOUT_TRIM_US,
+    },
+    {
+        "component/pwm_output/0/parameter/maximum_us",
+        pwmout_component_path,
+        "maximum_us",
+        "Output Maximum",
+        "PWM",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::pwm_calibration_min_us,
+        Vektor::pwm_calibration_max_us,
+        Vektor::default_pwm_max_us,
+        Vektor::FieldSlot::PWMOUT_MAX_US,
+    },
+    {
+        "component/pwm_output/0/parameter/reverse_mask",
+        pwmout_component_path,
+        "reverse_mask",
+        "Reverse Mask",
+        "bitmask",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        0,
+        Vektor::pwm_reverse_mask_max,
+        0,
+        Vektor::FieldSlot::PWMOUT_REVERSE_MASK,
+    },
+    {
+        "component/pwm_output/0/parameter/failsafe_us",
+        pwmout_component_path,
+        "failsafe_us",
+        "Failsafe Pulse",
+        "PWM",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        0,
+        Vektor::pwm_calibration_max_us,
+        0,
+        Vektor::FieldSlot::PWMOUT_FAILSAFE_US,
+    },
+    VEKTOR_PWMIN_FIELD(1),
+    VEKTOR_PWMIN_FIELD(2),
+    VEKTOR_PWMIN_FIELD(3),
+    VEKTOR_PWMIN_FIELD(4),
+    VEKTOR_PWMIN_FIELD(5),
+    VEKTOR_PWMIN_FIELD(6),
+    VEKTOR_PWMOUT_FIELD(1),
+    VEKTOR_PWMOUT_FIELD(2),
+    VEKTOR_PWMOUT_FIELD(3),
+    VEKTOR_PWMOUT_FIELD(4),
+    VEKTOR_PWMOUT_FIELD(5),
+    VEKTOR_PWMOUT_FIELD(6),
+    VEKTOR_PWMOUT_FIELD(7),
+    VEKTOR_PWMOUT_FIELD(8),
+    VEKTOR_PWMOUT_FIELD(9),
+    VEKTOR_PWMOUT_FIELD(10),
+    VEKTOR_PWMOUT_FIELD(11),
+    VEKTOR_PWMOUT_FIELD(12),
 };
 
 #undef VEKTOR_RCIN_FIELD
+#undef VEKTOR_PWMIN_PIN_FIELD
+#undef VEKTOR_PWMIN_FIELD
+#undef VEKTOR_PWMOUT_FIELD
 
 static constexpr uint16_t component_descriptor_count =
     sizeof(component_descriptors) / sizeof(component_descriptors[0]);
@@ -550,6 +795,42 @@ bool rcin_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
     const uint8_t value = uint8_t(slot);
     const uint8_t first = uint8_t(FieldSlot::RCIN_CHANNEL_1);
     const uint8_t last = uint8_t(FieldSlot::RCIN_CHANNEL_16);
+    if (value < first || value > last) {
+        return false;
+    }
+    channel_index = value - first;
+    return true;
+}
+
+bool pwmin_pin_for_slot(FieldSlot slot, uint8_t &channel_index)
+{
+    const uint8_t value = uint8_t(slot);
+    const uint8_t first = uint8_t(FieldSlot::PWMIN_PIN_1);
+    const uint8_t last = uint8_t(FieldSlot::PWMIN_PIN_6);
+    if (value < first || value > last) {
+        return false;
+    }
+    channel_index = value - first;
+    return true;
+}
+
+bool pwmin_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
+{
+    const uint8_t value = uint8_t(slot);
+    const uint8_t first = uint8_t(FieldSlot::PWMIN_CHANNEL_1);
+    const uint8_t last = uint8_t(FieldSlot::PWMIN_CHANNEL_6);
+    if (value < first || value > last) {
+        return false;
+    }
+    channel_index = value - first;
+    return true;
+}
+
+bool pwmout_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
+{
+    const uint8_t value = uint8_t(slot);
+    const uint8_t first = uint8_t(FieldSlot::PWMOUT_CHANNEL_1);
+    const uint8_t last = uint8_t(FieldSlot::PWMOUT_CHANNEL_12);
     if (value < first || value > last) {
         return false;
     }

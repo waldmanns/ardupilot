@@ -4,6 +4,8 @@
 #include "Vektor_Capability.h"
 #include "Vektor_Parameters.h"
 #include "Vektor_Protocol.h"
+#include "Vektor_PwmInput.h"
+#include "Vektor_PwmOutput.h"
 #include "Vektor_RequestCache.h"
 #include "Vektor_Rcin.h"
 #include "Vektor_Runtime.h"
@@ -22,6 +24,8 @@ public:
               const RuntimeState &runtime,
               const VspComponent &vsp,
               const RcinSource &rcin,
+              PwmInput &pwm_input,
+              PwmOutput &pwm_output,
               AssignmentMatrix &assignments);
     void update();
 
@@ -141,6 +145,7 @@ private:
     uint64_t coarse_capability_flags() const;
     uint64_t device_id() const;
     bool initialize_descriptor_identity();
+    bool refresh_capability_hash();
     bool validate_descriptor_ids();
     bool calculate_descriptor_hash(const uint8_t *domains,
                                    uint8_t domain_count,
@@ -164,6 +169,8 @@ private:
     const RuntimeState *_runtime = nullptr;
     const VspComponent *_vsp = nullptr;
     const RcinSource *_rcin = nullptr;
+    PwmInput *_pwm_input = nullptr;
+    PwmOutput *_pwm_output = nullptr;
     AssignmentMatrix *_assignments = nullptr;
     Protocol::Parser _parser;
     bool _ready = false;

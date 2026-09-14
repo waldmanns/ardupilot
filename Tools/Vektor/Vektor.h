@@ -4,11 +4,14 @@
 #include "Vektor_AssignmentMatrix.h"
 #include "Vektor_Capability.h"
 #include "Vektor_Parameters.h"
+#include "Vektor_PwmInput.h"
+#include "Vektor_PwmOutput.h"
 #include "Vektor_Rcin.h"
 #include "Vektor_Runtime.h"
 #include "Vektor_SerialProtocol.h"
 
 #include <RC_Channel/RC_Channel.h>
+#include <SRV_Channel/SRV_Channel.h>
 
 #include <stdint.h>
 
@@ -40,20 +43,27 @@ public:
     Parameters g;
     VektorRCChannels rc_channels;
     AssignmentMatrix assignments;
+    PwmInput pwm_input;
+    PwmOutput pwm_output;
     static const AP_Param::Info var_info[];
 
 private:
     void load_parameters();
     void setup_rcin_uart();
     void update_rcin(uint64_t now_us);
-    void apply_assignments();
+    void apply_vsp_inputs();
+    void apply_pwm_outputs();
     SignalSample<float> assigned_float(uint32_t destination_id) const;
 
     AP_Param param_loader{var_info};
+    // The ChibiOS RCOutput driver consults the SRV channel registry during
+    // initialization even though Vektor owns PWM calibration itself.
+    SRV_Channels _servo_channels;
     const BoardCapability *_active_capability;
     RuntimeState _runtime;
     RcinSource _rcin;
     VspComponent _vsp;
+    SignalSample<float> _pwm_commands[PwmOutput::max_channels] {};
     SerialProtocol _serial_protocol;
 };
 

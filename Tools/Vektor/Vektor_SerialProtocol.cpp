@@ -111,6 +111,8 @@ void SerialProtocol::init(AP_HAL::UARTDriver *uart,
                           const RuntimeState &runtime,
                           const VspComponent &vsp,
                           const RcinSource &rcin,
+                          PwmInput &pwm_input,
+                          PwmOutput &pwm_output,
                           AssignmentMatrix &assignments)
 {
     _uart = uart;
@@ -119,6 +121,8 @@ void SerialProtocol::init(AP_HAL::UARTDriver *uart,
     _runtime = &runtime;
     _vsp = &vsp;
     _rcin = &rcin;
+    _pwm_input = &pwm_input;
+    _pwm_output = &pwm_output;
     _assignments = &assignments;
     _server_nonce = uint32_t(AP_HAL::micros64()) ^ uint32_t(device_id());
     _ready = (_uart != nullptr) &&
@@ -1533,7 +1537,8 @@ bool SerialProtocol::build_timer_group_record(uint16_t index,
     for (uint8_t i = 0; i < sizeof(supported_rates) / sizeof(supported_rates[0]); i++) {
         writer.u16(supported_rates[i]);
     }
-    writer.u16(supported_rates[0]);
+    writer.u16(flex_group || _pwm_output == nullptr ?
+               supported_rates[0] : _pwm_output->effective_rate_hz());
 
     record_len = writer.length();
     return writer.ok();
@@ -1769,12 +1774,39 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
     }
 
     uint32_t raw = 0;
-    uint8_t rcin_channel = 0;
-    if (rcin_channel_for_slot(field->slot, rcin_channel)) {
+    uint8_t channel_index = 0;
+    if (rcin_channel_for_slot(field->slot, channel_index)) {
         if (_rcin == nullptr) {
             return false;
         }
-        const SignalSample<float> *sample = _rcin->channel(rcin_channel);
+        const SignalSample<float> *sample = _rcin->channel(channel_index);
+        if (sample == nullptr) {
+            return false;
+        }
+        raw = float_raw_value(sample->value);
+        return write_typed_payload(writer, field->type, raw);
+    }
+    if (pwmin_pin_for_slot(field->slot, channel_index)) {
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_input->pins[channel_index].get());
+        return write_typed_payload(writer, field->type, raw);
+    }
+    if (pwmin_channel_for_slot(field->slot, channel_index)) {
+        const SignalSample<float> *sample =
+            _pwm_input == nullptr ? nullptr :
+                                    _pwm_input->channel(channel_index);
+        if (sample == nullptr) {
+            return false;
+        }
+        raw = float_raw_value(sample->value);
+        return write_typed_payload(writer, field->type, raw);
+    }
+    if (pwmout_channel_for_slot(field->slot, channel_index)) {
+        const SignalSample<float> *sample =
+            _pwm_output == nullptr ? nullptr :
+                                     _pwm_output->command(channel_index);
         if (sample == nullptr) {
             return false;
         }
@@ -1866,6 +1898,66 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
         raw = uint32_t(protocols->get());
         break;
     }
+    case FieldSlot::PWMIN_TIMEOUT_MS:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_input->timeout_ms.get());
+        break;
+    case FieldSlot::PWMIN_MIN_US:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_input->pwm_min.get());
+        break;
+    case FieldSlot::PWMIN_TRIM_US:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_input->pwm_trim.get());
+        break;
+    case FieldSlot::PWMIN_MAX_US:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_input->pwm_max.get());
+        break;
+    case FieldSlot::PWMOUT_RATE_HZ:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_output->rate_hz.get());
+        break;
+    case FieldSlot::PWMOUT_MIN_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_output->pwm_min.get());
+        break;
+    case FieldSlot::PWMOUT_TRIM_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_output->pwm_trim.get());
+        break;
+    case FieldSlot::PWMOUT_MAX_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_output->pwm_max.get());
+        break;
+    case FieldSlot::PWMOUT_REVERSE_MASK:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_output->reverse_mask.get());
+        break;
+    case FieldSlot::PWMOUT_FAILSAFE_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_pwm_output->failsafe_pwm.get());
+        break;
     case FieldSlot::VSP_X:
         if (_vsp == nullptr) {
             return false;
@@ -1906,6 +1998,30 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
     case FieldSlot::RCIN_CHANNEL_14:
     case FieldSlot::RCIN_CHANNEL_15:
     case FieldSlot::RCIN_CHANNEL_16:
+    case FieldSlot::PWMIN_PIN_1:
+    case FieldSlot::PWMIN_PIN_2:
+    case FieldSlot::PWMIN_PIN_3:
+    case FieldSlot::PWMIN_PIN_4:
+    case FieldSlot::PWMIN_PIN_5:
+    case FieldSlot::PWMIN_PIN_6:
+    case FieldSlot::PWMIN_CHANNEL_1:
+    case FieldSlot::PWMIN_CHANNEL_2:
+    case FieldSlot::PWMIN_CHANNEL_3:
+    case FieldSlot::PWMIN_CHANNEL_4:
+    case FieldSlot::PWMIN_CHANNEL_5:
+    case FieldSlot::PWMIN_CHANNEL_6:
+    case FieldSlot::PWMOUT_CHANNEL_1:
+    case FieldSlot::PWMOUT_CHANNEL_2:
+    case FieldSlot::PWMOUT_CHANNEL_3:
+    case FieldSlot::PWMOUT_CHANNEL_4:
+    case FieldSlot::PWMOUT_CHANNEL_5:
+    case FieldSlot::PWMOUT_CHANNEL_6:
+    case FieldSlot::PWMOUT_CHANNEL_7:
+    case FieldSlot::PWMOUT_CHANNEL_8:
+    case FieldSlot::PWMOUT_CHANNEL_9:
+    case FieldSlot::PWMOUT_CHANNEL_10:
+    case FieldSlot::PWMOUT_CHANNEL_11:
+    case FieldSlot::PWMOUT_CHANNEL_12:
         return false;
     }
 
@@ -1920,10 +2036,22 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     }
 
     SignalQuality quality = SignalQuality::VALID;
-    uint8_t rcin_channel = 0;
-    if (rcin_channel_for_slot(field->slot, rcin_channel)) {
+    uint8_t channel_index = 0;
+    if (rcin_channel_for_slot(field->slot, channel_index)) {
         const SignalSample<float> *sample =
-            _rcin == nullptr ? nullptr : _rcin->channel(rcin_channel);
+            _rcin == nullptr ? nullptr : _rcin->channel(channel_index);
+        quality = sample == nullptr ? SignalQuality::INVALID :
+                                      sample->quality;
+    } else if (pwmin_channel_for_slot(field->slot, channel_index)) {
+        const SignalSample<float> *sample =
+            _pwm_input == nullptr ? nullptr :
+                                    _pwm_input->channel(channel_index);
+        quality = sample == nullptr ? SignalQuality::INVALID :
+                                      sample->quality;
+    } else if (pwmout_channel_for_slot(field->slot, channel_index)) {
+        const SignalSample<float> *sample =
+            _pwm_output == nullptr ? nullptr :
+                                     _pwm_output->command(channel_index);
         quality = sample == nullptr ? SignalQuality::INVALID :
                                       sample->quality;
     }
@@ -1959,6 +2087,22 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     case FieldSlot::RCIN_PORT:
     case FieldSlot::RCIN_TIMEOUT_MS:
     case FieldSlot::RCIN_PROTOCOLS:
+    case FieldSlot::PWMIN_PIN_1:
+    case FieldSlot::PWMIN_PIN_2:
+    case FieldSlot::PWMIN_PIN_3:
+    case FieldSlot::PWMIN_PIN_4:
+    case FieldSlot::PWMIN_PIN_5:
+    case FieldSlot::PWMIN_PIN_6:
+    case FieldSlot::PWMIN_TIMEOUT_MS:
+    case FieldSlot::PWMIN_MIN_US:
+    case FieldSlot::PWMIN_TRIM_US:
+    case FieldSlot::PWMIN_MAX_US:
+    case FieldSlot::PWMOUT_RATE_HZ:
+    case FieldSlot::PWMOUT_MIN_US:
+    case FieldSlot::PWMOUT_TRIM_US:
+    case FieldSlot::PWMOUT_MAX_US:
+    case FieldSlot::PWMOUT_REVERSE_MASK:
+    case FieldSlot::PWMOUT_FAILSAFE_US:
     case FieldSlot::RCIN_CHANNEL_1:
     case FieldSlot::RCIN_CHANNEL_2:
     case FieldSlot::RCIN_CHANNEL_3:
@@ -1975,6 +2119,24 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     case FieldSlot::RCIN_CHANNEL_14:
     case FieldSlot::RCIN_CHANNEL_15:
     case FieldSlot::RCIN_CHANNEL_16:
+    case FieldSlot::PWMIN_CHANNEL_1:
+    case FieldSlot::PWMIN_CHANNEL_2:
+    case FieldSlot::PWMIN_CHANNEL_3:
+    case FieldSlot::PWMIN_CHANNEL_4:
+    case FieldSlot::PWMIN_CHANNEL_5:
+    case FieldSlot::PWMIN_CHANNEL_6:
+    case FieldSlot::PWMOUT_CHANNEL_1:
+    case FieldSlot::PWMOUT_CHANNEL_2:
+    case FieldSlot::PWMOUT_CHANNEL_3:
+    case FieldSlot::PWMOUT_CHANNEL_4:
+    case FieldSlot::PWMOUT_CHANNEL_5:
+    case FieldSlot::PWMOUT_CHANNEL_6:
+    case FieldSlot::PWMOUT_CHANNEL_7:
+    case FieldSlot::PWMOUT_CHANNEL_8:
+    case FieldSlot::PWMOUT_CHANNEL_9:
+    case FieldSlot::PWMOUT_CHANNEL_10:
+    case FieldSlot::PWMOUT_CHANNEL_11:
+    case FieldSlot::PWMOUT_CHANNEL_12:
         break;
     }
 
@@ -2029,6 +2191,40 @@ bool SerialProtocol::validate_parameter_value(uint32_t field_id,
         return false;
     }
 
+    if (field->slot == FieldSlot::PWMOUT_RATE_HZ &&
+        !PwmOutput::supported_rate(uint16_t(value))) {
+        code = Protocol::ErrorCode::OUT_OF_RANGE;
+        detail = "unsupported PWM rate";
+        return false;
+    }
+
+    if (_pwm_input != nullptr) {
+        if ((field->slot == FieldSlot::PWMIN_MIN_US &&
+             value >= _pwm_input->pwm_trim.get()) ||
+            (field->slot == FieldSlot::PWMIN_TRIM_US &&
+             (value <= _pwm_input->pwm_min.get() ||
+              value >= _pwm_input->pwm_max.get())) ||
+            (field->slot == FieldSlot::PWMIN_MAX_US &&
+             value <= _pwm_input->pwm_trim.get())) {
+            code = Protocol::ErrorCode::OUT_OF_RANGE;
+            detail = "invalid PWM input calibration";
+            return false;
+        }
+    }
+    if (_pwm_output != nullptr) {
+        if ((field->slot == FieldSlot::PWMOUT_MIN_US &&
+             value >= _pwm_output->pwm_trim.get()) ||
+            (field->slot == FieldSlot::PWMOUT_TRIM_US &&
+             (value <= _pwm_output->pwm_min.get() ||
+              value >= _pwm_output->pwm_max.get())) ||
+            (field->slot == FieldSlot::PWMOUT_MAX_US &&
+             value <= _pwm_output->pwm_trim.get())) {
+            code = Protocol::ErrorCode::OUT_OF_RANGE;
+            detail = "invalid PWM output calibration";
+            return false;
+        }
+    }
+
     code = Protocol::ErrorCode::UNKNOWN_MESSAGE;
     detail = "";
     return true;
@@ -2044,6 +2240,16 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
         type_id != uint8_t(field->type) ||
         !field_is_parameter(*field)) {
         return false;
+    }
+
+    uint8_t channel_index = 0;
+    if (pwmin_pin_for_slot(field->slot, channel_index)) {
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_input->pins[channel_index],
+                                   int16_t(uint16_t(raw)));
+        return true;
     }
 
     switch (field->slot) {
@@ -2074,6 +2280,76 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
         save_parameter_without_gcs(*protocols, int32_t(raw));
         return true;
     }
+    case FieldSlot::PWMIN_TIMEOUT_MS:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_input->timeout_ms,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMIN_MIN_US:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_input->pwm_min,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMIN_TRIM_US:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_input->pwm_trim,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMIN_MAX_US:
+        if (_pwm_input == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_input->pwm_max,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMOUT_RATE_HZ:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_output->rate_hz,
+                                   int16_t(uint16_t(raw)));
+        return refresh_capability_hash();
+    case FieldSlot::PWMOUT_MIN_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_output->pwm_min,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMOUT_TRIM_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_output->pwm_trim,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMOUT_MAX_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_output->pwm_max,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMOUT_REVERSE_MASK:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_output->reverse_mask,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::PWMOUT_FAILSAFE_US:
+        if (_pwm_output == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(_pwm_output->failsafe_pwm,
+                                   int16_t(uint16_t(raw)));
+        return true;
     case FieldSlot::RX_FRAMES:
     case FieldSlot::RX_DROPS:
     case FieldSlot::TX_DROPS:
@@ -2103,6 +2379,30 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
     case FieldSlot::RCIN_CHANNEL_14:
     case FieldSlot::RCIN_CHANNEL_15:
     case FieldSlot::RCIN_CHANNEL_16:
+    case FieldSlot::PWMIN_PIN_1:
+    case FieldSlot::PWMIN_PIN_2:
+    case FieldSlot::PWMIN_PIN_3:
+    case FieldSlot::PWMIN_PIN_4:
+    case FieldSlot::PWMIN_PIN_5:
+    case FieldSlot::PWMIN_PIN_6:
+    case FieldSlot::PWMIN_CHANNEL_1:
+    case FieldSlot::PWMIN_CHANNEL_2:
+    case FieldSlot::PWMIN_CHANNEL_3:
+    case FieldSlot::PWMIN_CHANNEL_4:
+    case FieldSlot::PWMIN_CHANNEL_5:
+    case FieldSlot::PWMIN_CHANNEL_6:
+    case FieldSlot::PWMOUT_CHANNEL_1:
+    case FieldSlot::PWMOUT_CHANNEL_2:
+    case FieldSlot::PWMOUT_CHANNEL_3:
+    case FieldSlot::PWMOUT_CHANNEL_4:
+    case FieldSlot::PWMOUT_CHANNEL_5:
+    case FieldSlot::PWMOUT_CHANNEL_6:
+    case FieldSlot::PWMOUT_CHANNEL_7:
+    case FieldSlot::PWMOUT_CHANNEL_8:
+    case FieldSlot::PWMOUT_CHANNEL_9:
+    case FieldSlot::PWMOUT_CHANNEL_10:
+    case FieldSlot::PWMOUT_CHANNEL_11:
+    case FieldSlot::PWMOUT_CHANNEL_12:
         break;
     }
     return false;
@@ -2158,28 +2458,32 @@ bool SerialProtocol::initialize_descriptor_identity()
         uint8_t(Protocol::DescriptorDomain::COMPONENT),
         uint8_t(Protocol::DescriptorDomain::FIELD),
     };
-    static const uint8_t capability_domains[] = {
-        uint8_t(Protocol::DescriptorDomain::BOARD),
-        uint8_t(Protocol::DescriptorDomain::ENDPOINT),
-        uint8_t(Protocol::DescriptorDomain::TIMER_GROUP),
-        uint8_t(Protocol::DescriptorDomain::RUNTIME_LIMIT),
-    };
-
     _schema_hash = 0;
     _capability_hash = 0;
     return validate_descriptor_ids() &&
            calculate_descriptor_hash(schema_domains,
                                      sizeof(schema_domains),
                                      _schema_hash) &&
-           calculate_descriptor_hash(capability_domains,
+           refresh_capability_hash();
+}
+
+bool SerialProtocol::refresh_capability_hash()
+{
+    static const uint8_t capability_domains[] = {
+        uint8_t(Protocol::DescriptorDomain::BOARD),
+        uint8_t(Protocol::DescriptorDomain::ENDPOINT),
+        uint8_t(Protocol::DescriptorDomain::TIMER_GROUP),
+        uint8_t(Protocol::DescriptorDomain::RUNTIME_LIMIT),
+    };
+    return calculate_descriptor_hash(capability_domains,
                                      sizeof(capability_domains),
                                      _capability_hash);
 }
 
 bool SerialProtocol::validate_descriptor_ids()
 {
-    static constexpr uint16_t max_stable_ids = 96;
-    uint32_t stable_ids[max_stable_ids];
+    static constexpr uint16_t max_stable_ids = 160;
+    static uint32_t stable_ids[max_stable_ids];
     uint16_t count = 0;
 
     auto append_id = [&](uint32_t id) {

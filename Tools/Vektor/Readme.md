@@ -20,6 +20,9 @@ This scaffold intentionally starts small. It provides:
 - a 16-channel RC input source with AP_RCProtocol UART autodetection,
   per-channel calibration, receiver failsafe/freshness tracking, and normalized
   typed outputs;
+- six GPIO edge-capture PWM inputs with independent freshness/quality state;
+- a normalized PWM output bank that drives the board-advertised output count,
+  owns pulse calibration and frame rate, and disables unrouted outputs;
 - a common component/field schema registry that owns stable IDs and emits the
   protocol descriptor records;
 - Vektor Serial Protocol v1 framing with COBS, CRC-32/ISO-HDLC, `PING`,
@@ -46,6 +49,18 @@ The first exposed persistent parameters are:
   `0` disables the added UART);
 - `RCIN_TIMEOUT`: receiver freshness timeout in milliseconds.
 
+PWM input parameters are `PWIN1_PIN` through `PWIN6_PIN`, `PWIN_TIMEOUT`,
+`PWIN_MIN`, `PWIN_TRIM`, and `PWIN_MAX`. A pin value of `-1` disables that
+input. On `revo-mini`, GPIO 50 through 55 correspond to PWM connector outputs
+1 through 6. Configuring one of those pins as an input reserves that physical
+channel, so it cannot simultaneously be targeted as a PWM output.
+
+The output bank uses `PWM_RATE` (50, 100, 200, or 330 Hz), `PWM_MIN`,
+`PWM_TRIM`, `PWM_MAX`, `PWM_REVERSE`, and `PWM_FAILSAFE`. A zero failsafe value
+disables a channel whenever its assigned signal is stale or invalid; a nonzero
+value sends that bounded pulse instead. Unassigned channels always remain
+disabled.
+
 The standard `RC1_*` through `RC16_*` calibration parameters and
 `RC_PROTOCOLS` mask are also registered. The selected UART uses ArduPilot's
 compiled-in receiver autodetector, including serial protocols such as iBUS,
@@ -60,6 +75,24 @@ setting a new source for an assigned destination replaces the old route. Route
 flags are reserved and must currently be zero. The VSP component consumes its
 assigned X/Y samples, but its control-law `update()` remains intentionally
 empty for manual implementation.
+
+Minimal direct routes use these stable schema paths:
+
+```text
+# serial receiver channel 1 -> physical PWM output 1
+component/rcin/0/output/channel_1
+    -> component/pwm_output/0/input/channel_1
+
+# GPIO-captured PWM input 1 -> physical PWM output 2
+component/pwm_input/0/output/channel_1
+    -> component/pwm_output/0/input/channel_2
+```
+
+`ROUTE_SET` carries the FNV-1a field IDs discovered from those descriptors.
+PWM input and serial receiver samples therefore use the same normalized,
+timestamped routing path. On the reduced F405 target only PWM output channels
+1 through 6 are accepted; the full-board capability permits channels 1
+through 12 once its H743 hwdef is available.
 
 Build the current configured board with:
 

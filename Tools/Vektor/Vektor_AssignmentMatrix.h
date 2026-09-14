@@ -36,6 +36,9 @@ public:
     AssignmentMatrix();
 
     void reset();
+    void configure_channel_limits(uint8_t pwm_input_count,
+                                  uint8_t pwm_output_count,
+                                  uint32_t unavailable_pwm_output_mask = 0);
     void load_persistent();
     SetResult set(uint32_t source_output_id,
                   uint32_t destination_input_id,
@@ -70,6 +73,9 @@ private:
     AP_Int32 _stored_destination[max_routes];
     AP_Int16 _stored_flags[max_routes];
     uint8_t _count = 0;
+    uint8_t _pwm_input_count = 6;
+    uint8_t _pwm_output_count = 12;
+    uint32_t _unavailable_pwm_output_mask = 0;
     bool _persistence_enabled = false;
 };
 

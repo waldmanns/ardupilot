@@ -58,6 +58,40 @@ enum class FieldSlot : uint8_t {
     RCIN_CHANNEL_14,
     RCIN_CHANNEL_15,
     RCIN_CHANNEL_16,
+    PWMIN_PIN_1,
+    PWMIN_PIN_2,
+    PWMIN_PIN_3,
+    PWMIN_PIN_4,
+    PWMIN_PIN_5,
+    PWMIN_PIN_6,
+    PWMIN_TIMEOUT_MS,
+    PWMIN_MIN_US,
+    PWMIN_TRIM_US,
+    PWMIN_MAX_US,
+    PWMOUT_RATE_HZ,
+    PWMOUT_MIN_US,
+    PWMOUT_TRIM_US,
+    PWMOUT_MAX_US,
+    PWMOUT_REVERSE_MASK,
+    PWMOUT_FAILSAFE_US,
+    PWMIN_CHANNEL_1,
+    PWMIN_CHANNEL_2,
+    PWMIN_CHANNEL_3,
+    PWMIN_CHANNEL_4,
+    PWMIN_CHANNEL_5,
+    PWMIN_CHANNEL_6,
+    PWMOUT_CHANNEL_1,
+    PWMOUT_CHANNEL_2,
+    PWMOUT_CHANNEL_3,
+    PWMOUT_CHANNEL_4,
+    PWMOUT_CHANNEL_5,
+    PWMOUT_CHANNEL_6,
+    PWMOUT_CHANNEL_7,
+    PWMOUT_CHANNEL_8,
+    PWMOUT_CHANNEL_9,
+    PWMOUT_CHANNEL_10,
+    PWMOUT_CHANNEL_11,
+    PWMOUT_CHANNEL_12,
 };
 
 struct ComponentDescriptor {
@@ -114,5 +148,8 @@ bool write_typed_payload(Protocol::PayloadWriter &writer,
                          Protocol::PrimitiveType type,
                          uint32_t raw);
 bool rcin_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
+bool pwmin_pin_for_slot(FieldSlot slot, uint8_t &channel_index);
+bool pwmin_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
+bool pwmout_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
 
 } // namespace Vektor

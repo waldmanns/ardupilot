@@ -28,5 +28,17 @@ static constexpr int16_t default_rcin_timeout_ms = 500;
 static constexpr int16_t rcin_timeout_ms_min = 50;
 static constexpr int16_t rcin_timeout_ms_max = 5000;
 static constexpr int32_t rcin_protocol_mask_max = (1L << 17) - 1;
+static constexpr int16_t default_pwmin_timeout_ms = 100;
+static constexpr int16_t pwmin_timeout_ms_min = 20;
+static constexpr int16_t pwmin_timeout_ms_max = 2000;
+static constexpr int16_t pwm_input_valid_min_us = 800;
+static constexpr int16_t pwm_input_valid_max_us = 2200;
+static constexpr int16_t pwm_calibration_min_us = 800;
+static constexpr int16_t pwm_calibration_max_us = 2200;
+static constexpr int16_t default_pwm_min_us = 1000;
+static constexpr int16_t default_pwm_trim_us = 1500;
+static constexpr int16_t default_pwm_max_us = 2000;
+static constexpr int16_t default_pwm_rate_hz = 50;
+static constexpr int16_t pwm_reverse_mask_max = (1 << 12) - 1;
 
 } // namespace Vektor

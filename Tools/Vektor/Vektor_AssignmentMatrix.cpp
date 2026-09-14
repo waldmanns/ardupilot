@@ -98,6 +98,15 @@ void AssignmentMatrix::reset()
     _persistence_enabled = false;
 }
 
+void AssignmentMatrix::configure_channel_limits(uint8_t pwm_input_count,
+                                                uint8_t pwm_output_count,
+                                                uint32_t unavailable_pwm_output_mask)
+{
+    _pwm_input_count = pwm_input_count;
+    _pwm_output_count = pwm_output_count;
+    _unavailable_pwm_output_mask = unavailable_pwm_output_mask;
+}
+
 void AssignmentMatrix::load_persistent()
 {
     reset();
@@ -272,6 +281,16 @@ AssignmentMatrix::SetResult AssignmentMatrix::validate(
     const FieldDescriptor *destination =
         registry.field_by_id(destination_input_id);
     if (destination == nullptr) {
+        return SetResult::BAD_DESTINATION;
+    }
+    uint8_t channel_index = 0;
+    if (pwmin_channel_for_slot(source->slot, channel_index) &&
+        channel_index >= _pwm_input_count) {
+        return SetResult::BAD_SOURCE;
+    }
+    if (pwmout_channel_for_slot(destination->slot, channel_index) &&
+        (channel_index >= _pwm_output_count ||
+         (_unavailable_pwm_output_mask & (1U << channel_index)) != 0)) {
         return SetResult::BAD_DESTINATION;
     }
     if (source->kind != Protocol::FieldKind::OUTPUT ||

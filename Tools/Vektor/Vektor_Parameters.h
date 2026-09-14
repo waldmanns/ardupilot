@@ -19,6 +19,8 @@ public:
         k_param_rcin_timeout_ms,
         k_param_rc_channels,
         k_param_assignments,
+        k_param_pwm_input,
+        k_param_pwm_output,
     };
 
     AP_Int16 format_version;

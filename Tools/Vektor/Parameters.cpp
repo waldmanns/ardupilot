@@ -62,6 +62,12 @@ const AP_Param::Info App::var_info[] = {
     // ROUTE_DELETE using stable schema field IDs.
     GOBJECT(assignments, "ROUTE", AssignmentMatrix),
 
+    // GPIO edge-capture PWM source configuration.
+    GOBJECT(pwm_input, "PWIN", PwmInput),
+
+    // Normalized-to-pulse output bank configuration.
+    GOBJECT(pwm_output, "PWM", PwmOutput),
+
     AP_VAREND
 };
 
