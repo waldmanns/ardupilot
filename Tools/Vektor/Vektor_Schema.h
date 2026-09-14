@@ -35,10 +35,29 @@ enum class FieldSlot : uint8_t {
     SYS_OPTIONS,
     SYS_DESC_PAGE,
     SYS_PROTOCOL_BAUD,
+    RCIN_PORT,
+    RCIN_TIMEOUT_MS,
+    RCIN_PROTOCOLS,
     VSP_X,
     VSP_Y,
     VSP_SERVO_A,
     VSP_SERVO_B,
+    RCIN_CHANNEL_1,
+    RCIN_CHANNEL_2,
+    RCIN_CHANNEL_3,
+    RCIN_CHANNEL_4,
+    RCIN_CHANNEL_5,
+    RCIN_CHANNEL_6,
+    RCIN_CHANNEL_7,
+    RCIN_CHANNEL_8,
+    RCIN_CHANNEL_9,
+    RCIN_CHANNEL_10,
+    RCIN_CHANNEL_11,
+    RCIN_CHANNEL_12,
+    RCIN_CHANNEL_13,
+    RCIN_CHANNEL_14,
+    RCIN_CHANNEL_15,
+    RCIN_CHANNEL_16,
 };
 
 struct ComponentDescriptor {
@@ -94,5 +113,6 @@ bool field_is_parameter(const FieldDescriptor &field);
 bool write_typed_payload(Protocol::PayloadWriter &writer,
                          Protocol::PrimitiveType type,
                          uint32_t raw);
+bool rcin_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
 
 } // namespace Vektor

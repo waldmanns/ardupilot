@@ -1,9 +1,11 @@
 #pragma once
 
+#include "Vektor_AssignmentMatrix.h"
 #include "Vektor_Capability.h"
 #include "Vektor_Parameters.h"
 #include "Vektor_Protocol.h"
 #include "Vektor_RequestCache.h"
+#include "Vektor_Rcin.h"
 #include "Vektor_Runtime.h"
 #include "Vektor_Subscription.h"
 #include "Vektor_Vsp.h"
@@ -18,7 +20,9 @@ public:
               const BoardCapability &capability,
               Parameters &parameters,
               const RuntimeState &runtime,
-              const VspComponent &vsp);
+              const VspComponent &vsp,
+              const RcinSource &rcin,
+              AssignmentMatrix &assignments);
     void update();
 
 private:
@@ -33,6 +37,9 @@ private:
     void handle_get_all_params(const Protocol::FrameView &frame);
     void handle_subscribe(const Protocol::FrameView &frame);
     void handle_unsubscribe(const Protocol::FrameView &frame);
+    void handle_route_list(const Protocol::FrameView &frame);
+    void handle_route_set(const Protocol::FrameView &frame);
+    void handle_route_delete(const Protocol::FrameView &frame);
     void service_telemetry(uint64_t now_us);
     bool send_payload(Protocol::MessageType message_type,
                       uint8_t flags,
@@ -112,6 +119,11 @@ private:
                      const uint32_t *field_ids,
                      uint16_t field_count);
     bool send_all_parameters(uint16_t sequence);
+    bool send_routes(uint16_t sequence,
+                     uint32_t cursor,
+                     uint16_t max_records);
+    bool send_single_route(uint16_t sequence,
+                           const AssignmentMatrix::Entry &route);
     bool write_field_value(Protocol::PayloadWriter &writer,
                            uint32_t field_id) const;
     bool write_field_payload(Protocol::PayloadWriter &writer,
@@ -151,6 +163,8 @@ private:
     Parameters *_parameters = nullptr;
     const RuntimeState *_runtime = nullptr;
     const VspComponent *_vsp = nullptr;
+    const RcinSource *_rcin = nullptr;
+    AssignmentMatrix *_assignments = nullptr;
     Protocol::Parser _parser;
     bool _ready = false;
     bool _hello_seen = false;

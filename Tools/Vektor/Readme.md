@@ -17,6 +17,9 @@ This scaffold intentionally starts small. It provides:
 - a small runtime state service with loop timing and uptime observables;
 - a minimal AP_Param-backed system parameter set;
 - typed signal primitives with timestamp and quality;
+- a 16-channel RC input source with AP_RCProtocol UART autodetection,
+  per-channel calibration, receiver failsafe/freshness tracking, and normalized
+  typed outputs;
 - a common component/field schema registry that owns stable IDs and emits the
   protocol descriptor records;
 - Vektor Serial Protocol v1 framing with COBS, CRC-32/ISO-HDLC, `PING`,
@@ -28,6 +31,9 @@ This scaffold intentionally starts small. It provides:
   limit discovery, and startup rejection of zero or colliding object IDs;
 - bounded realtime `SUBSCRIBE`/`UNSUBSCRIBE` sessions and compact volatile
   `TELEMETRY` for the built-in protocol/runtime observables;
+- a bounded persistent assignment matrix with type, direction, multiplicity,
+  stable route-ID, and component-cycle validation, exposed through
+  `ROUTE_LIST`, `ROUTE_SET`, and `ROUTE_DELETE`;
 - a small duplicate-request cache that replays identical retries and rejects
   sequence reuse with changed payloads.
 
@@ -36,6 +42,24 @@ The first exposed persistent parameters are:
 - `SYS_OPTIONS`: reserved system option bitmask;
 - `SYS_DESC_PAGE`: default descriptor records per `DESCRIBE` page;
 - `SYS_PROTO_BAUD`: protocol UART baud rate used on boot.
+- `RCIN_PORT`: HAL serial index used for the receiver UART (`1` by default,
+  `0` disables the added UART);
+- `RCIN_TIMEOUT`: receiver freshness timeout in milliseconds.
+
+The standard `RC1_*` through `RC16_*` calibration parameters and
+`RC_PROTOCOLS` mask are also registered. The selected UART uses ArduPilot's
+compiled-in receiver autodetector, including serial protocols such as iBUS,
+SBUS, DSM, SUMD, SRXL, CRSF/ELRS, FPort, and Ghost where enabled for the board.
+The native schema exposes that standard mask as
+`component/rcin/0/parameter/protocol_mask`. The resulting normalized channels
+appear as routable fields under
+`component/rcin/0/output/channel_1` through `channel_16`.
+
+Assignments are stored through `AP_Param` and allow one source per destination;
+setting a new source for an assigned destination replaces the old route. Route
+flags are reserved and must currently be zero. The VSP component consumes its
+assigned X/Y samples, but its control-law `update()` remains intentionally
+empty for manual implementation.
 
 Build the current configured board with:
 

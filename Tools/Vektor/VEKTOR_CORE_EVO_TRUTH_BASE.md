@@ -1422,15 +1422,18 @@ The current `Tools/Vektor` scaffold implements and tests:
 - `PING`, `HELLO`, paged board/component/field/endpoint/timer-group/runtime-limit `DESCRIBE`, `ERROR`, typed `GET`/`SET`, bulk parameter operations, and duplicate-request replay/conflict handling;
 - deterministic nonzero schema/capability hashes over ID-sorted descriptor records, with initialization-time stable-ID collision validation;
 - bounded `SUBSCRIBE`/`UNSUBSCRIBE` sessions and compact volatile `TELEMETRY` for the built-in realtime observables, with scheduler-rate negotiation and newest-sample behavior;
-- host tests covering codec/parser behavior, schema registry serialization, replay caching, runtime timing, subscription scheduling, and an end-to-end UART telemetry session.
+- a 16-channel RC input component backed by HAL/AP_RCProtocol, with selectable receiver UART, serial receiver autodetection, standard RC calibration, frame freshness/failsafe quality, and normalized routable outputs;
+- a bounded `AP_Param`-persistent assignment matrix with stable route IDs, one-source-per-input replacement, type/direction validation, and component-cycle rejection;
+- `ROUTE_LIST`, `ROUTE_SET`, and `ROUTE_DELETE` protocol handlers and the `CAP_ROUTING` capability bit;
+- host tests covering codec/parser behavior, schema registry serialization, RC input quality and normalization, assignment validation, route protocol operations, replay caching, runtime timing, subscription scheduling, and an end-to-end UART telemetry session.
 
 The following remain design or bring-up work rather than implemented product behavior:
 
 - full H743 ChibiOS hwdef and hardware build;
 - build-generated schema tables and build-time collision failure (the current common registry is hand-authored and validates IDs during initialization);
-- hardware endpoint drivers, scheduler profiles, and measured realtime limits;
+- hardware endpoint drivers beyond the UART RC input frontend, scheduler profiles, and measured realtime limits;
 - common attitude service across ICM-20602 and BMI088;
-- VSP/VRS components and persistent signal routing with cycle validation;
+- VSP/VRS control-law behavior (the VSP core remains an intentional skeleton);
 - action/event services, DroneCAN integration, and MAVLink coexistence;
 - logical file-service backends and low-priority logging;
 - configurator protocol client and UI.
@@ -1441,7 +1444,6 @@ The following remain design or bring-up work rather than implemented product beh
 
 `VEKTOR_SERIAL_PROTOCOL_TRUTH.md` freezes the v1 interoperability details that were open in the original draft. The current firmware still needs:
 
-- route service handlers and persistent route validation;
 - action schemas, action/event handlers, and operation lifecycle behavior;
 - file-service handlers and board-specific chunk limits where storage is advertised;
 - a finalized physical USB/UART port-selection policy and MAVLink coexistence validation.

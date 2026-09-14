@@ -44,6 +44,24 @@ uint32_t float_raw_value(float value)
     return raw;
 }
 
+template <typename Parameter, typename Value>
+void save_parameter_without_gcs(Parameter &parameter, Value value)
+{
+    if (parameter.get() == value) {
+        return;
+    }
+    parameter.set(value);
+    parameter.save_sync(true, false);
+}
+
+AP_Int32 *rcin_protocols_parameter()
+{
+    enum ap_var_type type = AP_PARAM_NONE;
+    AP_Param *parameter = AP_Param::find("RC_PROTOCOLS", &type);
+    return type == AP_PARAM_INT32 ? static_cast<AP_Int32 *>(parameter) :
+                                    nullptr;
+}
+
 void pwm_channel_path(uint8_t channel, char *path, uint8_t path_len)
 {
     hal.util->snprintf(path,
@@ -91,13 +109,17 @@ void SerialProtocol::init(AP_HAL::UARTDriver *uart,
                           const BoardCapability &capability,
                           Parameters &parameters,
                           const RuntimeState &runtime,
-                          const VspComponent &vsp)
+                          const VspComponent &vsp,
+                          const RcinSource &rcin,
+                          AssignmentMatrix &assignments)
 {
     _uart = uart;
     _capability = &capability;
     _parameters = &parameters;
     _runtime = &runtime;
     _vsp = &vsp;
+    _rcin = &rcin;
+    _assignments = &assignments;
     _server_nonce = uint32_t(AP_HAL::micros64()) ^ uint32_t(device_id());
     _ready = (_uart != nullptr) &&
              Protocol::self_test() &&
@@ -199,6 +221,15 @@ void SerialProtocol::handle_frame(const Protocol::FrameView &frame)
         break;
     case Protocol::MessageType::UNSUBSCRIBE:
         handle_unsubscribe(frame);
+        break;
+    case Protocol::MessageType::ROUTE_LIST:
+        handle_route_list(frame);
+        break;
+    case Protocol::MessageType::ROUTE_SET:
+        handle_route_set(frame);
+        break;
+    case Protocol::MessageType::ROUTE_DELETE:
+        handle_route_delete(frame);
         break;
     default:
         if (Protocol::is_known_message_type(uint8_t(frame.message_type))) {
@@ -754,6 +785,165 @@ void SerialProtocol::handle_unsubscribe(const Protocol::FrameView &frame)
                  frame.sequence,
                  writer.data(),
                  writer.length());
+}
+
+void SerialProtocol::handle_route_list(const Protocol::FrameView &frame)
+{
+    if (!_hello_seen) {
+        send_error(frame,
+                   Protocol::ErrorCode::INVALID_STATE,
+                   0,
+                   "HELLO required");
+        return;
+    }
+
+    Protocol::PayloadReader reader(frame.payload, frame.payload_len);
+    uint32_t cursor = 0;
+    uint16_t max_records = 0;
+    if (!reader.u32(cursor) ||
+        !reader.u16(max_records) ||
+        reader.remaining() != 0) {
+        send_error(frame,
+                   Protocol::ErrorCode::BAD_LENGTH,
+                   0,
+                   "bad ROUTE_LIST");
+        return;
+    }
+    if (!send_routes(frame.sequence, cursor, max_records)) {
+        send_error(frame,
+                   Protocol::ErrorCode::INTERNAL_ERROR,
+                   0,
+                   "failed ROUTE_LIST");
+    }
+}
+
+void SerialProtocol::handle_route_set(const Protocol::FrameView &frame)
+{
+    if (!_hello_seen) {
+        send_error(frame,
+                   Protocol::ErrorCode::INVALID_STATE,
+                   0,
+                   "HELLO required");
+        return;
+    }
+
+    Protocol::PayloadReader reader(frame.payload, frame.payload_len);
+    uint32_t source_id = 0;
+    uint32_t destination_id = 0;
+    uint16_t flags = 0;
+    if (!reader.u32(source_id) ||
+        !reader.u32(destination_id) ||
+        !reader.u16(flags) ||
+        reader.remaining() != 0) {
+        send_error(frame,
+                   Protocol::ErrorCode::BAD_LENGTH,
+                   0,
+                   "bad ROUTE_SET");
+        return;
+    }
+    if (_assignments == nullptr) {
+        send_error(frame,
+                   Protocol::ErrorCode::NOT_AVAILABLE,
+                   0,
+                   "routing unavailable");
+        return;
+    }
+
+    const AssignmentMatrix::Entry *accepted = nullptr;
+    const AssignmentMatrix::SetResult result =
+        _assignments->set(source_id, destination_id, flags, accepted);
+    if (result != AssignmentMatrix::SetResult::OK || accepted == nullptr) {
+        Protocol::ErrorCode code = Protocol::ErrorCode::INVALID_ROUTE;
+        uint32_t object_id = destination_id;
+        const char *detail = "invalid route";
+        switch (result) {
+        case AssignmentMatrix::SetResult::BAD_SOURCE:
+        case AssignmentMatrix::SetResult::SOURCE_NOT_ROUTABLE:
+            object_id = source_id;
+            detail = "invalid route source";
+            break;
+        case AssignmentMatrix::SetResult::BAD_DESTINATION:
+        case AssignmentMatrix::SetResult::DESTINATION_NOT_ROUTABLE:
+            detail = "invalid route destination";
+            break;
+        case AssignmentMatrix::SetResult::TYPE_MISMATCH:
+            code = Protocol::ErrorCode::TYPE_MISMATCH;
+            detail = "route type mismatch";
+            break;
+        case AssignmentMatrix::SetResult::UNSUPPORTED_FLAGS:
+            detail = "unsupported route flags";
+            break;
+        case AssignmentMatrix::SetResult::CYCLE:
+            detail = "route cycle prohibited";
+            break;
+        case AssignmentMatrix::SetResult::FULL:
+            code = Protocol::ErrorCode::TOO_MANY_ITEMS;
+            object_id = 0;
+            detail = "assignment matrix full";
+            break;
+        case AssignmentMatrix::SetResult::INVALID_ROUTE_ID:
+            object_id = 0;
+            detail = "invalid generated route ID";
+            break;
+        case AssignmentMatrix::SetResult::OK:
+            code = Protocol::ErrorCode::INTERNAL_ERROR;
+            object_id = 0;
+            detail = "route result missing";
+            break;
+        }
+        send_error(frame, code, object_id, detail);
+        return;
+    }
+
+    if (!send_single_route(frame.sequence, *accepted)) {
+        send_error(frame,
+                   Protocol::ErrorCode::INTERNAL_ERROR,
+                   accepted->route_id,
+                   "failed ROUTE_SET");
+    }
+}
+
+void SerialProtocol::handle_route_delete(const Protocol::FrameView &frame)
+{
+    if (!_hello_seen) {
+        send_error(frame,
+                   Protocol::ErrorCode::INVALID_STATE,
+                   0,
+                   "HELLO required");
+        return;
+    }
+
+    Protocol::PayloadReader reader(frame.payload, frame.payload_len);
+    uint32_t route_id = 0;
+    if (!reader.u32(route_id) || reader.remaining() != 0) {
+        send_error(frame,
+                   Protocol::ErrorCode::BAD_LENGTH,
+                   0,
+                   "bad ROUTE_DELETE");
+        return;
+    }
+    if (_assignments == nullptr || !_assignments->remove(route_id)) {
+        send_error(frame,
+                   Protocol::ErrorCode::BAD_ID,
+                   route_id,
+                   "unknown route");
+        return;
+    }
+
+    Protocol::PayloadWriter writer(_payload, sizeof(_payload));
+    writer.u32(0);
+    writer.u16(0);
+    if (!writer.ok() ||
+        !send_payload(Protocol::MessageType::ROUTES,
+                      Protocol::FLAG_RESPONSE,
+                      frame.sequence,
+                      writer.data(),
+                      writer.length())) {
+        send_error(frame,
+                   Protocol::ErrorCode::INTERNAL_ERROR,
+                   route_id,
+                   "failed ROUTE_DELETE");
+    }
 }
 
 void SerialProtocol::service_telemetry(uint64_t now_us)
@@ -1486,6 +1676,77 @@ bool SerialProtocol::send_all_parameters(uint16_t sequence)
                         writer.length());
 }
 
+bool SerialProtocol::send_routes(uint16_t sequence,
+                                 uint32_t cursor,
+                                 uint16_t max_records)
+{
+    const uint8_t total = _assignments == nullptr ? 0 :
+                                                   _assignments->count();
+    const uint16_t page_limit =
+        (max_records == 0 || max_records > AssignmentMatrix::max_routes) ?
+        uint16_t(AssignmentMatrix::max_routes) : max_records;
+    const uint32_t start = cursor < total ? cursor : total;
+    uint32_t index = start;
+
+    uint8_t records[Protocol::MAX_PAYLOAD_SIZE - 6] {};
+    Protocol::PayloadWriter records_writer(records, sizeof(records));
+    uint16_t emitted = 0;
+    while (index < total && emitted < page_limit) {
+        const AssignmentMatrix::Entry *route =
+            _assignments->by_index(uint8_t(index));
+        if (route == nullptr || records_writer.remaining() < 14) {
+            break;
+        }
+        records_writer.u32(route->route_id);
+        records_writer.u32(route->source_output_id);
+        records_writer.u32(route->destination_input_id);
+        records_writer.u16(route->flags);
+        emitted++;
+        index++;
+    }
+    if (!records_writer.ok()) {
+        return false;
+    }
+
+    const uint32_t next_cursor = index < total ? index : 0;
+    Protocol::PayloadWriter writer(_payload, sizeof(_payload));
+    writer.u32(next_cursor);
+    writer.u16(emitted);
+    writer.bytes(records_writer.data(), records_writer.length());
+    if (!writer.ok()) {
+        return false;
+    }
+
+    uint8_t flags = Protocol::FLAG_RESPONSE;
+    if (next_cursor != 0) {
+        flags |= Protocol::FLAG_MORE;
+    }
+    return send_payload(Protocol::MessageType::ROUTES,
+                        flags,
+                        sequence,
+                        writer.data(),
+                        writer.length());
+}
+
+bool SerialProtocol::send_single_route(
+    uint16_t sequence,
+    const AssignmentMatrix::Entry &route)
+{
+    Protocol::PayloadWriter writer(_payload, sizeof(_payload));
+    writer.u32(0);
+    writer.u16(1);
+    writer.u32(route.route_id);
+    writer.u32(route.source_output_id);
+    writer.u32(route.destination_input_id);
+    writer.u16(route.flags);
+    return writer.ok() &&
+           send_payload(Protocol::MessageType::ROUTES,
+                        Protocol::FLAG_RESPONSE,
+                        sequence,
+                        writer.data(),
+                        writer.length());
+}
+
 bool SerialProtocol::write_field_value(Protocol::PayloadWriter &writer,
                                        uint32_t field_id) const
 {
@@ -1508,6 +1769,19 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
     }
 
     uint32_t raw = 0;
+    uint8_t rcin_channel = 0;
+    if (rcin_channel_for_slot(field->slot, rcin_channel)) {
+        if (_rcin == nullptr) {
+            return false;
+        }
+        const SignalSample<float> *sample = _rcin->channel(rcin_channel);
+        if (sample == nullptr) {
+            return false;
+        }
+        raw = float_raw_value(sample->value);
+        return write_typed_payload(writer, field->type, raw);
+    }
+
     switch (field->slot) {
     case FieldSlot::RX_FRAMES:
         raw = _rx_frames;
@@ -1572,6 +1846,26 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
         }
         raw = uint32_t(_parameters->sys_protocol_baud.get());
         break;
+    case FieldSlot::RCIN_PORT:
+        if (_parameters == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_parameters->rcin_port.get());
+        break;
+    case FieldSlot::RCIN_TIMEOUT_MS:
+        if (_parameters == nullptr) {
+            return false;
+        }
+        raw = uint16_t(_parameters->rcin_timeout_ms.get());
+        break;
+    case FieldSlot::RCIN_PROTOCOLS: {
+        const AP_Int32 *protocols = rcin_protocols_parameter();
+        if (protocols == nullptr) {
+            return false;
+        }
+        raw = uint32_t(protocols->get());
+        break;
+    }
     case FieldSlot::VSP_X:
         if (_vsp == nullptr) {
             return false;
@@ -1596,6 +1890,23 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
         }
         raw = float_raw_value(_vsp->servo_b().value);
         break;
+    case FieldSlot::RCIN_CHANNEL_1:
+    case FieldSlot::RCIN_CHANNEL_2:
+    case FieldSlot::RCIN_CHANNEL_3:
+    case FieldSlot::RCIN_CHANNEL_4:
+    case FieldSlot::RCIN_CHANNEL_5:
+    case FieldSlot::RCIN_CHANNEL_6:
+    case FieldSlot::RCIN_CHANNEL_7:
+    case FieldSlot::RCIN_CHANNEL_8:
+    case FieldSlot::RCIN_CHANNEL_9:
+    case FieldSlot::RCIN_CHANNEL_10:
+    case FieldSlot::RCIN_CHANNEL_11:
+    case FieldSlot::RCIN_CHANNEL_12:
+    case FieldSlot::RCIN_CHANNEL_13:
+    case FieldSlot::RCIN_CHANNEL_14:
+    case FieldSlot::RCIN_CHANNEL_15:
+    case FieldSlot::RCIN_CHANNEL_16:
+        return false;
     }
 
     return write_typed_payload(writer, field->type, raw);
@@ -1609,6 +1920,13 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     }
 
     SignalQuality quality = SignalQuality::VALID;
+    uint8_t rcin_channel = 0;
+    if (rcin_channel_for_slot(field->slot, rcin_channel)) {
+        const SignalSample<float> *sample =
+            _rcin == nullptr ? nullptr : _rcin->channel(rcin_channel);
+        quality = sample == nullptr ? SignalQuality::INVALID :
+                                      sample->quality;
+    }
     switch (field->slot) {
     case FieldSlot::VSP_X:
         quality = _vsp == nullptr ? SignalQuality::INVALID :
@@ -1638,6 +1956,25 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     case FieldSlot::SYS_OPTIONS:
     case FieldSlot::SYS_DESC_PAGE:
     case FieldSlot::SYS_PROTOCOL_BAUD:
+    case FieldSlot::RCIN_PORT:
+    case FieldSlot::RCIN_TIMEOUT_MS:
+    case FieldSlot::RCIN_PROTOCOLS:
+    case FieldSlot::RCIN_CHANNEL_1:
+    case FieldSlot::RCIN_CHANNEL_2:
+    case FieldSlot::RCIN_CHANNEL_3:
+    case FieldSlot::RCIN_CHANNEL_4:
+    case FieldSlot::RCIN_CHANNEL_5:
+    case FieldSlot::RCIN_CHANNEL_6:
+    case FieldSlot::RCIN_CHANNEL_7:
+    case FieldSlot::RCIN_CHANNEL_8:
+    case FieldSlot::RCIN_CHANNEL_9:
+    case FieldSlot::RCIN_CHANNEL_10:
+    case FieldSlot::RCIN_CHANNEL_11:
+    case FieldSlot::RCIN_CHANNEL_12:
+    case FieldSlot::RCIN_CHANNEL_13:
+    case FieldSlot::RCIN_CHANNEL_14:
+    case FieldSlot::RCIN_CHANNEL_15:
+    case FieldSlot::RCIN_CHANNEL_16:
         break;
     }
 
@@ -1711,15 +2048,32 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
 
     switch (field->slot) {
     case FieldSlot::SYS_OPTIONS:
-        _parameters->sys_options.set_and_save_ifchanged(int32_t(raw));
+        save_parameter_without_gcs(_parameters->sys_options, int32_t(raw));
         return true;
     case FieldSlot::SYS_DESC_PAGE:
-        _parameters->sys_desc_page.set_and_save_ifchanged(
-            int16_t(uint16_t(raw)));
+        save_parameter_without_gcs(_parameters->sys_desc_page,
+                                   int16_t(uint16_t(raw)));
         return true;
     case FieldSlot::SYS_PROTOCOL_BAUD:
-        _parameters->sys_protocol_baud.set_and_save_ifchanged(int32_t(raw));
+        save_parameter_without_gcs(_parameters->sys_protocol_baud,
+                                   int32_t(raw));
         return true;
+    case FieldSlot::RCIN_PORT:
+        save_parameter_without_gcs(_parameters->rcin_port,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::RCIN_TIMEOUT_MS:
+        save_parameter_without_gcs(_parameters->rcin_timeout_ms,
+                                   int16_t(uint16_t(raw)));
+        return true;
+    case FieldSlot::RCIN_PROTOCOLS: {
+        AP_Int32 *protocols = rcin_protocols_parameter();
+        if (protocols == nullptr) {
+            return false;
+        }
+        save_parameter_without_gcs(*protocols, int32_t(raw));
+        return true;
+    }
     case FieldSlot::RX_FRAMES:
     case FieldSlot::RX_DROPS:
     case FieldSlot::TX_DROPS:
@@ -1733,6 +2087,22 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
     case FieldSlot::VSP_Y:
     case FieldSlot::VSP_SERVO_A:
     case FieldSlot::VSP_SERVO_B:
+    case FieldSlot::RCIN_CHANNEL_1:
+    case FieldSlot::RCIN_CHANNEL_2:
+    case FieldSlot::RCIN_CHANNEL_3:
+    case FieldSlot::RCIN_CHANNEL_4:
+    case FieldSlot::RCIN_CHANNEL_5:
+    case FieldSlot::RCIN_CHANNEL_6:
+    case FieldSlot::RCIN_CHANNEL_7:
+    case FieldSlot::RCIN_CHANNEL_8:
+    case FieldSlot::RCIN_CHANNEL_9:
+    case FieldSlot::RCIN_CHANNEL_10:
+    case FieldSlot::RCIN_CHANNEL_11:
+    case FieldSlot::RCIN_CHANNEL_12:
+    case FieldSlot::RCIN_CHANNEL_13:
+    case FieldSlot::RCIN_CHANNEL_14:
+    case FieldSlot::RCIN_CHANNEL_15:
+    case FieldSlot::RCIN_CHANNEL_16:
         break;
     }
     return false;
@@ -2004,6 +2374,7 @@ uint64_t SerialProtocol::coarse_capability_flags() const
             flags |= 1ULL << 15; // CAP_DATAFLASH
         }
     }
+    flags |= 1ULL << 11; // CAP_ROUTING
     flags |= 1ULL << 13; // CAP_REALTIME
     return flags;
 }

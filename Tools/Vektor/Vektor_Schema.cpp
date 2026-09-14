@@ -11,6 +11,7 @@ namespace Protocol = Vektor::Protocol;
 static constexpr const char *protocol_component_path = "component/system/0";
 static constexpr const char *runtime_component_path = "component/system/1";
 static constexpr const char *vsp_component_path = "component/vsp/1";
+static constexpr const char *rcin_component_path = "component/rcin/0";
 static constexpr uint32_t parameter_live_flags =
     Vektor::FIELD_READABLE |
     Vektor::FIELD_WRITABLE |
@@ -45,7 +46,33 @@ const Vektor::ComponentDescriptor component_descriptors[] = {
         1,
         0,
     },
+    {
+        rcin_component_path,
+        "component_type/input/rcin",
+        "rcin0",
+        "RC Input",
+        0,
+        0,
+    },
 };
+
+#define VEKTOR_RCIN_FIELD(CHANNEL)                                           \
+    {                                                                        \
+        "component/rcin/0/output/channel_" #CHANNEL,                        \
+        rcin_component_path,                                                 \
+        "channel_" #CHANNEL,                                                \
+        "Channel " #CHANNEL,                                                \
+        "normalized",                                                       \
+        Protocol::FieldKind::OUTPUT,                                         \
+        Protocol::PrimitiveType::FLOAT32,                                    \
+        Vektor::FIELD_READABLE |                                             \
+        Vektor::FIELD_REALTIME |                                             \
+        Vektor::FIELD_ROUTABLE,                                              \
+        0,                                                                   \
+        0,                                                                   \
+        0,                                                                   \
+        Vektor::FieldSlot::RCIN_CHANNEL_##CHANNEL,                           \
+    }
 
 const Vektor::FieldDescriptor field_descriptors[] = {
     {
@@ -223,6 +250,54 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         Vektor::FieldSlot::SYS_PROTOCOL_BAUD,
     },
     {
+        "component/rcin/0/parameter/uart_port",
+        rcin_component_path,
+        "uart_port",
+        "Receiver UART",
+        "serial index",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        Vektor::FIELD_READABLE |
+        Vektor::FIELD_WRITABLE |
+        Vektor::FIELD_PERSISTENT |
+        Vektor::FIELD_HAS_MIN |
+        Vektor::FIELD_HAS_MAX |
+        Vektor::FIELD_HAS_DEFAULT |
+        Vektor::FIELD_APPLY_REBOOT,
+        Vektor::rcin_port_min,
+        Vektor::rcin_port_max,
+        Vektor::default_rcin_port,
+        Vektor::FieldSlot::RCIN_PORT,
+    },
+    {
+        "component/rcin/0/parameter/timeout_ms",
+        rcin_component_path,
+        "timeout_ms",
+        "RC Input Timeout",
+        "ms",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I16,
+        parameter_live_flags,
+        Vektor::rcin_timeout_ms_min,
+        Vektor::rcin_timeout_ms_max,
+        Vektor::default_rcin_timeout_ms,
+        Vektor::FieldSlot::RCIN_TIMEOUT_MS,
+    },
+    {
+        "component/rcin/0/parameter/protocol_mask",
+        rcin_component_path,
+        "protocol_mask",
+        "Receiver Protocols",
+        "bitmask",
+        Protocol::FieldKind::PARAMETER,
+        Protocol::PrimitiveType::I32,
+        parameter_live_flags,
+        0,
+        Vektor::rcin_protocol_mask_max,
+        1,
+        Vektor::FieldSlot::RCIN_PROTOCOLS,
+    },
+    {
         "component/vsp/1/input/x",
         vsp_component_path,
         "x",
@@ -286,7 +361,25 @@ const Vektor::FieldDescriptor field_descriptors[] = {
         0,
         Vektor::FieldSlot::VSP_SERVO_B,
     },
+    VEKTOR_RCIN_FIELD(1),
+    VEKTOR_RCIN_FIELD(2),
+    VEKTOR_RCIN_FIELD(3),
+    VEKTOR_RCIN_FIELD(4),
+    VEKTOR_RCIN_FIELD(5),
+    VEKTOR_RCIN_FIELD(6),
+    VEKTOR_RCIN_FIELD(7),
+    VEKTOR_RCIN_FIELD(8),
+    VEKTOR_RCIN_FIELD(9),
+    VEKTOR_RCIN_FIELD(10),
+    VEKTOR_RCIN_FIELD(11),
+    VEKTOR_RCIN_FIELD(12),
+    VEKTOR_RCIN_FIELD(13),
+    VEKTOR_RCIN_FIELD(14),
+    VEKTOR_RCIN_FIELD(15),
+    VEKTOR_RCIN_FIELD(16),
 };
+
+#undef VEKTOR_RCIN_FIELD
 
 static constexpr uint16_t component_descriptor_count =
     sizeof(component_descriptors) / sizeof(component_descriptors[0]);
@@ -450,6 +543,18 @@ bool write_typed_payload(Protocol::PayloadWriter &writer,
     default:
         return false;
     }
+}
+
+bool rcin_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
+{
+    const uint8_t value = uint8_t(slot);
+    const uint8_t first = uint8_t(FieldSlot::RCIN_CHANNEL_1);
+    const uint8_t last = uint8_t(FieldSlot::RCIN_CHANNEL_16);
+    if (value < first || value > last) {
+        return false;
+    }
+    channel_index = value - first;
+    return true;
 }
 
 } // namespace Vektor

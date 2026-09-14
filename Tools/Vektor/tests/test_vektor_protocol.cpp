@@ -1,6 +1,8 @@
 #include <AP_gtest.h>
 
+#include "Vektor_AssignmentMatrix.h"
 #include "Vektor_Protocol.h"
+#include "Vektor_Rcin.h"
 #include "Vektor_RequestCache.h"
 #include "Vektor_Runtime.h"
 #include "Vektor_Schema.h"
@@ -10,6 +12,7 @@
 
 #include <AP_HAL/AP_HAL.h>
 
+#include <math.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -169,8 +172,17 @@ bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
     Vektor::VspComponent vsp;
     vsp.reset();
+    Vektor::RcinSource rcin;
+    rcin.reset();
+    Vektor::AssignmentMatrix assignments;
     Vektor::SerialProtocol serial;
-    serial.init(&uart, capability, parameters, runtime, vsp);
+    serial.init(&uart,
+                capability,
+                parameters,
+                runtime,
+                vsp,
+                rcin,
+                assignments);
     if (!uart.is_initialized()) {
         return false;
     }
@@ -504,9 +516,9 @@ TEST(VektorProtocol, StableIdsMustBeUniqueAndNonzero)
 TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
 {
     const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
-    EXPECT_EQ(registry.component_count(), 3);
-    EXPECT_EQ(registry.field_count(), 16);
-    EXPECT_EQ(registry.parameter_count(), 3);
+    EXPECT_EQ(registry.component_count(), 4);
+    EXPECT_EQ(registry.field_count(), 35);
+    EXPECT_EQ(registry.parameter_count(), 6);
 
     EXPECT_EQ(registry.component_id(0),
               Vektor::Protocol::fnv1a32("component/system/0"));
@@ -534,6 +546,17 @@ TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
     EXPECT_EQ(servo_a->kind, Vektor::Protocol::FieldKind::OUTPUT);
     EXPECT_EQ(servo_a->type, Vektor::Protocol::PrimitiveType::FLOAT32);
     EXPECT_NE(servo_a->flags & Vektor::FIELD_ROUTABLE, 0U);
+
+    const uint32_t rcin_channel_id = Vektor::Protocol::fnv1a32(
+        "component/rcin/0/output/channel_1");
+    const Vektor::FieldDescriptor *rcin_channel =
+        registry.field_by_id(rcin_channel_id);
+    ASSERT_NE(rcin_channel, nullptr);
+    EXPECT_EQ(rcin_channel->slot, Vektor::FieldSlot::RCIN_CHANNEL_1);
+    EXPECT_EQ(rcin_channel->kind, Vektor::Protocol::FieldKind::OUTPUT);
+    EXPECT_EQ(rcin_channel->type,
+              Vektor::Protocol::PrimitiveType::FLOAT32);
+    EXPECT_NE(rcin_channel->flags & Vektor::FIELD_ROUTABLE, 0U);
 }
 
 TEST(VektorSchemaRegistry, SerializesCanonicalFieldRecord)
@@ -581,6 +604,104 @@ TEST(VektorSchemaRegistry, SerializesCanonicalFieldRecord)
                                              sizeof(record),
                                              record_len));
     EXPECT_EQ(record_len, 0);
+}
+
+TEST(VektorRcinSource, TracksFreshStaleAndFailsafeQuality)
+{
+    Vektor::RcinSource rcin;
+    rcin.reset(500000);
+    ASSERT_NE(rcin.channel(0), nullptr);
+    EXPECT_EQ(rcin.channel(0)->quality, Vektor::SignalQuality::INVALID);
+    EXPECT_EQ(rcin.channel(Vektor::RcinSource::max_channels), nullptr);
+
+    const float values[] = { 0.25f, -2.0f, NAN };
+    const uint16_t pwm[] = { 1600, 1000, 1500 };
+    rcin.ingest_normalized(values, pwm, 3, false, 100);
+    rcin.update(100);
+    EXPECT_TRUE(rcin.healthy());
+    EXPECT_FALSE(rcin.failsafe());
+    EXPECT_EQ(rcin.channel_count(), 3);
+    EXPECT_EQ(rcin.frame_count(), 1U);
+    EXPECT_EQ(rcin.last_frame_us(), 100U);
+    EXPECT_FLOAT_EQ(rcin.channel(0)->value, 0.25f);
+    EXPECT_EQ(rcin.channel(0)->quality, Vektor::SignalQuality::VALID);
+    EXPECT_FLOAT_EQ(rcin.channel(1)->value, -1.0f);
+    EXPECT_EQ(rcin.channel(1)->quality, Vektor::SignalQuality::VALID);
+    EXPECT_EQ(rcin.channel(2)->quality, Vektor::SignalQuality::INVALID);
+    EXPECT_EQ(rcin.raw_pwm(0), 1600);
+
+    rcin.update(500101);
+    EXPECT_FALSE(rcin.healthy());
+    EXPECT_EQ(rcin.channel(0)->quality, Vektor::SignalQuality::STALE);
+    EXPECT_EQ(rcin.channel(1)->quality, Vektor::SignalQuality::STALE);
+    EXPECT_EQ(rcin.channel(2)->quality, Vektor::SignalQuality::INVALID);
+
+    rcin.ingest_normalized(values, pwm, 2, true, 600000);
+    rcin.update(600000);
+    EXPECT_FALSE(rcin.healthy());
+    EXPECT_TRUE(rcin.failsafe());
+    EXPECT_EQ(rcin.channel(0)->quality, Vektor::SignalQuality::INVALID);
+}
+
+TEST(VektorRcinSource, NormalizesPwmAndRejectsInvalidPulses)
+{
+    Vektor::RcinSource rcin;
+    rcin.reset();
+    const uint16_t pwm[] = { 1000, 1500, 2000, 850 };
+    rcin.ingest_pwm(pwm, 4, false, 1000);
+    rcin.update(1000);
+
+    EXPECT_FLOAT_EQ(rcin.channel(0)->value, -1.0f);
+    EXPECT_FLOAT_EQ(rcin.channel(1)->value, 0.0f);
+    EXPECT_FLOAT_EQ(rcin.channel(2)->value, 1.0f);
+    EXPECT_EQ(rcin.channel(0)->quality, Vektor::SignalQuality::VALID);
+    EXPECT_EQ(rcin.channel(3)->quality, Vektor::SignalQuality::INVALID);
+}
+
+TEST(VektorAssignmentMatrix, ValidatesReplacesAndRemovesAssignments)
+{
+    const uint32_t channel_1 = Vektor::Protocol::fnv1a32(
+        "component/rcin/0/output/channel_1");
+    const uint32_t channel_2 = Vektor::Protocol::fnv1a32(
+        "component/rcin/0/output/channel_2");
+    const uint32_t vsp_x = Vektor::Protocol::fnv1a32(
+        "component/vsp/1/input/x");
+    const uint32_t servo_a = Vektor::Protocol::fnv1a32(
+        "component/vsp/1/output/servo_a");
+
+    Vektor::AssignmentMatrix assignments;
+    const Vektor::AssignmentMatrix::Entry *accepted = nullptr;
+    EXPECT_EQ(assignments.set(channel_1, vsp_x, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::OK);
+    ASSERT_NE(accepted, nullptr);
+    EXPECT_EQ(assignments.count(), 1);
+    EXPECT_NE(accepted->route_id, 0U);
+    EXPECT_EQ(accepted->route_id,
+              Vektor::AssignmentMatrix::make_route_id(channel_1, vsp_x));
+    EXPECT_EQ(accepted->route_id, 0x92359BB4U);
+    EXPECT_EQ(assignments.to_destination(vsp_x), accepted);
+
+    EXPECT_EQ(assignments.set(channel_2, vsp_x, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::OK);
+    ASSERT_NE(accepted, nullptr);
+    EXPECT_EQ(assignments.count(), 1);
+    EXPECT_EQ(accepted->source_output_id, channel_2);
+
+    EXPECT_EQ(assignments.set(vsp_x, vsp_x, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::SOURCE_NOT_ROUTABLE);
+    EXPECT_EQ(assignments.set(servo_a, vsp_x, 0, accepted),
+              Vektor::AssignmentMatrix::SetResult::CYCLE);
+    EXPECT_EQ(assignments.set(channel_1, vsp_x, 1, accepted),
+              Vektor::AssignmentMatrix::SetResult::UNSUPPORTED_FLAGS);
+
+    const Vektor::AssignmentMatrix::Entry *route =
+        assignments.to_destination(vsp_x);
+    ASSERT_NE(route, nullptr);
+    const uint32_t route_id = route->route_id;
+    EXPECT_TRUE(assignments.remove(route_id));
+    EXPECT_EQ(assignments.count(), 0);
+    EXPECT_EQ(assignments.by_id(route_id), nullptr);
+    EXPECT_FALSE(assignments.remove(route_id));
 }
 
 TEST(VektorRequestReplayCache, ReplaysIdenticalRequest)
@@ -789,6 +910,140 @@ TEST(VektorSerialProtocol, DescriptorHashesAreStableAndBoardSpecific)
     EXPECT_NE(f405_capability, h743_capability);
 }
 
+TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
+{
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    parameters.sys_protocol_baud.set(Vektor::protocol_baud);
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::VspComponent vsp;
+    vsp.reset();
+    Vektor::RcinSource rcin;
+    rcin.reset();
+    Vektor::AssignmentMatrix assignments;
+    Vektor::SerialProtocol serial;
+    serial.init(&uart,
+                Vektor::core_evo_h743_capability(),
+                parameters,
+                runtime,
+                vsp,
+                rcin,
+                assignments);
+    ASSERT_TRUE(uart.is_initialized());
+    uart.clear_tx();
+
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter hello(payload, sizeof(payload));
+    hello.u8(1);
+    hello.u8(1);
+    hello.u16(0);
+    hello.u32(0);
+    hello.u32(0xA55A);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::HELLO,
+                             1,
+                             hello.data(),
+                             hello.length()));
+    serial.update();
+
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type, Vektor::Protocol::MessageType::HELLO);
+
+    const uint32_t source_id = Vektor::Protocol::fnv1a32(
+        "component/rcin/0/output/channel_1");
+    const uint32_t destination_id = Vektor::Protocol::fnv1a32(
+        "component/vsp/1/input/x");
+
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter route_set(payload, sizeof(payload));
+    route_set.u32(source_id);
+    route_set.u32(destination_id);
+    route_set.u16(0);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::ROUTE_SET,
+                             2,
+                             route_set.data(),
+                             route_set.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type, Vektor::Protocol::MessageType::ROUTES);
+    EXPECT_EQ(response.flags, Vektor::Protocol::FLAG_RESPONSE);
+
+    Vektor::Protocol::PayloadReader set_response(response.payload,
+                                                 response.payload_len);
+    uint32_t next_cursor = 1;
+    uint16_t route_count = 0;
+    uint32_t route_id = 0;
+    uint32_t returned_source = 0;
+    uint32_t returned_destination = 0;
+    uint16_t returned_flags = UINT16_MAX;
+    ASSERT_TRUE(set_response.u32(next_cursor));
+    ASSERT_TRUE(set_response.u16(route_count));
+    ASSERT_TRUE(set_response.u32(route_id));
+    ASSERT_TRUE(set_response.u32(returned_source));
+    ASSERT_TRUE(set_response.u32(returned_destination));
+    ASSERT_TRUE(set_response.u16(returned_flags));
+    EXPECT_EQ(set_response.remaining(), 0);
+    EXPECT_EQ(next_cursor, 0U);
+    EXPECT_EQ(route_count, 1);
+    EXPECT_EQ(route_id,
+              Vektor::AssignmentMatrix::make_route_id(source_id,
+                                                      destination_id));
+    EXPECT_EQ(returned_source, source_id);
+    EXPECT_EQ(returned_destination, destination_id);
+    EXPECT_EQ(returned_flags, 0);
+
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter route_list(payload, sizeof(payload));
+    route_list.u32(0);
+    route_list.u16(1);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::ROUTE_LIST,
+                             3,
+                             route_list.data(),
+                             route_list.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type, Vektor::Protocol::MessageType::ROUTES);
+    Vektor::Protocol::PayloadReader list_response(response.payload,
+                                                  response.payload_len);
+    ASSERT_TRUE(list_response.u32(next_cursor));
+    ASSERT_TRUE(list_response.u16(route_count));
+    ASSERT_TRUE(list_response.u32(route_id));
+    ASSERT_TRUE(list_response.u32(returned_source));
+    ASSERT_TRUE(list_response.u32(returned_destination));
+    ASSERT_TRUE(list_response.u16(returned_flags));
+    EXPECT_EQ(list_response.remaining(), 0);
+    EXPECT_EQ(route_count, 1);
+
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter route_delete(payload, sizeof(payload));
+    route_delete.u32(route_id);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::ROUTE_DELETE,
+                             4,
+                             route_delete.data(),
+                             route_delete.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type, Vektor::Protocol::MessageType::ROUTES);
+    Vektor::Protocol::PayloadReader delete_response(response.payload,
+                                                    response.payload_len);
+    ASSERT_TRUE(delete_response.u32(next_cursor));
+    ASSERT_TRUE(delete_response.u16(route_count));
+    EXPECT_EQ(delete_response.remaining(), 0);
+    EXPECT_EQ(next_cursor, 0U);
+    EXPECT_EQ(route_count, 0);
+    EXPECT_EQ(assignments.count(), 0);
+}
+
 TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
 {
     static TestUart uart;
@@ -799,12 +1054,17 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
     Vektor::VspComponent vsp;
     vsp.reset();
+    Vektor::RcinSource rcin;
+    rcin.reset();
+    Vektor::AssignmentMatrix assignments;
     Vektor::SerialProtocol serial;
     serial.init(&uart,
                 Vektor::core_evo_h743_capability(),
                 parameters,
                 runtime,
-                vsp);
+                vsp,
+                rcin,
+                assignments);
     ASSERT_TRUE(uart.is_initialized());
     uart.clear_tx();
 
@@ -872,6 +1132,7 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     EXPECT_EQ(max_realtime_hz, Vektor::max_realtime_rate_hz);
     EXPECT_EQ(control_update_hz, Vektor::default_service_rate_hz);
     EXPECT_EQ(attitude_update_hz, 0);
+    EXPECT_NE(capability_flags & (1ULL << 11), 0U);
     EXPECT_NE(capability_flags & (1ULL << 13), 0U);
     EXPECT_NE(schema_hash, 0U);
     EXPECT_NE(capability_hash, 0U);

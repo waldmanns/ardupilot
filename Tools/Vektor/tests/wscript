@@ -12,7 +12,9 @@ def build(bld):
         source=[
             'test_vektor_protocol.cpp',
             '../Vektor_Protocol.cpp',
+            '../Vektor_AssignmentMatrix.cpp',
             '../Vektor_Capability.cpp',
+            '../Vektor_Rcin.cpp',
             '../Vektor_RequestCache.cpp',
             '../Vektor_Runtime.cpp',
             '../Vektor_Schema.cpp',

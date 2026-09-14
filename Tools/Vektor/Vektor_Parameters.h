@@ -15,12 +15,18 @@ public:
         k_param_sys_options,
         k_param_sys_desc_page,
         k_param_sys_protocol_baud,
+        k_param_rcin_port,
+        k_param_rcin_timeout_ms,
+        k_param_rc_channels,
+        k_param_assignments,
     };
 
     AP_Int16 format_version;
     AP_Int32 sys_options;
     AP_Int16 sys_desc_page;
     AP_Int32 sys_protocol_baud;
+    AP_Int16 rcin_port;
+    AP_Int16 rcin_timeout_ms;
 };
 
 } // namespace Vektor

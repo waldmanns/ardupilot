@@ -9,6 +9,9 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/AP_HAL_Boards.h>
+#include <AP_RCProtocol/AP_RCProtocol.h>
+
+#include <math.h>
 
 const AP_HAL::HAL &hal = AP_HAL::get_HAL();
 
@@ -21,22 +24,118 @@ void App::setup()
     load_parameters();
     _active_capability = &default_capability_for_build();
     _runtime.init(default_service_rate_hz, AP_HAL::micros64());
+    assignments.load_persistent();
+    _rcin.reset(uint32_t(g.rcin_timeout_ms.get()) * 1000U);
+    setup_rcin_uart();
     _vsp.reset();
     _serial_protocol.init(hal.serial(0),
                           *_active_capability,
                           g,
                           _runtime,
-                          _vsp);
+                          _vsp,
+                          _rcin,
+                          assignments);
 }
 
 void App::loop()
 {
     const uint64_t now_us = AP_HAL::micros64();
     _runtime.begin_loop(now_us);
+    update_rcin(now_us);
+    apply_assignments();
     _vsp.update(now_us);
     _serial_protocol.update();
     _runtime.end_loop(AP_HAL::micros64());
     hal.scheduler->delay(1000U / default_service_rate_hz);
+}
+
+void App::setup_rcin_uart()
+{
+#if AP_RCPROTOCOL_ENABLED
+    const int16_t port = g.rcin_port.get();
+    if (port <= 0 || port > rcin_port_max || AP::RC().has_uart()) {
+        return;
+    }
+    AP_HAL::UARTDriver *uart = hal.serial(uint8_t(port));
+    if (uart != nullptr) {
+        AP::RC().add_uart(uart);
+    }
+#endif
+}
+
+void App::update_rcin(uint64_t now_us)
+{
+    int16_t timeout_ms = g.rcin_timeout_ms.get();
+    if (timeout_ms < rcin_timeout_ms_min ||
+        timeout_ms > rcin_timeout_ms_max) {
+        timeout_ms = default_rcin_timeout_ms;
+    }
+    _rcin.set_timeout_us(uint32_t(timeout_ms) * 1000U);
+
+#if AP_RCPROTOCOL_ENABLED
+    AP::RC().update();
+#endif
+
+    if (hal.rcin != nullptr && hal.rcin->new_input()) {
+        uint16_t pwm[RcinSource::max_channels] {};
+        float normalized[RcinSource::max_channels] {};
+        const uint8_t available = hal.rcin->num_channels();
+        const uint8_t count = available > RcinSource::max_channels ?
+                              RcinSource::max_channels : available;
+        if (count != 0) {
+            hal.rcin->read(pwm, count);
+        }
+        for (uint8_t i = 0; i < count; i++) {
+            RC_Channel *channel = rc_channels.channel(i);
+            if (channel == nullptr ||
+                pwm[i] < RC_INPUT_MIN_PULSEWIDTH ||
+                pwm[i] > RC_INPUT_MAX_PULSEWIDTH) {
+                normalized[i] = NAN;
+                continue;
+            }
+            channel->set_radio_in(pwm[i]);
+            normalized[i] = channel->norm_input_dz();
+        }
+        bool failsafe = false;
+#if AP_RCPROTOCOL_ENABLED
+        failsafe = AP::RC().failsafe_active();
+#endif
+        _rcin.ingest_normalized(normalized,
+                                pwm,
+                                count,
+                                failsafe,
+                                now_us);
+    }
+    _rcin.update(now_us);
+}
+
+SignalSample<float> App::assigned_float(uint32_t destination_id) const
+{
+    const AssignmentMatrix::Entry *route =
+        assignments.to_destination(destination_id);
+    if (route == nullptr) {
+        return {};
+    }
+
+    const FieldDescriptor *source =
+        schema_registry().field_by_id(route->source_output_id);
+    uint8_t channel_index = 0;
+    if (source == nullptr ||
+        !rcin_channel_for_slot(source->slot, channel_index)) {
+        return {};
+    }
+
+    const SignalSample<float> *sample = _rcin.channel(channel_index);
+    return sample == nullptr ? SignalSample<float> {} : *sample;
+}
+
+void App::apply_assignments()
+{
+    const uint32_t x_id =
+        Protocol::fnv1a32("component/vsp/1/input/x");
+    const uint32_t y_id =
+        Protocol::fnv1a32("component/vsp/1/input/y");
+    _vsp.set_inputs(assigned_float(x_id), assigned_float(y_id));
 }
 
 } // namespace Vektor
