@@ -231,8 +231,10 @@ void SerialProtocol::handle_describe(const Protocol::FrameView &frame)
                                         cursor,
                                         max_records);
         return;
-    case Protocol::DescriptorDomain::STORAGE_AREA:
     case Protocol::DescriptorDomain::ENUM_TABLE:
+        send_enum_descriptions(frame.sequence, domain, cursor, max_records);
+        return;
+    case Protocol::DescriptorDomain::STORAGE_AREA:
     case Protocol::DescriptorDomain::EVENT_TYPE:
     case Protocol::DescriptorDomain::ACTION_SCHEMA:
         send_empty_description(frame.sequence, domain);

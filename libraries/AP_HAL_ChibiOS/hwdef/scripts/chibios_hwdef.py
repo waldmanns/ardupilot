@@ -1695,6 +1695,37 @@ INCLUDE common.ld
             serial_list += ['EMPTY']
         f.write('\n// UART configuration\n')
 
+        # Preserve SERIAL_ORDER identity and direction information for
+        # applications which allocate the logical HAL serial endpoints
+        # themselves.  Array position is the hal.serial() index.  This keeps
+        # those applications from maintaining a second board-specific UART
+        # map alongside hwdef.dat.
+        serial_endpoint_names = []
+        serial_endpoint_flags = []
+        for serial in serial_list:
+            serial_endpoint_names.append('"%s"' % serial)
+            hidden = (hide_iomcu_uart and
+                      self.config['IOMCU_UART'][0] == serial)
+            if serial == 'EMPTY' or hidden:
+                serial_endpoint_flags.append('0')
+                continue
+            # Bits 0/1 are externally usable RX/TX, bit 2 identifies USB,
+            # and bit 3 marks a usable logical endpoint.
+            flags = 1 << 3
+            if serial.startswith('OTG'):
+                flags |= (1 << 0) | (1 << 1) | (1 << 2)
+            else:
+                if serial + '_RX' in self.bylabel:
+                    flags |= 1 << 0
+                if serial + '_TX' in self.bylabel:
+                    flags |= 1 << 1
+            serial_endpoint_flags.append(str(flags))
+        f.write('#define HAL_SERIAL_ENDPOINT_COUNT %u\n' % len(serial_list))
+        f.write('#define HAL_SERIAL_ENDPOINT_NAMES %s\n' %
+                ', '.join(serial_endpoint_names))
+        f.write('#define HAL_SERIAL_ENDPOINT_FLAGS %s\n' %
+                ', '.join(serial_endpoint_flags))
+
         # write out which serial ports we actually have
         nports = 0
         for idx, serial in enumerate(serial_list):

@@ -21,6 +21,7 @@ def build(bld):
             '../Vektor_Runtime.cpp',
             '../Vektor_Schema.cpp',
             '../Vektor_SerialProtocol.cpp',
+            '../Vektor_SerialRoles.cpp',
             '../Vektor_Subscription.cpp',
             '../Vektor_Vsp.cpp',
         ],

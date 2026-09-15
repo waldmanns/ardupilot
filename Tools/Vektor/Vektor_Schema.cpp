@@ -188,7 +188,7 @@ bool SchemaRegistry::build_field_record(uint16_t index,
     }
 
     Protocol::PayloadWriter writer(record, record_capacity);
-    writer.u8(1); // record_version
+    writer.u8(field->type == Protocol::PrimitiveType::ENUM ? 2 : 1);
     writer.u32(field_id(index));
     writer.u32(Protocol::fnv1a32(field->owner_component_path));
     writer.u8(uint8_t(field->kind));
@@ -214,6 +214,13 @@ bool SchemaRegistry::build_field_record(uint16_t index,
         record_len = 0;
         return false;
     }
+    if (field->type == Protocol::PrimitiveType::ENUM) {
+        const char *enum_path = enum_table_path_for_slot(field->slot);
+        if (enum_path == nullptr || !writer.u32(Protocol::fnv1a32(enum_path))) {
+            record_len = 0;
+            return false;
+        }
+    }
     record_len = writer.length();
     return writer.ok();
 }
@@ -236,12 +243,16 @@ bool write_typed_payload(Protocol::PayloadWriter &writer,
     switch (type) {
     case Protocol::PrimitiveType::BOOL:
         return writer.u8(raw == 0 ? 0 : 1);
+    case Protocol::PrimitiveType::U8:
+    case Protocol::PrimitiveType::I8:
+        return writer.u8(uint8_t(raw));
     case Protocol::PrimitiveType::U16:
     case Protocol::PrimitiveType::I16:
         return writer.u16(uint16_t(raw));
     case Protocol::PrimitiveType::U32:
     case Protocol::PrimitiveType::I32:
     case Protocol::PrimitiveType::FLOAT32:
+    case Protocol::PrimitiveType::ENUM:
         return writer.u32(raw);
     default:
         return false;
@@ -330,6 +341,68 @@ bool pwmout_pulse_channel_for_slot(FieldSlot slot, uint8_t &channel_index)
     }
     channel_index = value - first;
     return true;
+}
+
+namespace {
+
+bool serial_field_for_slot(Vektor::FieldSlot slot,
+                           uint8_t field_offset,
+                           uint8_t &serial_index)
+{
+    const uint8_t value = uint8_t(slot);
+    const uint8_t first = uint8_t(Vektor::FieldSlot::SERIAL_0_ROLE);
+    const uint8_t last = uint8_t(
+        Vektor::FieldSlot::SERIAL_9_REBOOT_REQUIRED);
+    if (value < first || value > last ||
+        ((value - first) % 5U) != field_offset) {
+        return false;
+    }
+    serial_index = (value - first) / 5U;
+    return true;
+}
+
+} // namespace
+
+bool serial_role_for_slot(FieldSlot slot, uint8_t &serial_index)
+{
+    return serial_field_for_slot(slot, 0, serial_index);
+}
+
+bool serial_baud_for_slot(FieldSlot slot, uint8_t &serial_index)
+{
+    return serial_field_for_slot(slot, 1, serial_index);
+}
+
+bool serial_active_role_for_slot(FieldSlot slot, uint8_t &serial_index)
+{
+    return serial_field_for_slot(slot, 2, serial_index);
+}
+
+bool serial_status_for_slot(FieldSlot slot, uint8_t &serial_index)
+{
+    return serial_field_for_slot(slot, 3, serial_index);
+}
+
+bool serial_reboot_required_for_slot(FieldSlot slot, uint8_t &serial_index)
+{
+    return serial_field_for_slot(slot, 4, serial_index);
+}
+
+const char *enum_table_path_for_slot(FieldSlot slot)
+{
+    uint8_t serial_index = 0;
+    if (serial_role_for_slot(slot, serial_index) ||
+        serial_active_role_for_slot(slot, serial_index)) {
+        return "enum/serial_role";
+    }
+    if (serial_status_for_slot(slot, serial_index) ||
+        slot == FieldSlot::USB_STATUS) {
+        return "enum/serial_endpoint_status";
+    }
+    if (slot == FieldSlot::USB_MODE || slot == FieldSlot::USB_ACTIVE_MODE) {
+        return "enum/usb_mode";
+    }
+    return nullptr;
 }
 
 } // namespace Vektor

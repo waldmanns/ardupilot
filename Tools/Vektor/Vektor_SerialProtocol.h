@@ -10,6 +10,7 @@
 #include "Vektor_RequestCache.h"
 #include "Vektor_Rcin.h"
 #include "Vektor_Runtime.h"
+#include "Vektor_SerialRoles.h"
 #include "Vektor_Subscription.h"
 #include "Vektor_Vsp.h"
 
@@ -28,7 +29,9 @@ public:
               const RcinSource &rcin,
               PwmInput &pwm_input,
               PwmOutput &pwm_output,
-              AssignmentMatrix &assignments);
+              AssignmentMatrix &assignments,
+              SerialRoleManager *serial_roles = nullptr,
+              uint32_t transport_baud = protocol_baud);
     void update();
 
 private:
@@ -91,6 +94,10 @@ private:
                                          uint8_t domain,
                                          uint32_t cursor,
                                          uint16_t max_records);
+    bool send_enum_descriptions(uint16_t sequence,
+                                uint8_t domain,
+                                uint32_t cursor,
+                                uint16_t max_records);
     bool send_empty_description(uint16_t sequence, uint8_t domain);
     bool send_description_page(uint16_t sequence,
                                uint8_t domain,
@@ -126,6 +133,10 @@ private:
                                     uint8_t *record,
                                     uint16_t record_capacity,
                                     uint16_t &record_len);
+    bool build_enum_record(uint16_t index,
+                           uint8_t *record,
+                           uint16_t record_capacity,
+                           uint16_t &record_len);
     bool send_value(uint16_t sequence, uint32_t field_id);
     bool send_values(uint16_t sequence,
                      const uint32_t *field_ids,
@@ -175,6 +186,7 @@ private:
     uint16_t endpoint_count() const;
     uint16_t timer_group_count() const;
     uint16_t runtime_limit_count() const;
+    uint16_t enum_count() const;
     bool field_available(const FieldDescriptor &field) const;
     const FieldDescriptor *available_field_by_index(uint16_t index,
                                                     uint16_t *schema_index = nullptr) const;
@@ -189,6 +201,7 @@ private:
     PwmInput *_pwm_input = nullptr;
     PwmOutput *_pwm_output = nullptr;
     AssignmentMatrix *_assignments = nullptr;
+    SerialRoleManager *_serial_roles = nullptr;
     Protocol::Parser _parser;
     bool _ready = false;
     bool _hello_seen = false;

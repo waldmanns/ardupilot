@@ -24,6 +24,7 @@ void App::setup()
 {
     load_parameters();
     _active_capability = &default_capability_for_build();
+    _serial_roles.init(*_active_capability, g.serial_roles);
     _runtime.init(default_service_rate_hz, AP_HAL::micros64());
     setup_attitude();
     _rcin.reset(uint32_t(g.rcin_timeout_ms.get()) * 1000U);
@@ -38,21 +39,45 @@ void App::setup()
                                          pwm_input.reserved_output_mask());
     assignments.load_persistent();
     _vsp.reset();
-    AP_HAL::UARTDriver *protocol_uart = nullptr;
-    if (_active_capability->protocol_serial_index >= 0) {
-        protocol_uart = hal.serial(
-            uint8_t(_active_capability->protocol_serial_index));
+    const int8_t usb_index = recovery_usb_serial_index(*_active_capability);
+    AP_HAL::UARTDriver *usb = usb_index < 0 ? nullptr :
+        hal.serial(uint8_t(usb_index));
+    _serial_protocol[0].init(usb,
+                             *_active_capability,
+                             g,
+                             _runtime,
+                             _attitude,
+                             _vsp,
+                             _rcin,
+                             pwm_input,
+                             pwm_output,
+                             assignments,
+                             &_serial_roles,
+                             protocol_baud);
+
+    for (uint8_t i = 0; i < _active_capability->serial_endpoint_count; i++) {
+        if (_serial_roles.active_role(i) != SerialRole::VEKTOR) {
+            continue;
+        }
+        AP_HAL::UARTDriver *uart = hal.serial(i);
+        if (uart == nullptr) {
+            _serial_roles.mark_endpoint_unavailable(i);
+            break;
+        }
+        _serial_protocol[1].init(uart,
+                                 *_active_capability,
+                                 g,
+                                 _runtime,
+                                 _attitude,
+                                 _vsp,
+                                 _rcin,
+                                 pwm_input,
+                                 pwm_output,
+                                 assignments,
+                                 &_serial_roles,
+                                 _serial_roles.active_baud(i));
+        break;
     }
-    _serial_protocol.init(protocol_uart,
-                          *_active_capability,
-                          g,
-                          _runtime,
-                          _attitude,
-                          _vsp,
-                          _rcin,
-                          pwm_input,
-                          pwm_output,
-                          assignments);
 }
 
 void App::loop()
@@ -66,7 +91,8 @@ void App::loop()
     apply_vsp_inputs();
     _vsp.update(now_us);
     apply_pwm_outputs();
-    _serial_protocol.update();
+    _serial_protocol[0].update();
+    _serial_protocol[1].update();
     const uint64_t completed_us = AP_HAL::micros64();
     _runtime.end_loop(completed_us);
     uint32_t delay_us = _runtime.delay_until_next_loop_us(completed_us);
@@ -139,15 +165,19 @@ void App::update_attitude(uint64_t now_us)
 void App::setup_rcin_uart()
 {
 #if AP_RCPROTOCOL_ENABLED
-    const int16_t port = g.rcin_port.get();
-    if (port <= 0 || port > rcin_port_max ||
-        port == _active_capability->protocol_serial_index ||
-        AP::RC().has_uart()) {
-        return;
-    }
-    AP_HAL::UARTDriver *uart = hal.serial(uint8_t(port));
-    if (uart != nullptr) {
+    for (uint8_t port = 0;
+         port < _active_capability->serial_endpoint_count;
+         port++) {
+        if (_serial_roles.active_role(port) != SerialRole::RCIN) {
+            continue;
+        }
+        AP_HAL::UARTDriver *uart = hal.serial(port);
+        if (uart == nullptr || AP::RC().has_uart()) {
+            _serial_roles.mark_endpoint_unavailable(port);
+            return;
+        }
         AP::RC().add_uart(uart);
+        return;
     }
 #endif
 }

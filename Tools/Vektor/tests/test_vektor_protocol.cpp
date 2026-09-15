@@ -11,6 +11,7 @@
 #include "Vektor_Schema.h"
 #include "Vektor_SerialCatalog.h"
 #include "Vektor_SerialProtocol.h"
+#include "Vektor_SerialRoles.h"
 #include "Vektor_Subscription.h"
 #include "Vektor_Vsp.h"
 
@@ -50,10 +51,14 @@ constexpr uint8_t h743_flex_modes[] = {
     Vektor::FLEX_PWM_INPUT,
 };
 
-constexpr uint8_t h743_uart_flags[] = { 3, 3, 3, 3 };
-constexpr uint8_t f405_uart_flags[] = { 3, 3, 3 };
-constexpr uint8_t h743_uart_serial_indices[] = { 1, 2, 3, 4 };
-constexpr uint8_t f405_uart_serial_indices[] = { 1, 3, 4 };
+constexpr const char *h743_serial_names[] = {
+    "OTG1", "USART1", "USART2", "USART3", "UART4"
+};
+constexpr uint8_t h743_serial_flags[] = { 15, 11, 11, 11, 11 };
+constexpr const char *f405_serial_names[] = {
+    "OTG1", "USART1", "EMPTY", "USART3", "USART6"
+};
+constexpr uint8_t f405_serial_flags[] = { 15, 11, 0, 11, 11 };
 
 constexpr Vektor::BoardCapability h743_test_capability {
     "Vektor Core Evo H743",
@@ -62,8 +67,7 @@ constexpr Vektor::BoardCapability h743_test_capability {
     0,
     12,
     6,
-    1,
-    4,
+    5,
     2,
     1,
     0,
@@ -72,7 +76,6 @@ constexpr Vektor::BoardCapability h743_test_capability {
     Vektor::CAP_NATIVE_USB |
         Vektor::CAP_PWM_OUTPUTS |
         Vektor::CAP_FLEX_TIMER_CHANNELS |
-        Vektor::CAP_DEDICATED_RECEIVER_ROW |
         Vektor::CAP_EXTERNAL_UARTS |
         Vektor::CAP_CLASSIC_CAN |
         Vektor::CAP_ADC_OBSERVABLES |
@@ -85,11 +88,8 @@ constexpr Vektor::BoardCapability h743_test_capability {
     -1,
     6,
     h743_flex_modes,
-    h743_uart_flags,
-    h743_uart_serial_indices,
-    Vektor::ProtocolTransport::USB,
-    -1,
-    0,
+    h743_serial_names,
+    h743_serial_flags,
 };
 
 constexpr Vektor::BoardCapability f405_test_capability {
@@ -99,8 +99,7 @@ constexpr Vektor::BoardCapability f405_test_capability {
     124,
     6,
     0,
-    0,
-    3,
+    5,
     0,
     3,
     2,
@@ -121,11 +120,8 @@ constexpr Vektor::BoardCapability f405_test_capability {
     0,
     6,
     nullptr,
-    f405_uart_flags,
-    f405_uart_serial_indices,
-    Vektor::ProtocolTransport::USB,
-    -1,
-    0,
+    f405_serial_names,
+    f405_serial_flags,
 };
 
 template<typename ReferenceType, size_t count>
@@ -320,7 +316,6 @@ bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
     static TestUart uart;
     uart.reset();
     Vektor::Parameters parameters;
-    parameters.sys_protocol_baud.set(Vektor::protocol_baud);
     Vektor::RuntimeState runtime;
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
     Vektor::AttitudeSource attitude;
@@ -707,12 +702,10 @@ TEST(VektorCapability, RejectsDescriptorModelsThatOverpromiseHardware)
     invalid.pwm_outputs--;
     EXPECT_FALSE(Vektor::capability_valid(invalid));
     invalid = h743_test_capability;
-    invalid.protocol_serial_index = -1;
+    invalid.serial_endpoint_names = nullptr;
     EXPECT_FALSE(Vektor::capability_valid(invalid));
     invalid = h743_test_capability;
-    invalid.protocol_transport = Vektor::ProtocolTransport::UART;
-    invalid.protocol_uart_endpoint = 0;
-    invalid.protocol_serial_index = 2;
+    invalid.flags &= ~Vektor::CAP_NATIVE_USB;
     EXPECT_FALSE(Vektor::capability_valid(invalid));
     invalid = h743_test_capability;
     invalid.pwm_timer_groups = f405_pwm_timer_groups;
@@ -720,12 +713,136 @@ TEST(VektorCapability, RejectsDescriptorModelsThatOverpromiseHardware)
     EXPECT_FALSE(Vektor::capability_valid(invalid));
 }
 
+TEST(VektorSerialRoles, ValidatesUniqueOwnersAndPhysicalCompatibility)
+{
+    int16_t roles[Vektor::SerialRoleParameters::max_endpoints] {};
+    Vektor::SerialEndpointStatus
+        statuses[Vektor::SerialRoleParameters::max_endpoints] {};
+
+    roles[1] = int16_t(Vektor::SerialRole::RCIN);
+    roles[3] = int16_t(Vektor::SerialRole::VEKTOR);
+    EXPECT_TRUE(Vektor::validate_serial_roles(f405_test_capability,
+                                               roles,
+                                               statuses));
+    EXPECT_EQ(statuses[1], Vektor::SerialEndpointStatus::OK);
+    EXPECT_EQ(statuses[3], Vektor::SerialEndpointStatus::OK);
+
+    roles[4] = int16_t(Vektor::SerialRole::RCIN);
+    EXPECT_FALSE(Vektor::validate_serial_roles(f405_test_capability,
+                                                roles,
+                                                statuses));
+    EXPECT_EQ(statuses[1], Vektor::SerialEndpointStatus::DUPLICATE_RCIN);
+    EXPECT_EQ(statuses[4], Vektor::SerialEndpointStatus::DUPLICATE_RCIN);
+
+    roles[4] = int16_t(Vektor::SerialRole::VEKTOR);
+    EXPECT_FALSE(Vektor::validate_serial_roles(f405_test_capability,
+                                                roles,
+                                                statuses));
+    EXPECT_EQ(statuses[3], Vektor::SerialEndpointStatus::DUPLICATE_VEKTOR);
+    EXPECT_EQ(statuses[4], Vektor::SerialEndpointStatus::DUPLICATE_VEKTOR);
+}
+
+TEST(VektorSerialRoles, RejectsUnsupportedAndUnknownRoles)
+{
+    constexpr uint8_t constrained_flags[] = { 15, 9, 10, 0, 11 };
+    Vektor::BoardCapability capability = f405_test_capability;
+    capability.serial_endpoint_flags = constrained_flags;
+    ASSERT_TRUE(Vektor::capability_valid(capability));
+
+    int16_t roles[Vektor::SerialRoleParameters::max_endpoints] {};
+    Vektor::SerialEndpointStatus
+        statuses[Vektor::SerialRoleParameters::max_endpoints] {};
+    roles[1] = int16_t(Vektor::SerialRole::RCIN);
+    EXPECT_TRUE(Vektor::validate_serial_roles(capability, roles, statuses));
+
+    roles[1] = int16_t(Vektor::SerialRole::VEKTOR);
+    EXPECT_FALSE(Vektor::validate_serial_roles(capability, roles, statuses));
+    EXPECT_EQ(statuses[1], Vektor::SerialEndpointStatus::UNSUPPORTED_ROLE);
+
+    roles[1] = 99;
+    EXPECT_FALSE(Vektor::validate_serial_roles(capability, roles, statuses));
+    EXPECT_EQ(statuses[1], Vektor::SerialEndpointStatus::INVALID_ROLE);
+
+    roles[1] = int16_t(Vektor::SerialRole::NONE);
+    roles[2] = int16_t(Vektor::SerialRole::RCIN);
+    EXPECT_FALSE(Vektor::validate_serial_roles(capability, roles, statuses));
+    EXPECT_EQ(statuses[2], Vektor::SerialEndpointStatus::UNSUPPORTED_ROLE);
+}
+
+TEST(VektorSerialRoles, SeparatesConfiguredAndActiveStateUntilReboot)
+{
+    Vektor::SerialRoleParameters parameters;
+    parameters.role[1].set(int16_t(Vektor::SerialRole::RCIN));
+    parameters.role[3].set(int16_t(Vektor::SerialRole::VEKTOR));
+    parameters.baud[3].set(230400);
+
+    Vektor::SerialRoleManager roles;
+    roles.init(f405_test_capability, parameters);
+    ASSERT_TRUE(roles.boot_configuration_valid());
+    EXPECT_EQ(roles.configured_role(1), Vektor::SerialRole::RCIN);
+    EXPECT_EQ(roles.active_role(1), Vektor::SerialRole::RCIN);
+    EXPECT_EQ(roles.active_role(3), Vektor::SerialRole::VEKTOR);
+    EXPECT_EQ(roles.active_baud(3), 230400U);
+    EXPECT_FALSE(roles.reboot_required(1));
+
+    parameters.role[1].set(int16_t(Vektor::SerialRole::MAVLINK1));
+    parameters.baud[3].set(460800);
+    EXPECT_EQ(roles.configured_role(1), Vektor::SerialRole::MAVLINK1);
+    EXPECT_EQ(roles.active_role(1), Vektor::SerialRole::RCIN);
+    EXPECT_EQ(roles.active_baud(3), 230400U);
+    EXPECT_EQ(roles.status(1),
+              Vektor::SerialEndpointStatus::RESERVED_NOT_IMPLEMENTED);
+    EXPECT_TRUE(roles.reboot_required(1));
+    EXPECT_TRUE(roles.reboot_required(3));
+}
+
+TEST(VektorSerialRoles, KeepsReservedMavlinkRolesInactive)
+{
+    Vektor::SerialRoleParameters parameters;
+    parameters.role[1].set(int16_t(Vektor::SerialRole::MAVLINK1));
+    parameters.role[3].set(int16_t(Vektor::SerialRole::MAVLINK2));
+    parameters.usb_mode.set(int16_t(Vektor::UsbMode::VEKTOR_MAVLINK));
+
+    Vektor::SerialRoleManager roles;
+    roles.init(f405_test_capability, parameters);
+    ASSERT_TRUE(roles.boot_configuration_valid());
+    EXPECT_EQ(roles.configured_role(1), Vektor::SerialRole::MAVLINK1);
+    EXPECT_EQ(roles.configured_role(3), Vektor::SerialRole::MAVLINK2);
+    EXPECT_EQ(roles.active_role(1), Vektor::SerialRole::NONE);
+    EXPECT_EQ(roles.active_role(3), Vektor::SerialRole::NONE);
+    EXPECT_EQ(roles.status(1),
+              Vektor::SerialEndpointStatus::RESERVED_NOT_IMPLEMENTED);
+    EXPECT_EQ(roles.status(3),
+              Vektor::SerialEndpointStatus::RESERVED_NOT_IMPLEMENTED);
+    EXPECT_EQ(roles.active_usb_mode(), Vektor::UsbMode::VEKTOR_ONLY);
+    EXPECT_EQ(roles.usb_status(),
+              Vektor::SerialEndpointStatus::RESERVED_NOT_IMPLEMENTED);
+    EXPECT_FALSE(roles.usb_reboot_required());
+}
+
+TEST(VektorSerialRoles, InvalidBootConfigurationActivatesNoUartOwner)
+{
+    Vektor::SerialRoleParameters parameters;
+    parameters.role[1].set(int16_t(Vektor::SerialRole::VEKTOR));
+    parameters.role[3].set(int16_t(Vektor::SerialRole::VEKTOR));
+
+    Vektor::SerialRoleManager roles;
+    roles.init(f405_test_capability, parameters);
+    EXPECT_FALSE(roles.boot_configuration_valid());
+    EXPECT_EQ(roles.active_role(1), Vektor::SerialRole::NONE);
+    EXPECT_EQ(roles.active_role(3), Vektor::SerialRole::NONE);
+    EXPECT_EQ(roles.status(1),
+              Vektor::SerialEndpointStatus::DUPLICATE_VEKTOR);
+    EXPECT_EQ(roles.status(3),
+              Vektor::SerialEndpointStatus::DUPLICATE_VEKTOR);
+}
+
 TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
 {
     const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
     EXPECT_EQ(registry.component_count(), 7);
-    EXPECT_EQ(registry.field_count(), 115);
-    EXPECT_EQ(registry.parameter_count(), 22);
+    EXPECT_EQ(registry.field_count(), 167);
+    EXPECT_EQ(registry.parameter_count(), 41);
 
     EXPECT_EQ(registry.component_id(0),
               Vektor::Protocol::fnv1a32("component/system/0"));
@@ -1463,15 +1580,128 @@ TEST(VektorSerialProtocol, EndpointDescriptorCarriesDirectionAndTransportFlags)
     ASSERT_TRUE(endpoint.u64(flags));
     ASSERT_TRUE(skip_str8(endpoint));
     ASSERT_TRUE(skip_str8(endpoint));
+    uint8_t serial_index = UINT8_MAX;
+    uint32_t enum_id = 0;
+    uint32_t supported = 0;
+    uint32_t configured_id = 0;
+    uint32_t active_id = 0;
+    uint32_t baud_id = UINT32_MAX;
+    uint32_t status_id = 0;
+    uint32_t reboot_id = 0;
+    ASSERT_TRUE(endpoint.u8(serial_index));
+    ASSERT_TRUE(skip_str8(endpoint));
+    ASSERT_TRUE(endpoint.u32(enum_id));
+    ASSERT_TRUE(endpoint.u32(supported));
+    ASSERT_TRUE(endpoint.u32(configured_id));
+    ASSERT_TRUE(endpoint.u32(active_id));
+    ASSERT_TRUE(endpoint.u32(baud_id));
+    ASSERT_TRUE(endpoint.u32(status_id));
+    ASSERT_TRUE(endpoint.u32(reboot_id));
     EXPECT_EQ(endpoint.remaining(), 0);
-    EXPECT_EQ(version, 1);
-    EXPECT_EQ(endpoint_id, Vektor::Protocol::fnv1a32("hw/usb/0"));
+    EXPECT_EQ(version, 2);
+    EXPECT_EQ(endpoint_id, Vektor::Protocol::fnv1a32("hw/serial/0"));
     EXPECT_EQ(kind, uint8_t(Vektor::Protocol::EndpointKind::USB));
     EXPECT_EQ(parent_id, 0U);
     EXPECT_EQ(flags,
               uint64_t(Vektor::ENDPOINT_INPUT |
                        Vektor::ENDPOINT_OUTPUT |
                        Vektor::ENDPOINT_VEKTOR_TRANSPORT));
+    EXPECT_EQ(serial_index, 0);
+    EXPECT_EQ(enum_id, Vektor::Protocol::fnv1a32("enum/usb_mode"));
+    EXPECT_EQ(supported, 3U);
+    EXPECT_EQ(configured_id, Vektor::SerialCatalog::Parameter::USB_MODE.id);
+    EXPECT_EQ(active_id,
+              Vektor::SerialCatalog::Observable::USB_ACTIVE_MODE.id);
+    EXPECT_EQ(baud_id, 0U);
+    EXPECT_EQ(status_id, Vektor::SerialCatalog::Observable::USB_STATUS.id);
+    EXPECT_EQ(reboot_id,
+              Vektor::SerialCatalog::Observable::USB_REBOOT_REQUIRED.id);
+    EXPECT_NE(next_cursor, 0U);
+}
+
+TEST(VektorSerialProtocol, DescribesReservedSerialRoleEnumValues)
+{
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    Vektor::SerialRoleManager serial_roles;
+    serial_roles.init(f405_test_capability, parameters.serial_roles);
+    ASSERT_TRUE(serial_roles.boot_configuration_valid());
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    Vektor::VspComponent vsp;
+    Vektor::RcinSource rcin;
+    Vektor::PwmInput pwm_input;
+    Vektor::PwmOutput pwm_output;
+    Vektor::AssignmentMatrix assignments;
+    Vektor::SerialProtocol serial;
+    serial.init(&uart,
+                f405_test_capability,
+                parameters,
+                runtime,
+                attitude,
+                vsp,
+                rcin,
+                pwm_input,
+                pwm_output,
+                assignments,
+                &serial_roles);
+    ASSERT_TRUE(start_session(serial, uart, 1, 0x4D41564C));
+
+    uart.clear_tx();
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter describe(payload, sizeof(payload));
+    describe.u8(uint8_t(Vektor::Protocol::DescriptorDomain::ENUM_TABLE));
+    describe.u32(0);
+    describe.u16(1);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::DESCRIBE,
+                             2,
+                             describe.data(),
+                             describe.length()));
+    serial.update();
+
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    Vektor::Protocol::PayloadReader page(response.payload,
+                                         response.payload_len);
+    uint8_t domain = 0;
+    uint32_t next_cursor = 0;
+    uint16_t record_count = 0;
+    uint16_t record_len = 0;
+    const uint8_t *record = nullptr;
+    ASSERT_TRUE(page.u8(domain));
+    ASSERT_TRUE(page.u32(next_cursor));
+    ASSERT_TRUE(page.u16(record_count));
+    ASSERT_TRUE(page.u16(record_len));
+    ASSERT_TRUE(page.bytes(record, record_len));
+    ASSERT_EQ(record_count, 1);
+
+    Vektor::Protocol::PayloadReader enum_record(record, record_len);
+    uint8_t version = 0;
+    uint32_t enum_id = 0;
+    uint8_t underlying_type = 0;
+    uint8_t value_count = 0;
+    ASSERT_TRUE(enum_record.u8(version));
+    ASSERT_TRUE(enum_record.u32(enum_id));
+    ASSERT_TRUE(enum_record.u8(underlying_type));
+    ASSERT_TRUE(skip_str8(enum_record));
+    ASSERT_TRUE(skip_str8(enum_record));
+    ASSERT_TRUE(enum_record.u8(value_count));
+    EXPECT_EQ(version, 1);
+    EXPECT_EQ(enum_id, Vektor::Protocol::fnv1a32("enum/serial_role"));
+    EXPECT_EQ(underlying_type,
+              uint8_t(Vektor::Protocol::PrimitiveType::ENUM));
+    ASSERT_EQ(value_count, 5);
+    for (uint8_t i = 0; i < value_count; i++) {
+        uint32_t value = UINT32_MAX;
+        ASSERT_TRUE(enum_record.u32(value));
+        ASSERT_TRUE(skip_str8(enum_record));
+        EXPECT_EQ(value, i);
+    }
+    EXPECT_EQ(enum_record.remaining(), 0);
     EXPECT_NE(next_cursor, 0U);
 }
 
@@ -1727,7 +1957,6 @@ TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
     static TestUart uart;
     uart.reset();
     Vektor::Parameters parameters;
-    parameters.sys_protocol_baud.set(Vektor::protocol_baud);
     Vektor::RuntimeState runtime;
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
     Vektor::AttitudeSource attitude;
@@ -1868,7 +2097,6 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     static TestUart uart;
     uart.reset();
     Vektor::Parameters parameters;
-    parameters.sys_protocol_baud.set(Vektor::protocol_baud);
     Vektor::RuntimeState runtime;
     runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
     Vektor::AttitudeSource attitude;

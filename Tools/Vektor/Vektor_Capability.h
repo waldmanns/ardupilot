@@ -25,6 +25,15 @@ enum EndpointFlag : uint8_t {
     ENDPOINT_VEKTOR_TRANSPORT = 1U << 2,
 };
 
+// Generated HAL_SERIAL_ENDPOINT_FLAGS use these bits. Array position is the
+// logical hal.serial() index from SERIAL_ORDER.
+enum SerialEndpointFlag : uint8_t {
+    SERIAL_ENDPOINT_INPUT = 1U << 0,
+    SERIAL_ENDPOINT_OUTPUT = 1U << 1,
+    SERIAL_ENDPOINT_USB = 1U << 2,
+    SERIAL_ENDPOINT_USABLE = 1U << 3,
+};
+
 enum FlexModeFlag : uint8_t {
     FLEX_PWM_INPUT = 1U << 0,
     FLEX_PWM_OUTPUT = 1U << 1,
@@ -39,12 +48,6 @@ enum TimerRateFlag : uint8_t {
     TIMER_RATE_100_HZ = 1U << 1,
     TIMER_RATE_200_HZ = 1U << 2,
     TIMER_RATE_330_HZ = 1U << 3,
-};
-
-enum class ProtocolTransport : uint8_t {
-    NONE,
-    USB,
-    UART,
 };
 
 struct TimerGroup {
@@ -63,8 +66,7 @@ struct BoardCapability {
     uint32_t board_id;
     uint8_t pwm_outputs;
     uint8_t flex_timer_channels;
-    uint8_t dedicated_receiver_rows;
-    uint8_t uart_endpoints;
+    uint8_t serial_endpoint_count;
     uint8_t can_ports;
     uint8_t adc_observables;
     uint8_t storage_areas;
@@ -78,15 +80,19 @@ struct BoardCapability {
     int16_t heartbeat_led_gpio;
     uint8_t pwm_inputs;
     const uint8_t *flex_mode_flags;
-    const uint8_t *uart_endpoint_flags;
-    const uint8_t *uart_serial_indices;
-    ProtocolTransport protocol_transport;
-    int8_t protocol_uart_endpoint;
-    int8_t protocol_serial_index;
+    const char *const *serial_endpoint_names;
+    const uint8_t *serial_endpoint_flags;
 };
 
 const BoardCapability &default_capability_for_build();
 bool capability_has(const BoardCapability &capability, CapabilityFlag flag);
 bool capability_valid(const BoardCapability &capability);
+bool serial_endpoint_usable(const BoardCapability &capability,
+                            uint8_t serial_index);
+bool serial_endpoint_is_usb(const BoardCapability &capability,
+                            uint8_t serial_index);
+uint8_t serial_endpoint_supported_role_mask(const BoardCapability &capability,
+                                            uint8_t serial_index);
+int8_t recovery_usb_serial_index(const BoardCapability &capability);
 
 } // namespace Vektor

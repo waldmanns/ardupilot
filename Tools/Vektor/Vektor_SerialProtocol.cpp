@@ -110,7 +110,9 @@ void SerialProtocol::init(AP_HAL::UARTDriver *uart,
                           const RcinSource &rcin,
                           PwmInput &pwm_input,
                           PwmOutput &pwm_output,
-                          AssignmentMatrix &assignments)
+                          AssignmentMatrix &assignments,
+                          SerialRoleManager *serial_roles,
+                          uint32_t transport_baud)
 {
     _uart = uart;
     _capability = &capability;
@@ -122,6 +124,7 @@ void SerialProtocol::init(AP_HAL::UARTDriver *uart,
     _pwm_input = &pwm_input;
     _pwm_output = &pwm_output;
     _assignments = &assignments;
+    _serial_roles = serial_roles;
     _server_nonce = uint32_t(AP_HAL::micros64()) ^ uint32_t(device_id());
     _ready = (_uart != nullptr) &&
              capability_valid(capability) &&
@@ -139,11 +142,11 @@ void SerialProtocol::init(AP_HAL::UARTDriver *uart,
         return;
     }
 
-    int32_t baud = _parameters->sys_protocol_baud.get();
-    if (baud < protocol_baud_min || baud > protocol_baud_max) {
-        baud = protocol_baud;
+    if (transport_baud < uint32_t(protocol_baud_min) ||
+        transport_baud > uint32_t(protocol_baud_max)) {
+        transport_baud = protocol_baud;
     }
-    _uart->begin(uint32_t(baud), protocol_rx_space, protocol_tx_space);
+    _uart->begin(transport_baud, protocol_rx_space, protocol_tx_space);
     _uart->write(uint8_t(Protocol::DELIMITER));
 }
 
@@ -576,6 +579,41 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
         raw = _pwm_output->pwm_us(channel_index);
         return write_typed_payload(writer, field->type, raw);
     }
+    if (serial_role_for_slot(field->slot, channel_index)) {
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        raw = uint32_t(_serial_roles->configured_role(channel_index));
+        return write_typed_payload(writer, field->type, raw);
+    }
+    if (serial_baud_for_slot(field->slot, channel_index)) {
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        raw = _serial_roles->configured_baud(channel_index);
+        return write_typed_payload(writer, field->type, raw);
+    }
+    if (serial_active_role_for_slot(field->slot, channel_index)) {
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        raw = uint32_t(_serial_roles->active_role(channel_index));
+        return write_typed_payload(writer, field->type, raw);
+    }
+    if (serial_status_for_slot(field->slot, channel_index)) {
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        raw = uint32_t(_serial_roles->status(channel_index));
+        return write_typed_payload(writer, field->type, raw);
+    }
+    if (serial_reboot_required_for_slot(field->slot, channel_index)) {
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        raw = _serial_roles->reboot_required(channel_index) ? 1U : 0U;
+        return write_typed_payload(writer, field->type, raw);
+    }
 
     switch (field->slot) {
     case FieldSlot::RX_FRAMES:
@@ -688,17 +726,29 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
         }
         raw = uint16_t(_parameters->sys_desc_page.get());
         break;
-    case FieldSlot::SYS_PROTOCOL_BAUD:
-        if (_parameters == nullptr) {
+    case FieldSlot::USB_MODE:
+        if (_serial_roles == nullptr) {
             return false;
         }
-        raw = uint32_t(_parameters->sys_protocol_baud.get());
+        raw = uint32_t(_serial_roles->configured_usb_mode());
         break;
-    case FieldSlot::RCIN_PORT:
-        if (_parameters == nullptr) {
+    case FieldSlot::USB_ACTIVE_MODE:
+        if (_serial_roles == nullptr) {
             return false;
         }
-        raw = uint16_t(_parameters->rcin_port.get());
+        raw = uint32_t(_serial_roles->active_usb_mode());
+        break;
+    case FieldSlot::USB_STATUS:
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        raw = uint32_t(_serial_roles->usb_status());
+        break;
+    case FieldSlot::USB_REBOOT_REQUIRED:
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        raw = _serial_roles->usb_reboot_required() ? 1U : 0U;
         break;
     case FieldSlot::RCIN_TIMEOUT_MS:
         if (_parameters == nullptr) {
@@ -898,6 +948,8 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
     case FieldSlot::PWMOUT_PULSE_11:
     case FieldSlot::PWMOUT_PULSE_12:
         return false;
+    default:
+        return false;
     }
 
     return write_typed_payload(writer, field->type, raw);
@@ -978,8 +1030,10 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     case FieldSlot::SERVICE_RATE_HZ:
     case FieldSlot::SYS_OPTIONS:
     case FieldSlot::SYS_DESC_PAGE:
-    case FieldSlot::SYS_PROTOCOL_BAUD:
-    case FieldSlot::RCIN_PORT:
+    case FieldSlot::USB_MODE:
+    case FieldSlot::USB_ACTIVE_MODE:
+    case FieldSlot::USB_STATUS:
+    case FieldSlot::USB_REBOOT_REQUIRED:
     case FieldSlot::RCIN_TIMEOUT_MS:
     case FieldSlot::RCIN_PROTOCOLS:
     case FieldSlot::PWMIN_PIN_1:
@@ -1070,6 +1124,8 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     case FieldSlot::PWMOUT_PULSE_10:
     case FieldSlot::PWMOUT_PULSE_11:
     case FieldSlot::PWMOUT_PULSE_12:
+        break;
+    default:
         break;
     }
 

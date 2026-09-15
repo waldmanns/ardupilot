@@ -23,6 +23,7 @@ bool SerialProtocol::refresh_capability_hash()
         uint8_t(Protocol::DescriptorDomain::ENDPOINT),
         uint8_t(Protocol::DescriptorDomain::TIMER_GROUP),
         uint8_t(Protocol::DescriptorDomain::RUNTIME_LIMIT),
+        uint8_t(Protocol::DescriptorDomain::ENUM_TABLE),
     };
     return calculate_descriptor_hash(capability_domains,
                                      sizeof(capability_domains),
@@ -31,7 +32,7 @@ bool SerialProtocol::refresh_capability_hash()
 
 bool SerialProtocol::validate_descriptor_ids()
 {
-    static constexpr uint16_t max_stable_ids = 192;
+    static constexpr uint16_t max_stable_ids = 256;
     static uint32_t stable_ids[max_stable_ids];
     uint16_t count = 0;
 
@@ -56,6 +57,7 @@ bool SerialProtocol::validate_descriptor_ids()
         uint8_t(Protocol::DescriptorDomain::ENDPOINT),
         uint8_t(Protocol::DescriptorDomain::TIMER_GROUP),
         uint8_t(Protocol::DescriptorDomain::RUNTIME_LIMIT),
+        uint8_t(Protocol::DescriptorDomain::ENUM_TABLE),
     };
     for (uint8_t domain_index = 0;
          domain_index < sizeof(object_domains);
@@ -127,7 +129,7 @@ bool SerialProtocol::calculate_descriptor_hash(const uint8_t *domains,
             return false;
         }
 
-        uint8_t record[128];
+        uint8_t record[247];
         uint16_t record_len = 0;
         if (!build_descriptor_record(selected_domain,
                                      selected_index,
@@ -154,7 +156,7 @@ bool SerialProtocol::descriptor_id(uint8_t domain,
                                    uint16_t index,
                                    uint32_t &id)
 {
-    uint8_t record[128];
+    uint8_t record[247];
     uint16_t record_len = 0;
     if (!build_descriptor_record(domain,
                                  index,
@@ -186,8 +188,9 @@ uint16_t SerialProtocol::descriptor_count(uint8_t domain) const
         return timer_group_count();
     case Protocol::DescriptorDomain::RUNTIME_LIMIT:
         return runtime_limit_count();
-    case Protocol::DescriptorDomain::STORAGE_AREA:
     case Protocol::DescriptorDomain::ENUM_TABLE:
+        return enum_count();
+    case Protocol::DescriptorDomain::STORAGE_AREA:
     case Protocol::DescriptorDomain::EVENT_TYPE:
     case Protocol::DescriptorDomain::ACTION_SCHEMA:
         return 0;
@@ -201,8 +204,14 @@ uint64_t SerialProtocol::coarse_capability_flags() const
     if (capability_has(*_capability, CAP_NATIVE_USB)) {
         flags |= 1ULL << 0; // CAP_USB
     }
-    if (_capability->protocol_transport == ProtocolTransport::UART) {
-        flags |= 1ULL << 1; // CAP_UART_VEKTOR
+    if (_serial_roles != nullptr) {
+        for (uint8_t i = 0; i < _capability->serial_endpoint_count; i++) {
+            if (!serial_endpoint_is_usb(*_capability, i) &&
+                _serial_roles->active_role(i) == SerialRole::VEKTOR) {
+                flags |= 1ULL << 1; // CAP_UART_VEKTOR
+                break;
+            }
+        }
     }
     if (capability_has(*_capability, CAP_PWM_OUTPUTS)) {
         flags |= 1ULL << 2;
@@ -238,14 +247,17 @@ uint64_t SerialProtocol::coarse_capability_flags() const
 
 uint16_t SerialProtocol::endpoint_count() const
 {
-    uint16_t count = capability_has(*_capability, CAP_NATIVE_USB) ? 1 : 0;
+    uint16_t count = 0;
+    for (uint8_t i = 0; i < _capability->serial_endpoint_count; i++) {
+        if (serial_endpoint_usable(*_capability, i)) {
+            count++;
+        }
+    }
     if (_capability->pwm_outputs != 0) {
         count += 1; // PWM bank
         count += _capability->pwm_outputs;
     }
     count += _capability->flex_timer_channels;
-    count += _capability->dedicated_receiver_rows;
-    count += _capability->uart_endpoints;
     count += _capability->can_ports;
     count += _capability->adc_observables;
     if (capability_has(*_capability, CAP_ONBOARD_IMU)) {
@@ -269,6 +281,11 @@ uint16_t SerialProtocol::timer_group_count() const
 uint16_t SerialProtocol::runtime_limit_count() const
 {
     return 1;
+}
+
+uint16_t SerialProtocol::enum_count() const
+{
+    return 3;
 }
 
 uint64_t SerialProtocol::device_id() const
@@ -371,6 +388,16 @@ bool SerialProtocol::field_available(const FieldDescriptor &field) const
         pwmout_pulse_channel_for_slot(field.slot, channel_index)) {
         return channel_index < _capability->pwm_outputs;
     }
+    if (serial_role_for_slot(field.slot, channel_index) ||
+        serial_baud_for_slot(field.slot, channel_index) ||
+        serial_active_role_for_slot(field.slot, channel_index) ||
+        serial_status_for_slot(field.slot, channel_index) ||
+        serial_reboot_required_for_slot(field.slot, channel_index)) {
+        return _serial_roles != nullptr &&
+               channel_index < _capability->serial_endpoint_count &&
+               serial_endpoint_usable(*_capability, channel_index) &&
+               !serial_endpoint_is_usb(*_capability, channel_index);
+    }
 
     switch (field.slot) {
     case FieldSlot::ATTITUDE_ROLL_DEG:
@@ -379,10 +406,12 @@ bool SerialProtocol::field_available(const FieldDescriptor &field) const
     case FieldSlot::ATTITUDE_QUATERNION:
     case FieldSlot::ATTITUDE_BODY_RATES_RAD_S:
         return capability_has(*_capability, CAP_ONBOARD_IMU);
-    case FieldSlot::SYS_PROTOCOL_BAUD:
-        return _capability->protocol_transport == ProtocolTransport::UART;
-    case FieldSlot::RCIN_PORT:
-        return _capability->uart_endpoints != 0;
+    case FieldSlot::USB_MODE:
+    case FieldSlot::USB_ACTIVE_MODE:
+    case FieldSlot::USB_STATUS:
+    case FieldSlot::USB_REBOOT_REQUIRED:
+        return _serial_roles != nullptr &&
+               recovery_usb_serial_index(*_capability) >= 0;
     case FieldSlot::RCIN_PROTOCOLS:
         return rcin_protocols_parameter() != nullptr;
     case FieldSlot::PWMIN_TIMEOUT_MS:
@@ -405,4 +434,3 @@ bool SerialProtocol::field_available(const FieldDescriptor &field) const
         return true;
     }
 }
-

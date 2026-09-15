@@ -72,6 +72,18 @@ bool SerialProtocol::send_runtime_limit_descriptions(uint16_t sequence,
                                  runtime_limit_count());
 }
 
+bool SerialProtocol::send_enum_descriptions(uint16_t sequence,
+                                            uint8_t domain,
+                                            uint32_t cursor,
+                                            uint16_t max_records)
+{
+    return send_description_page(sequence,
+                                 domain,
+                                 cursor,
+                                 max_records,
+                                 enum_count());
+}
+
 bool SerialProtocol::send_empty_description(uint16_t sequence, uint8_t domain)
 {
     Protocol::PayloadWriter writer(_payload, sizeof(_payload));
@@ -107,7 +119,7 @@ bool SerialProtocol::send_description_page(uint16_t sequence,
     uint32_t index = cursor;
 
     while (index < total_records && record_count < page_limit) {
-        uint8_t record[128];
+        uint8_t record[247];
         uint16_t record_len = 0;
         if (!build_descriptor_record(domain,
                                      uint16_t(index),
@@ -179,9 +191,100 @@ bool SerialProtocol::build_descriptor_record(uint8_t domain,
                                           record_capacity,
                                           record_len);
     }
+    if (domain == uint8_t(Protocol::DescriptorDomain::ENUM_TABLE)) {
+        return build_enum_record(index,
+                                 record,
+                                 record_capacity,
+                                 record_len);
+    }
 
     record_len = 0;
     return false;
+}
+
+bool SerialProtocol::build_enum_record(uint16_t index,
+                                       uint8_t *record,
+                                       uint16_t record_capacity,
+                                       uint16_t &record_len)
+{
+    struct EnumValue {
+        int32_t value;
+        const char *name;
+    };
+    static constexpr EnumValue roles[] = {
+        { int32_t(SerialRole::NONE), "NONE" },
+        { int32_t(SerialRole::RCIN), "RCIN" },
+        { int32_t(SerialRole::VEKTOR), "VEKTOR" },
+        { int32_t(SerialRole::MAVLINK1), "MAVLINK1_RESERVED" },
+        { int32_t(SerialRole::MAVLINK2), "MAVLINK2_RESERVED" },
+    };
+    static constexpr EnumValue usb_modes[] = {
+        { int32_t(UsbMode::VEKTOR_ONLY), "VEKTOR_ONLY" },
+        { int32_t(UsbMode::VEKTOR_MAVLINK),
+          "VEKTOR_MAVLINK_RESERVED" },
+    };
+    static constexpr EnumValue statuses[] = {
+        { int32_t(SerialEndpointStatus::OK), "OK" },
+        { int32_t(SerialEndpointStatus::RESERVED_NOT_IMPLEMENTED),
+          "RESERVED_NOT_IMPLEMENTED" },
+        { int32_t(SerialEndpointStatus::INVALID_ROLE), "INVALID_ROLE" },
+        { int32_t(SerialEndpointStatus::UNSUPPORTED_ROLE),
+          "UNSUPPORTED_ROLE" },
+        { int32_t(SerialEndpointStatus::DUPLICATE_RCIN), "DUPLICATE_RCIN" },
+        { int32_t(SerialEndpointStatus::DUPLICATE_VEKTOR),
+          "DUPLICATE_VEKTOR" },
+        { int32_t(SerialEndpointStatus::INVALID_BAUD), "INVALID_BAUD" },
+        { int32_t(SerialEndpointStatus::ENDPOINT_UNAVAILABLE),
+          "ENDPOINT_UNAVAILABLE" },
+        { int32_t(SerialEndpointStatus::CONFIGURATION_INVALID),
+          "CONFIGURATION_INVALID" },
+    };
+
+    const char *path = nullptr;
+    const char *name = nullptr;
+    const char *display_name = nullptr;
+    const EnumValue *values = nullptr;
+    uint8_t count = 0;
+    switch (index) {
+    case 0:
+        path = "enum/serial_role";
+        name = "serial_role";
+        display_name = "Serial Role";
+        values = roles;
+        count = sizeof(roles) / sizeof(roles[0]);
+        break;
+    case 1:
+        path = "enum/usb_mode";
+        name = "usb_mode";
+        display_name = "USB Mode";
+        values = usb_modes;
+        count = sizeof(usb_modes) / sizeof(usb_modes[0]);
+        break;
+    case 2:
+        path = "enum/serial_endpoint_status";
+        name = "serial_endpoint_status";
+        display_name = "Serial Endpoint Status";
+        values = statuses;
+        count = sizeof(statuses) / sizeof(statuses[0]);
+        break;
+    default:
+        record_len = 0;
+        return false;
+    }
+
+    Protocol::PayloadWriter writer(record, record_capacity);
+    writer.u8(1);
+    writer.u32(id_for_path(path));
+    writer.u8(uint8_t(Protocol::PrimitiveType::ENUM));
+    writer.str8(name);
+    writer.str8(display_name);
+    writer.u8(count);
+    for (uint8_t i = 0; i < count; i++) {
+        writer.u32(uint32_t(values[i].value));
+        writer.str8(values[i].name);
+    }
+    record_len = writer.length();
+    return writer.ok();
 }
 
 bool SerialProtocol::build_board_record(uint16_t index,
@@ -256,20 +359,110 @@ bool SerialProtocol::build_endpoint_record(uint16_t index,
 
     uint16_t remaining = index;
 
-    if (capability_has(*_capability, CAP_NATIVE_USB)) {
-        if (remaining == 0) {
-            return write_endpoint(Protocol::EndpointKind::USB,
-                                  id_for_path("hw/usb/0"),
-                                  0,
-                                  ENDPOINT_INPUT |
-                                      ENDPOINT_OUTPUT |
-                                      (_capability->protocol_transport ==
-                                               ProtocolTransport::USB ?
-                                           ENDPOINT_VEKTOR_TRANSPORT : 0),
-                                  "usb0",
-                                  "USB");
+    for (uint8_t serial_index = 0;
+         serial_index < _capability->serial_endpoint_count;
+         serial_index++) {
+        if (!serial_endpoint_usable(*_capability, serial_index)) {
+            continue;
         }
-        remaining--;
+        if (remaining != 0) {
+            remaining--;
+            continue;
+        }
+
+        const bool usb = serial_endpoint_is_usb(*_capability, serial_index);
+        const uint8_t physical_flags =
+            _capability->serial_endpoint_flags[serial_index];
+        uint64_t flags = 0;
+        if ((physical_flags & SERIAL_ENDPOINT_INPUT) != 0) {
+            flags |= ENDPOINT_INPUT;
+        }
+        if ((physical_flags & SERIAL_ENDPOINT_OUTPUT) != 0) {
+            flags |= ENDPOINT_OUTPUT;
+        }
+        if (usb || (_serial_roles != nullptr &&
+                    _serial_roles->active_role(serial_index) ==
+                        SerialRole::VEKTOR)) {
+            flags |= ENDPOINT_VEKTOR_TRANSPORT;
+        }
+
+        char path[24];
+        char name[16];
+        char display[40];
+        hal.util->snprintf(path, sizeof(path), "hw/serial/%u",
+                           unsigned(serial_index));
+        hal.util->snprintf(name, sizeof(name), "serial%u",
+                           unsigned(serial_index));
+        hal.util->snprintf(display, sizeof(display), "SERIAL%u (%s)",
+                           unsigned(serial_index),
+                           _capability->serial_endpoint_names[serial_index]);
+
+        uint32_t configured_id = 0;
+        uint32_t active_id = 0;
+        uint32_t baud_id = 0;
+        uint32_t status_id = 0;
+        uint32_t reboot_id = 0;
+        const char *enum_path = nullptr;
+        uint32_t supported = 0;
+        if (usb) {
+            configured_id = id_for_path(
+                "component/system/0/parameter/usb_mode");
+            active_id = id_for_path(
+                "component/system/0/observable/usb_active_mode");
+            status_id = id_for_path(
+                "component/system/0/observable/usb_status");
+            reboot_id = id_for_path(
+                "component/system/0/observable/usb_reboot_required");
+            enum_path = "enum/usb_mode";
+            supported = (1U << uint8_t(UsbMode::VEKTOR_ONLY)) |
+                        (1U << uint8_t(UsbMode::VEKTOR_MAVLINK));
+        } else {
+            char field_path[72];
+            hal.util->snprintf(field_path, sizeof(field_path),
+                "component/system/0/parameter/serial_%u_role",
+                unsigned(serial_index));
+            configured_id = id_for_path(field_path);
+            hal.util->snprintf(field_path, sizeof(field_path),
+                "component/system/0/observable/serial_%u_active_role",
+                unsigned(serial_index));
+            active_id = id_for_path(field_path);
+            hal.util->snprintf(field_path, sizeof(field_path),
+                "component/system/0/parameter/serial_%u_baud",
+                unsigned(serial_index));
+            baud_id = id_for_path(field_path);
+            hal.util->snprintf(field_path, sizeof(field_path),
+                "component/system/0/observable/serial_%u_status",
+                unsigned(serial_index));
+            status_id = id_for_path(field_path);
+            hal.util->snprintf(field_path, sizeof(field_path),
+                "component/system/0/observable/serial_%u_reboot_required",
+                unsigned(serial_index));
+            reboot_id = id_for_path(field_path);
+            enum_path = "enum/serial_role";
+            supported = serial_endpoint_supported_role_mask(*_capability,
+                                                             serial_index);
+        }
+
+        Protocol::PayloadWriter writer(record, record_capacity);
+        writer.u8(2); // SERIAL_ORDER-backed endpoint extension
+        writer.u32(id_for_path(path));
+        writer.u8(uint8_t(usb ? Protocol::EndpointKind::USB :
+                               Protocol::EndpointKind::UART));
+        writer.u32(0);
+        writer.u64(flags);
+        writer.str8(name);
+        writer.str8(display);
+        writer.u8(serial_index);
+        writer.str8(_capability->serial_endpoint_names[serial_index]);
+        writer.u32(id_for_path(enum_path));
+        writer.u32(supported);
+        writer.u32(configured_id);
+        writer.u32(active_id);
+        writer.u32(baud_id);
+        writer.u32(status_id);
+        writer.u32(reboot_id);
+        record_len = writer.length();
+        return writer.ok();
     }
 
     if (_capability->pwm_outputs != 0) {
@@ -318,38 +511,6 @@ bool SerialProtocol::build_endpoint_record(uint16_t index,
                               display);
     }
     remaining -= _capability->flex_timer_channels;
-
-    if (remaining < _capability->dedicated_receiver_rows) {
-        return write_endpoint(Protocol::EndpointKind::UART,
-                              id_for_path("hw/uart/receiver/0"),
-                              0,
-                              ENDPOINT_INPUT,
-                              "receiver0",
-                              "Dedicated Receiver RX");
-    }
-    remaining -= _capability->dedicated_receiver_rows;
-
-    if (remaining < _capability->uart_endpoints) {
-        const uint8_t uart = uint8_t(remaining);
-        char path[20];
-        char name[16];
-        char display[16];
-        hal.util->snprintf(path, sizeof(path), "hw/uart/%u", unsigned(uart));
-        hal.util->snprintf(name, sizeof(name), "uart%u", unsigned(uart + 1));
-        hal.util->snprintf(display, sizeof(display), "UART %u", unsigned(uart + 1));
-        return write_endpoint(Protocol::EndpointKind::UART,
-                              id_for_path(path),
-                              0,
-                              _capability->uart_endpoint_flags[uart] |
-                                  (_capability->protocol_transport ==
-                                               ProtocolTransport::UART &&
-                                           _capability->protocol_uart_endpoint ==
-                                               int8_t(uart) ?
-                                       ENDPOINT_VEKTOR_TRANSPORT : 0),
-                              name,
-                              display);
-    }
-    remaining -= _capability->uart_endpoints;
 
     if (remaining < _capability->can_ports) {
         const uint8_t can = uint8_t(remaining);

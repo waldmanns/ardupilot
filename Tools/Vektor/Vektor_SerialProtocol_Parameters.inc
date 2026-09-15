@@ -59,6 +59,18 @@ bool SerialProtocol::validate_parameter_value(uint32_t field_id,
         }
     }
 
+    uint8_t serial_index = 0;
+    if (serial_role_for_slot(field->slot, serial_index)) {
+        const SerialRole role = SerialRole(value);
+        if (_capability == nullptr || _serial_roles == nullptr ||
+            (serial_endpoint_supported_role_mask(*_capability, serial_index) &
+             (1U << uint8_t(role))) == 0) {
+            code = Protocol::ErrorCode::OUT_OF_RANGE;
+            detail = "role unsupported by serial endpoint";
+            return false;
+        }
+    }
+
     code = Protocol::ErrorCode::UNKNOWN_MESSAGE;
     detail = "";
     return true;
@@ -89,6 +101,13 @@ bool SerialProtocol::validate_parameter_set(const ParameterUpdate *updates,
     bool output_calibration_changed = false;
     uint32_t input_calibration_field_id = 0;
     uint32_t output_calibration_field_id = 0;
+    int16_t serial_roles[SerialRoleParameters::max_endpoints] {};
+    bool serial_roles_changed = false;
+    if (_serial_roles != nullptr) {
+        for (uint8_t i = 0; i < SerialRoleParameters::max_endpoints; i++) {
+            serial_roles[i] = int16_t(_serial_roles->configured_role(i));
+        }
+    }
 
     for (uint16_t i = 0; i < count; i++) {
         const FieldDescriptor *field =
@@ -100,6 +119,11 @@ bool SerialProtocol::validate_parameter_set(const ParameterUpdate *updates,
             return false;
         }
         const int32_t value = signed_raw_value(field->type, updates[i].raw);
+        uint8_t serial_index = 0;
+        if (serial_role_for_slot(field->slot, serial_index)) {
+            serial_roles[serial_index] = int16_t(value);
+            serial_roles_changed = true;
+        }
         switch (field->slot) {
         case FieldSlot::PWMIN_MIN_US:
             input_min = value;
@@ -138,6 +162,29 @@ bool SerialProtocol::validate_parameter_set(const ParameterUpdate *updates,
             break;
         default:
             break;
+        }
+    }
+
+    if (serial_roles_changed) {
+        SerialEndpointStatus statuses[SerialRoleParameters::max_endpoints] {};
+        if (_capability == nullptr ||
+            !validate_serial_roles(*_capability, serial_roles, statuses)) {
+            code = Protocol::ErrorCode::INVALID_STATE;
+            for (uint16_t i = 0; i < count; i++) {
+                const FieldDescriptor *field =
+                    schema_registry().field_by_id(updates[i].field_id);
+                uint8_t serial_index = 0;
+                if (field != nullptr &&
+                    serial_role_for_slot(field->slot, serial_index) &&
+                    statuses[serial_index] != SerialEndpointStatus::OK &&
+                    statuses[serial_index] !=
+                        SerialEndpointStatus::RESERVED_NOT_IMPLEMENTED) {
+                    failing_field_id = updates[i].field_id;
+                    break;
+                }
+            }
+            detail = "duplicate or invalid serial role assignment";
+            return false;
         }
     }
 
@@ -185,6 +232,21 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
                                    int16_t(uint16_t(raw)));
         return true;
     }
+    if (serial_role_for_slot(field->slot, channel_index)) {
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        _serial_roles->set_configured_role(channel_index,
+                                           SerialRole(int32_t(raw)));
+        return true;
+    }
+    if (serial_baud_for_slot(field->slot, channel_index)) {
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        _serial_roles->set_configured_baud(channel_index, raw);
+        return true;
+    }
 
     switch (field->slot) {
     case FieldSlot::SYS_OPTIONS:
@@ -194,13 +256,11 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
         save_parameter_without_gcs(_parameters->sys_desc_page,
                                    int16_t(uint16_t(raw)));
         return true;
-    case FieldSlot::SYS_PROTOCOL_BAUD:
-        save_parameter_without_gcs(_parameters->sys_protocol_baud,
-                                   int32_t(raw));
-        return true;
-    case FieldSlot::RCIN_PORT:
-        save_parameter_without_gcs(_parameters->rcin_port,
-                                   int16_t(uint16_t(raw)));
+    case FieldSlot::USB_MODE:
+        if (_serial_roles == nullptr) {
+            return false;
+        }
+        _serial_roles->set_configured_usb_mode(UsbMode(int32_t(raw)));
         return true;
     case FieldSlot::RCIN_TIMEOUT_MS:
         save_parameter_without_gcs(_parameters->rcin_timeout_ms,
@@ -384,6 +444,8 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
     case FieldSlot::PWMOUT_EFFECTIVE_RATE_HZ:
     case FieldSlot::PWMOUT_EFFECTIVE_FAILSAFE_US:
         break;
+    default:
+        break;
     }
     return false;
 }
@@ -404,6 +466,7 @@ bool SerialProtocol::read_typed_value(Protocol::PayloadReader &reader,
     case Protocol::PrimitiveType::U32:
     case Protocol::PrimitiveType::I32:
     case Protocol::PrimitiveType::FLOAT32:
+    case Protocol::PrimitiveType::ENUM:
         return reader.u32(raw);
     default:
         return false;

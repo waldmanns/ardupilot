@@ -90,17 +90,67 @@ VEKTOR_PARAMETER(SYS_DESC_PAGE, "component/system/0/parameter/sys_desc_page",
                  Vektor::min_describe_page_records,
                  Vektor::max_describe_page_records,
                  Vektor::default_describe_page_records, SYS_DESC_PAGE)
-VEKTOR_PARAMETER(SYS_PROTOCOL_BAUD,
-                 "component/system/0/parameter/sys_protocol_baud",
-                 "SYS_PROTO_BAUD", I32, PROTOCOL, "sys_protocol_baud",
-                 "Protocol Baud", "baud", parameter_reboot_flags,
-                 Vektor::protocol_baud_min, Vektor::protocol_baud_max,
-                 Vektor::protocol_baud, SYS_PROTOCOL_BAUD)
-VEKTOR_PARAMETER(RCIN_UART_PORT, "component/rcin/0/parameter/uart_port",
-                 "RCIN_PORT", I16, RCIN, "uart_port", "Receiver UART",
-                 "serial index", parameter_reboot_flags,
-                 Vektor::rcin_port_min, Vektor::rcin_port_max,
-                 Vektor::default_rcin_port, RCIN_PORT)
+VEKTOR_PARAMETER(USB_MODE, "component/system/0/parameter/usb_mode",
+                 "SERUSB_MODE", ENUM, PROTOCOL, "usb_mode", "USB Mode",
+                 "mode", parameter_reboot_flags, 0, 1, 0, USB_MODE)
+VEKTOR_OBSERVABLE(USB_ACTIVE_MODE,
+                  "component/system/0/observable/usb_active_mode",
+                  ENUM, PROTOCOL, "usb_active_mode", "USB Active Mode",
+                  "mode", realtime_flags, USB_ACTIVE_MODE)
+VEKTOR_OBSERVABLE(USB_STATUS, "component/system/0/observable/usb_status",
+                  ENUM, PROTOCOL, "usb_status", "USB Status", "status",
+                  realtime_flags, USB_STATUS)
+VEKTOR_OBSERVABLE(USB_REBOOT_REQUIRED,
+                  "component/system/0/observable/usb_reboot_required",
+                  BOOL, PROTOCOL, "usb_reboot_required",
+                  "USB Reboot Required", "bool", realtime_flags,
+                  USB_REBOOT_REQUIRED)
+
+#define VEKTOR_SERIAL_ENDPOINT_BINDINGS(INDEX)                              \
+    VEKTOR_PARAMETER(SERIAL_##INDEX##_ROLE,                                 \
+                     "component/system/0/parameter/serial_" #INDEX         \
+                     "_role", "SER" #INDEX "_ROLE", ENUM, PROTOCOL,      \
+                     "serial_" #INDEX "_role", "Serial " #INDEX         \
+                     " Role", "role", parameter_reboot_flags, 0, 4, 0,    \
+                     SERIAL_##INDEX##_ROLE)                                 \
+    VEKTOR_PARAMETER(SERIAL_##INDEX##_BAUD,                                 \
+                     "component/system/0/parameter/serial_" #INDEX         \
+                     "_baud", "SER" #INDEX "_BAUD", I32, PROTOCOL,      \
+                     "serial_" #INDEX "_baud", "Serial " #INDEX         \
+                     " Baud", "baud", parameter_reboot_flags,             \
+                     Vektor::protocol_baud_min, Vektor::protocol_baud_max,  \
+                     Vektor::protocol_baud, SERIAL_##INDEX##_BAUD)          \
+    VEKTOR_OBSERVABLE(SERIAL_##INDEX##_ACTIVE_ROLE,                         \
+                      "component/system/0/observable/serial_" #INDEX       \
+                      "_active_role", ENUM, PROTOCOL,                      \
+                      "serial_" #INDEX "_active_role",                    \
+                      "Serial " #INDEX " Active Role", "role",           \
+                      realtime_flags, SERIAL_##INDEX##_ACTIVE_ROLE)         \
+    VEKTOR_OBSERVABLE(SERIAL_##INDEX##_STATUS,                              \
+                      "component/system/0/observable/serial_" #INDEX       \
+                      "_status", ENUM, PROTOCOL,                           \
+                      "serial_" #INDEX "_status",                         \
+                      "Serial " #INDEX " Status", "status",              \
+                      realtime_flags, SERIAL_##INDEX##_STATUS)              \
+    VEKTOR_OBSERVABLE(SERIAL_##INDEX##_REBOOT_REQUIRED,                     \
+                      "component/system/0/observable/serial_" #INDEX       \
+                      "_reboot_required", BOOL, PROTOCOL,                  \
+                      "serial_" #INDEX "_reboot_required",                \
+                      "Serial " #INDEX " Reboot Required", "bool",       \
+                      realtime_flags, SERIAL_##INDEX##_REBOOT_REQUIRED)
+
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(0)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(1)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(2)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(3)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(4)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(5)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(6)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(7)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(8)
+VEKTOR_SERIAL_ENDPOINT_BINDINGS(9)
+#undef VEKTOR_SERIAL_ENDPOINT_BINDINGS
+
 VEKTOR_PARAMETER(RCIN_TIMEOUT_MS, "component/rcin/0/parameter/timeout_ms",
                  "RCIN_TIMEOUT", I16, RCIN, "timeout_ms", "RC Input Timeout",
                  "ms", parameter_live_flags, Vektor::rcin_timeout_ms_min,

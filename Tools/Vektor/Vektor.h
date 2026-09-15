@@ -48,7 +48,7 @@ private:
 
 class App {
 public:
-    static constexpr uint16_t k_format_version = 2;
+    static constexpr uint16_t k_format_version = 3;
 
     void setup();
     void loop();
@@ -107,6 +107,7 @@ private:
     // initialization even though Vektor owns PWM calibration itself.
     SRV_Channels _servo_channels;
     const BoardCapability *_active_capability;
+    SerialRoleManager _serial_roles;
     RuntimeState _runtime;
     AttitudeSource _attitude;
     RcinSource _rcin;
@@ -116,7 +117,8 @@ private:
     CompiledSource _pwm_output_sources[PwmOutput::max_channels] {};
     uint32_t _compiled_assignment_revision = 0;
     bool _compiled_routes_valid = false;
-    SerialProtocol _serial_protocol;
+    // USB recovery/configuration plus at most one role-assigned UART.
+    SerialProtocol _serial_protocol[2];
 #if VEKTOR_ATTITUDE_ENABLED
     uint64_t _last_compass_update_us = 0;
     bool _attitude_initialized = false;

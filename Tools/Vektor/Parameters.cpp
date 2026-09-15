@@ -26,23 +26,9 @@ const AP_Param::Info App::var_info[] = {
     // @User: Advanced
     GSCALAR(sys_desc_page, "SYS_DESC_PAGE", default_describe_page_records),
 
-    // @Param: SYS_PROTO_BAUD
-    // @DisplayName: Vektor protocol UART baud
-    // @Description: Baud rate used for the Vektor Serial Protocol stream on boot.
-    // @Range: 9600 921600
-    // @Increment: 1
-    // @RebootRequired: True
-    // @User: Advanced
-    GSCALAR(sys_protocol_baud, "SYS_PROTO_BAUD", protocol_baud),
-
-    // @Param: RCIN_PORT
-    // @DisplayName: Serial receiver UART
-    // @Description: HAL serial index used for serial receiver autodetection. Set to 0 to disable the additional receiver UART. The selected UART supports the compiled-in ArduPilot receiver protocols, including SBUS, iBUS, DSM, CRSF, FPort, and SUMD.
-    // @Range: 0 9
-    // @Increment: 1
-    // @RebootRequired: True
-    // @User: Standard
-    GSCALAR(rcin_port, "RCIN_PORT", default_rcin_port),
+    // Logical endpoint roles and baud rates. The subgroup index is the same
+    // index used by hal.serial() and generated from SERIAL_ORDER.
+    GGROUP(serial_roles, "SER", SerialRoleParameters),
 
     // @Param: RCIN_TIMEOUT
     // @DisplayName: RC input timeout
