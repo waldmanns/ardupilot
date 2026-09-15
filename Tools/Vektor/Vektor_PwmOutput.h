@@ -25,7 +25,9 @@ public:
     uint16_t pwm_us(uint8_t index) const;
     bool active(uint8_t index) const;
     uint8_t channel_count() const { return _channel_count; }
-    uint16_t effective_rate_hz() const { return configured_rate(); }
+    uint16_t effective_rate_hz() const { return _applied_rate_hz; }
+    uint16_t effective_failsafe_us() const;
+    bool configuration_valid() const;
 
     static bool supported_rate(uint16_t rate_hz);
     static uint16_t normalized_to_pwm(float value,
@@ -48,6 +50,7 @@ private:
                      uint16_t &maximum) const;
     uint16_t configured_rate() const;
     void apply_rate();
+    void disable_all();
 
     SignalSample<float> _commands[max_channels] {};
     uint16_t _pwm_us[max_channels] {};

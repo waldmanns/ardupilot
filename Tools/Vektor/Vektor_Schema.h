@@ -85,6 +85,13 @@ enum class FieldSlot : uint8_t {
     PWMIN_PIN_4,
     PWMIN_PIN_5,
     PWMIN_PIN_6,
+    PWMIN_ATTACH_STATUS_1,
+    PWMIN_ATTACH_STATUS_2,
+    PWMIN_ATTACH_STATUS_3,
+    PWMIN_ATTACH_STATUS_4,
+    PWMIN_ATTACH_STATUS_5,
+    PWMIN_ATTACH_STATUS_6,
+    PWMIN_CONFIG_VALID,
     PWMIN_TIMEOUT_MS,
     PWMIN_MIN_US,
     PWMIN_TRIM_US,
@@ -95,6 +102,9 @@ enum class FieldSlot : uint8_t {
     PWMOUT_MAX_US,
     PWMOUT_REVERSE_MASK,
     PWMOUT_FAILSAFE_US,
+    PWMOUT_CONFIG_VALID,
+    PWMOUT_EFFECTIVE_RATE_HZ,
+    PWMOUT_EFFECTIVE_FAILSAFE_US,
     PWMIN_CHANNEL_1,
     PWMIN_CHANNEL_2,
     PWMIN_CHANNEL_3,
@@ -183,6 +193,7 @@ bool write_typed_payload(Protocol::PayloadWriter &writer,
 bool rcin_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
 bool rcin_pwm_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
 bool pwmin_pin_for_slot(FieldSlot slot, uint8_t &channel_index);
+bool pwmin_status_for_slot(FieldSlot slot, uint8_t &channel_index);
 bool pwmin_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
 bool pwmout_channel_for_slot(FieldSlot slot, uint8_t &channel_index);
 bool pwmout_pulse_channel_for_slot(FieldSlot slot, uint8_t &channel_index);

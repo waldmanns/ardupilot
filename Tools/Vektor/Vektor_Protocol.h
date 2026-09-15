@@ -246,7 +246,7 @@ constexpr uint32_t fnv1a32_update(const char *path, uint32_t hash)
 
 constexpr uint32_t fnv1a32_constexpr(const char *path)
 {
-    return path == nullptr ? 0x811C9DC5U :
+    return path == nullptr ? 0U :
         detail::fnv1a32_update(path, 0x811C9DC5U);
 }
 uint32_t fnv1a32(const char *path);
@@ -255,6 +255,7 @@ uint64_t fnv1a64_update(uint64_t hash,
                         uint16_t length);
 uint64_t fnv1a64(const uint8_t *data, uint16_t length);
 bool stable_ids_unique_nonzero(const uint32_t *ids, uint16_t count);
+uint16_t primitive_size(PrimitiveType type);
 
 bool cobs_encode(const uint8_t *decoded,
                  uint16_t decoded_len,

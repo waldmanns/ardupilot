@@ -19,9 +19,38 @@ enum CapabilityFlag : uint32_t {
     CAP_DATAFLASH_STORAGE = 1U << 11,
 };
 
+enum EndpointFlag : uint8_t {
+    ENDPOINT_INPUT = 1U << 0,
+    ENDPOINT_OUTPUT = 1U << 1,
+    ENDPOINT_VEKTOR_TRANSPORT = 1U << 2,
+};
+
+enum FlexModeFlag : uint8_t {
+    FLEX_PWM_INPUT = 1U << 0,
+    FLEX_PWM_OUTPUT = 1U << 1,
+    FLEX_RPM_CAPTURE = 1U << 2,
+    FLEX_ADC_INPUT = 1U << 3,
+    FLEX_DIGITAL_INPUT = 1U << 4,
+    FLEX_DIGITAL_OUTPUT = 1U << 5,
+};
+
+enum TimerRateFlag : uint8_t {
+    TIMER_RATE_50_HZ = 1U << 0,
+    TIMER_RATE_100_HZ = 1U << 1,
+    TIMER_RATE_200_HZ = 1U << 2,
+    TIMER_RATE_330_HZ = 1U << 3,
+};
+
+enum class ProtocolTransport : uint8_t {
+    NONE,
+    USB,
+    UART,
+};
+
 struct TimerGroup {
     const char *name;
     uint8_t channel_count;
+    uint8_t supported_rate_flags;
 };
 
 struct BoardCapability {
@@ -44,9 +73,15 @@ struct BoardCapability {
     const TimerGroup *flex_timer_groups;
     uint8_t flex_timer_group_count;
     int16_t heartbeat_led_gpio;
+    uint8_t pwm_inputs;
+    const uint8_t *flex_mode_flags;
+    const uint8_t *uart_endpoint_flags;
+    ProtocolTransport protocol_transport;
+    int8_t protocol_uart_endpoint;
 };
 
 const BoardCapability &default_capability_for_build();
 bool capability_has(const BoardCapability &capability, CapabilityFlag flag);
+bool capability_valid(const BoardCapability &capability);
 
 } // namespace Vektor

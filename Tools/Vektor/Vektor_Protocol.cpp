@@ -54,7 +54,7 @@ uint32_t fnv1a32(const char *path)
 {
     uint32_t hash = 0x811C9DC5U;
     if (path == nullptr) {
-        return hash;
+        return 0;
     }
     while (*path != '\0') {
         hash ^= uint8_t(*path++);
@@ -65,11 +65,17 @@ uint32_t fnv1a32(const char *path)
 
 uint32_t crc32_iso_hdlc(const uint8_t *data, uint32_t length)
 {
+    if (data == nullptr && length != 0) {
+        return 0;
+    }
     return ~crc_crc32(~0U, data, length);
 }
 
 uint64_t fnv1a64(const uint8_t *data, uint16_t length)
 {
+    if (data == nullptr && length != 0) {
+        return 0;
+    }
     return fnv1a64_update(0xCBF29CE484222325ULL, data, length);
 }
 
@@ -78,7 +84,7 @@ uint64_t fnv1a64_update(uint64_t hash,
                         uint16_t length)
 {
     if (data == nullptr && length != 0) {
-        return hash;
+        return 0;
     }
     for (uint16_t i = 0; i < length; i++) {
         hash ^= data[i];
@@ -105,13 +111,46 @@ bool stable_ids_unique_nonzero(const uint32_t *ids, uint16_t count)
     return true;
 }
 
+uint16_t primitive_size(PrimitiveType type)
+{
+    switch (type) {
+    case PrimitiveType::BOOL:
+    case PrimitiveType::U8:
+    case PrimitiveType::I8:
+        return 1;
+    case PrimitiveType::U16:
+    case PrimitiveType::I16:
+        return 2;
+    case PrimitiveType::U32:
+    case PrimitiveType::I32:
+    case PrimitiveType::FLOAT32:
+    case PrimitiveType::ENUM:
+        return 4;
+    case PrimitiveType::U64:
+    case PrimitiveType::I64:
+    case PrimitiveType::FLOAT64:
+    case PrimitiveType::VECTOR2F:
+        return 8;
+    case PrimitiveType::VECTOR3F:
+        return 12;
+    case PrimitiveType::QUATERNIONF:
+        return 16;
+    case PrimitiveType::INVALID:
+    case PrimitiveType::STRING:
+    case PrimitiveType::BLOB:
+        return 0;
+    }
+    return 0;
+}
+
 bool cobs_encode(const uint8_t *decoded,
                  uint16_t decoded_len,
                  uint8_t *encoded,
                  uint16_t encoded_capacity,
                  uint16_t &encoded_len)
 {
-    if (encoded_capacity == 0) {
+    if (encoded == nullptr || encoded_capacity == 0 ||
+        (decoded == nullptr && decoded_len != 0)) {
         encoded_len = 0;
         return false;
     }
@@ -167,6 +206,10 @@ bool cobs_decode(const uint8_t *encoded,
                  uint16_t decoded_capacity,
                  uint16_t &decoded_len)
 {
+    if (decoded == nullptr || (encoded == nullptr && encoded_len != 0)) {
+        decoded_len = 0;
+        return false;
+    }
     uint16_t read_index = 0;
     uint16_t write_index = 0;
 
@@ -277,6 +320,9 @@ PayloadWriter::PayloadWriter(uint8_t *buffer, uint16_t capacity) :
     _buffer(buffer),
     _capacity(capacity)
 {
+    if (buffer == nullptr && capacity != 0) {
+        _ok = false;
+    }
 }
 
 bool PayloadWriter::reserve(uint16_t count)
@@ -331,7 +377,8 @@ bool PayloadWriter::u64(uint64_t value)
 
 bool PayloadWriter::bytes(const uint8_t *data, uint16_t data_len)
 {
-    if (!reserve(data_len)) {
+    if ((data == nullptr && data_len != 0) || !reserve(data_len)) {
+        _ok = false;
         return false;
     }
     if (data_len != 0 && data != nullptr) {
@@ -343,6 +390,10 @@ bool PayloadWriter::bytes(const uint8_t *data, uint16_t data_len)
 
 bool PayloadWriter::str8(const char *value)
 {
+    if (value == nullptr) {
+        _ok = false;
+        return false;
+    }
     const uint16_t len = bounded_strlen(value, 255);
     if (len > 255 || !u8(uint8_t(len))) {
         _ok = false;
@@ -353,6 +404,10 @@ bool PayloadWriter::str8(const char *value)
 
 bool PayloadWriter::str16(const char *value)
 {
+    if (value == nullptr) {
+        _ok = false;
+        return false;
+    }
     const uint16_t len = bounded_strlen(value, 65535);
     if (!u16(len)) {
         return false;
@@ -368,7 +423,8 @@ PayloadReader::PayloadReader(const uint8_t *buffer, uint16_t length) :
 
 bool PayloadReader::reserve(uint16_t count) const
 {
-    return count <= _length && _offset <= _length - count;
+    return !(_buffer == nullptr && count != 0) &&
+           count <= _length && _offset <= _length - count;
 }
 
 bool PayloadReader::u8(uint8_t &value)
@@ -418,7 +474,7 @@ bool PayloadReader::bytes(const uint8_t *&data, uint16_t data_len)
     if (!reserve(data_len)) {
         return false;
     }
-    data = &_buffer[_offset];
+    data = data_len == 0 ? nullptr : &_buffer[_offset];
     _offset += data_len;
     return true;
 }
@@ -440,6 +496,8 @@ bool build_frame(MessageType message_type,
                  uint16_t &encoded_stream_len)
 {
     if (payload_len > MAX_PAYLOAD_SIZE ||
+        decoded_scratch == nullptr || encoded_stream == nullptr ||
+        (payload == nullptr && payload_len != 0) ||
         decoded_capacity < HEADER_SIZE + payload_len + CRC_SIZE ||
         encoded_stream_capacity < 2) {
         encoded_stream_len = 0;

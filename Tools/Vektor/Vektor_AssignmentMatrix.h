@@ -47,6 +47,7 @@ public:
     bool remove(uint32_t route_id);
 
     uint8_t count() const { return _count; }
+    uint32_t revision() const { return _revision; }
     const Entry *by_index(uint8_t index) const;
     const Entry *by_id(uint32_t route_id) const;
     const Entry *to_destination(uint32_t destination_input_id) const;
@@ -77,6 +78,7 @@ private:
     uint8_t _pwm_output_count = 12;
     uint32_t _unavailable_pwm_output_mask = 0;
     bool _persistence_enabled = false;
+    uint32_t _revision = 0;
 };
 
 } // namespace Vektor

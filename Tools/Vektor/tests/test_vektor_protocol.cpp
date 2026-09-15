@@ -25,21 +25,33 @@ const AP_HAL::HAL &hal = AP_HAL::get_HAL();
 namespace {
 
 constexpr Vektor::TimerGroup h743_pwm_timer_groups[] = {
-    { "TIM2", 2 },
-    { "TIM4", 4 },
-    { "TIM8", 4 },
-    { "TIM1", 2 },
+    { "TIM2", 2, 0x0F },
+    { "TIM4", 4, 0x0F },
+    { "TIM8", 4, 0x0F },
+    { "TIM1", 2, 0x0F },
 };
 
 constexpr Vektor::TimerGroup h743_flex_timer_groups[] = {
-    { "TIM5", 2 },
-    { "TIM3", 4 },
+    { "TIM5", 2, 0 },
+    { "TIM3", 4, 0 },
 };
 
 constexpr Vektor::TimerGroup f405_pwm_timer_groups[] = {
-    { "TIM3", 2 },
-    { "TIM2", 4 },
+    { "TIM3", 2, 0x0F },
+    { "TIM2", 4, 0x0F },
 };
+
+constexpr uint8_t h743_flex_modes[] = {
+    Vektor::FLEX_PWM_INPUT,
+    Vektor::FLEX_PWM_INPUT,
+    Vektor::FLEX_PWM_INPUT,
+    Vektor::FLEX_PWM_INPUT,
+    Vektor::FLEX_PWM_INPUT,
+    Vektor::FLEX_PWM_INPUT,
+};
+
+constexpr uint8_t h743_uart_flags[] = { 3, 3, 3, 3 };
+constexpr uint8_t f405_uart_flags[] = { 3, 3, 3 };
 
 constexpr Vektor::BoardCapability h743_test_capability {
     "Vektor Core Evo H743",
@@ -68,6 +80,11 @@ constexpr Vektor::BoardCapability h743_test_capability {
     4,
     h743_flex_timer_groups,
     2,
+    -1,
+    6,
+    h743_flex_modes,
+    h743_uart_flags,
+    Vektor::ProtocolTransport::USB,
     -1,
 };
 
@@ -98,6 +115,11 @@ constexpr Vektor::BoardCapability f405_test_capability {
     nullptr,
     0,
     0,
+    6,
+    nullptr,
+    f405_uart_flags,
+    Vektor::ProtocolTransport::USB,
+    -1,
 };
 
 template<typename ReferenceType, size_t count>
@@ -254,6 +276,35 @@ bool skip_str8(Vektor::Protocol::PayloadReader &reader)
     uint8_t length = 0;
     const uint8_t *bytes = nullptr;
     return reader.u8(length) && reader.bytes(bytes, length);
+}
+
+bool start_session(Vektor::SerialProtocol &serial,
+                   TestUart &uart,
+                   uint16_t sequence,
+                   uint32_t client_nonce)
+{
+    uart.clear_tx();
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter hello(payload, sizeof(payload));
+    hello.u8(1);
+    hello.u8(1);
+    hello.u16(0);
+    hello.u32(0);
+    hello.u32(client_nonce);
+    if (!hello.ok() ||
+        !push_request(uart,
+                      Vektor::Protocol::MessageType::HELLO,
+                      sequence,
+                      hello.data(),
+                      hello.length())) {
+        return false;
+    }
+    serial.update();
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    return parse_single_frame(uart, parser, response) &&
+           response.message_type == Vektor::Protocol::MessageType::HELLO &&
+           response.sequence == sequence;
 }
 
 bool hello_hashes_for_capability(const Vektor::BoardCapability &capability,
@@ -616,11 +667,46 @@ TEST(VektorProtocol, StableIdsMustBeUniqueAndNonzero)
     EXPECT_TRUE(Vektor::Protocol::stable_ids_unique_nonzero(nullptr, 0));
 }
 
+TEST(VektorProtocol, RejectsInvalidNullBuffers)
+{
+    uint8_t buffer[16] {};
+    uint16_t length = 123;
+    EXPECT_EQ(Vektor::Protocol::fnv1a32(nullptr), 0U);
+    EXPECT_EQ(Vektor::Protocol::fnv1a64(nullptr, 1), 0U);
+    EXPECT_EQ(Vektor::Protocol::crc32_iso_hdlc(nullptr, 1), 0U);
+    EXPECT_FALSE(Vektor::Protocol::cobs_encode(
+        nullptr, 1, buffer, sizeof(buffer), length));
+    EXPECT_EQ(length, 0);
+    EXPECT_FALSE(Vektor::Protocol::cobs_decode(
+        buffer, 1, nullptr, 0, length));
+    EXPECT_EQ(length, 0);
+
+    Vektor::Protocol::PayloadWriter writer(nullptr, 1);
+    EXPECT_FALSE(writer.u8(1));
+    EXPECT_FALSE(writer.ok());
+    Vektor::Protocol::PayloadReader reader(nullptr, 1);
+    uint8_t value = 0;
+    EXPECT_FALSE(reader.u8(value));
+}
+
+TEST(VektorCapability, RejectsDescriptorModelsThatOverpromiseHardware)
+{
+    EXPECT_TRUE(Vektor::capability_valid(h743_test_capability));
+    EXPECT_TRUE(Vektor::capability_valid(f405_test_capability));
+
+    Vektor::BoardCapability invalid = h743_test_capability;
+    invalid.flex_mode_flags = nullptr;
+    EXPECT_FALSE(Vektor::capability_valid(invalid));
+    invalid = h743_test_capability;
+    invalid.pwm_outputs--;
+    EXPECT_FALSE(Vektor::capability_valid(invalid));
+}
+
 TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
 {
     const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
     EXPECT_EQ(registry.component_count(), 7);
-    EXPECT_EQ(registry.field_count(), 102);
+    EXPECT_EQ(registry.field_count(), 112);
     EXPECT_EQ(registry.parameter_count(), 22);
 
     EXPECT_EQ(registry.component_id(0),
@@ -648,7 +734,7 @@ TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
     ASSERT_NE(servo_a, nullptr);
     EXPECT_EQ(servo_a->kind, Vektor::Protocol::FieldKind::OUTPUT);
     EXPECT_EQ(servo_a->type, Vektor::Protocol::PrimitiveType::FLOAT32);
-    EXPECT_NE(servo_a->flags & Vektor::FIELD_ROUTABLE, 0U);
+    EXPECT_EQ(servo_a->flags & Vektor::FIELD_ROUTABLE, 0U);
 
     const uint32_t rcin_channel_id = Vektor::Protocol::fnv1a32(
         "component/rcin/0/output/channel_1");
@@ -881,6 +967,21 @@ TEST(VektorPwmInput, NormalizesIndependentPulsesAndTracksFreshness)
     EXPECT_EQ(input.channel(0)->quality, Vektor::SignalQuality::INVALID);
 }
 
+TEST(VektorPwmInput, PreservesIrqTimeAndRejectsInvalidCalibration)
+{
+    EXPECT_EQ(Vektor::PwmInput::extend_irq_timestamp(
+                  0xFFFFFFF0U, 0x100000020ULL),
+              0xFFFFFFF0ULL);
+
+    Vektor::PwmInput input;
+    input.pwm_min.set(1700);
+    input.pwm_trim.set(1500);
+    EXPECT_FALSE(input.calibration_valid());
+    input.ingest_pulse(0, 1600, 1234);
+    EXPECT_EQ(input.channel(0)->timestamp_us, 1234U);
+    EXPECT_EQ(input.channel(0)->quality, Vektor::SignalQuality::INVALID);
+}
+
 TEST(VektorPwmOutput, MapsNormalizedCommandsToCalibratedPulses)
 {
     EXPECT_EQ(Vektor::PwmOutput::normalized_to_pwm(
@@ -913,6 +1014,17 @@ TEST(VektorPwmOutput, MapsNormalizedCommandsToCalibratedPulses)
     output.update(commands, 2, 0);
     EXPECT_FALSE(output.active(0));
     EXPECT_EQ(output.pwm_us(0), 0);
+}
+
+
+TEST(VektorPwmOutput, ReportsInvalidConfigurationWithoutClampingFailsafe)
+{
+    Vektor::PwmOutput output;
+    EXPECT_TRUE(output.configuration_valid());
+    output.pwm_max.set(1800);
+    output.failsafe_pwm.set(1900);
+    EXPECT_FALSE(output.configuration_valid());
+    EXPECT_EQ(output.effective_failsafe_us(), 0);
 }
 
 TEST(VektorAssignmentMatrix, ValidatesReplacesAndRemovesAssignments)
@@ -953,7 +1065,7 @@ TEST(VektorAssignmentMatrix, ValidatesReplacesAndRemovesAssignments)
     EXPECT_EQ(assignments.set(vsp_x, vsp_x, 0, accepted),
               Vektor::AssignmentMatrix::SetResult::SOURCE_NOT_ROUTABLE);
     EXPECT_EQ(assignments.set(servo_a, vsp_x, 0, accepted),
-              Vektor::AssignmentMatrix::SetResult::CYCLE);
+              Vektor::AssignmentMatrix::SetResult::SOURCE_NOT_ROUTABLE);
     EXPECT_EQ(assignments.set(channel_1, vsp_x, 1, accepted),
               Vektor::AssignmentMatrix::SetResult::UNSUPPORTED_FLAGS);
 
@@ -1088,6 +1200,23 @@ TEST(VektorRuntimeState, ClampsWideValues)
               UINT32_MAX);
 }
 
+TEST(VektorRuntimeState, SchedulesAgainstAnAbsoluteDeadline)
+{
+    Vektor::RuntimeState runtime;
+    runtime.init(100, 1000);
+    runtime.begin_loop(3000);
+    runtime.end_loop(3300);
+    EXPECT_EQ(runtime.delay_until_next_loop_us(3300), 9700U);
+
+    runtime.begin_loop(13000);
+    runtime.end_loop(13450);
+    EXPECT_EQ(runtime.delay_until_next_loop_us(13450), 9550U);
+
+    runtime.begin_loop(26000);
+    runtime.end_loop(26500);
+    EXPECT_EQ(runtime.delay_until_next_loop_us(26500), 6500U);
+}
+
 TEST(VektorSubscriptionTable, NegotiatesRateAndSchedulesWithoutBacklog)
 {
     Vektor::SubscriptionTable subscriptions;
@@ -1186,8 +1315,256 @@ TEST(VektorSerialProtocol, DescriptorHashesAreStableAndBoardSpecific)
     EXPECT_NE(h743_capability, 0U);
     EXPECT_EQ(repeated_schema, h743_schema);
     EXPECT_EQ(repeated_capability, h743_capability);
-    EXPECT_EQ(f405_schema, h743_schema);
+    EXPECT_NE(f405_schema, h743_schema);
     EXPECT_NE(f405_capability, h743_capability);
+}
+
+TEST(VektorSerialProtocol, EndpointDescriptorCarriesDirectionAndTransportFlags)
+{
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    Vektor::VspComponent vsp;
+    Vektor::RcinSource rcin;
+    Vektor::PwmInput pwm_input;
+    Vektor::PwmOutput pwm_output;
+    Vektor::AssignmentMatrix assignments;
+    Vektor::SerialProtocol serial;
+    serial.init(&uart,
+                h743_test_capability,
+                parameters,
+                runtime,
+                attitude,
+                vsp,
+                rcin,
+                pwm_input,
+                pwm_output,
+                assignments);
+    ASSERT_TRUE(uart.is_initialized());
+    ASSERT_TRUE(start_session(serial, uart, 1, 0x31415926));
+
+    uart.clear_tx();
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter describe(payload, sizeof(payload));
+    describe.u8(uint8_t(Vektor::Protocol::DescriptorDomain::ENDPOINT));
+    describe.u32(0);
+    describe.u16(1);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::DESCRIBE,
+                             2,
+                             describe.data(),
+                             describe.length()));
+    serial.update();
+
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type,
+              Vektor::Protocol::MessageType::DESCRIBE);
+    Vektor::Protocol::PayloadReader page(response.payload,
+                                         response.payload_len);
+    uint8_t domain = 0;
+    uint32_t next_cursor = 0;
+    uint16_t count = 0;
+    uint16_t record_len = 0;
+    const uint8_t *record_bytes = nullptr;
+    ASSERT_TRUE(page.u8(domain));
+    ASSERT_TRUE(page.u32(next_cursor));
+    ASSERT_TRUE(page.u16(count));
+    ASSERT_TRUE(page.u16(record_len));
+    ASSERT_TRUE(page.bytes(record_bytes, record_len));
+    ASSERT_EQ(count, 1);
+    ASSERT_EQ(domain,
+              uint8_t(Vektor::Protocol::DescriptorDomain::ENDPOINT));
+
+    Vektor::Protocol::PayloadReader endpoint(record_bytes, record_len);
+    uint8_t version = 0;
+    uint32_t endpoint_id = 0;
+    uint8_t kind = 0;
+    uint32_t parent_id = UINT32_MAX;
+    uint64_t flags = 0;
+    ASSERT_TRUE(endpoint.u8(version));
+    ASSERT_TRUE(endpoint.u32(endpoint_id));
+    ASSERT_TRUE(endpoint.u8(kind));
+    ASSERT_TRUE(endpoint.u32(parent_id));
+    ASSERT_TRUE(endpoint.u64(flags));
+    ASSERT_TRUE(skip_str8(endpoint));
+    ASSERT_TRUE(skip_str8(endpoint));
+    EXPECT_EQ(endpoint.remaining(), 0);
+    EXPECT_EQ(version, 1);
+    EXPECT_EQ(endpoint_id, Vektor::Protocol::fnv1a32("hw/usb/0"));
+    EXPECT_EQ(kind, uint8_t(Vektor::Protocol::EndpointKind::USB));
+    EXPECT_EQ(parent_id, 0U);
+    EXPECT_EQ(flags,
+              uint64_t(Vektor::ENDPOINT_INPUT |
+                       Vektor::ENDPOINT_OUTPUT |
+                       Vektor::ENDPOINT_VEKTOR_TRANSPORT));
+    EXPECT_NE(next_cursor, 0U);
+}
+
+TEST(VektorSerialProtocol, RequiresHelloAndAcceptsANewHelloSession)
+{
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    Vektor::VspComponent vsp;
+    Vektor::RcinSource rcin;
+    Vektor::PwmInput pwm_input;
+    Vektor::PwmOutput pwm_output;
+    Vektor::AssignmentMatrix assignments;
+    Vektor::SerialProtocol serial;
+    serial.init(&uart,
+                h743_test_capability,
+                parameters,
+                runtime,
+                attitude,
+                vsp,
+                rcin,
+                pwm_input,
+                pwm_output,
+                assignments);
+    ASSERT_TRUE(uart.is_initialized());
+
+    uart.clear_tx();
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter ping(payload, sizeof(payload));
+    ping.u32(1);
+    ping.u64(2);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::PING,
+                             7,
+                             ping.data(),
+                             ping.length()));
+    serial.update();
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    ASSERT_EQ(response.message_type, Vektor::Protocol::MessageType::ERROR);
+    Vektor::Protocol::PayloadReader error(response.payload,
+                                          response.payload_len);
+    uint8_t request_type = 0;
+    uint16_t error_code = 0;
+    ASSERT_TRUE(error.u8(request_type));
+    ASSERT_TRUE(error.u16(error_code));
+    EXPECT_EQ(error_code,
+              uint16_t(Vektor::Protocol::ErrorCode::INVALID_STATE));
+
+    ASSERT_TRUE(start_session(serial, uart, 1, 0x11111111));
+    // Reusing a sequence with a different nonce starts a new session; it is
+    // not a duplicate-request conflict inherited from the old session.
+    ASSERT_TRUE(start_session(serial, uart, 1, 0x22222222));
+}
+
+TEST(VektorSerialProtocol, SetManyValidatesTheFinalStagedCalibration)
+{
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    Vektor::VspComponent vsp;
+    Vektor::RcinSource rcin;
+    static Vektor::PwmInput pwm_input;
+    pwm_input.pwm_min.set(Vektor::default_pwm_min_us);
+    pwm_input.pwm_trim.set(Vektor::default_pwm_trim_us);
+    pwm_input.pwm_max.set(Vektor::default_pwm_max_us);
+    static Vektor::PwmOutput pwm_output;
+    pwm_output.pwm_min.set(Vektor::default_pwm_min_us);
+    pwm_output.pwm_trim.set(Vektor::default_pwm_trim_us);
+    pwm_output.pwm_max.set(Vektor::default_pwm_max_us);
+    pwm_output.failsafe_pwm.set(0);
+    Vektor::AssignmentMatrix assignments;
+    Vektor::SerialProtocol serial;
+    serial.init(&uart,
+                h743_test_capability,
+                parameters,
+                runtime,
+                attitude,
+                vsp,
+                rcin,
+                pwm_input,
+                pwm_output,
+                assignments);
+    ASSERT_TRUE(uart.is_initialized());
+    ASSERT_TRUE(start_session(serial, uart, 1, 0xABCDEF01));
+
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter valid(payload, sizeof(payload));
+    valid.u16(3);
+    valid.u32(Vektor::SerialCatalog::Parameter::PWMIN_MINIMUM_US.id);
+    valid.u8(uint8_t(Vektor::Protocol::PrimitiveType::I16));
+    valid.u16(1600);
+    valid.u32(Vektor::SerialCatalog::Parameter::PWMIN_TRIM_US.id);
+    valid.u8(uint8_t(Vektor::Protocol::PrimitiveType::I16));
+    valid.u16(1700);
+    valid.u32(Vektor::SerialCatalog::Parameter::PWMIN_MAXIMUM_US.id);
+    valid.u8(uint8_t(Vektor::Protocol::PrimitiveType::I16));
+    valid.u16(1800);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::SET_MANY,
+                             2,
+                             valid.data(),
+                             valid.length()));
+    serial.update();
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type, Vektor::Protocol::MessageType::VALUES);
+    EXPECT_EQ(pwm_input.pwm_min.get(), 1600);
+    EXPECT_EQ(pwm_input.pwm_trim.get(), 1700);
+    EXPECT_EQ(pwm_input.pwm_max.get(), 1800);
+
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter invalid(payload, sizeof(payload));
+    invalid.u16(2);
+    invalid.u32(Vektor::SerialCatalog::Parameter::PWMIN_MINIMUM_US.id);
+    invalid.u8(uint8_t(Vektor::Protocol::PrimitiveType::I16));
+    invalid.u16(1750);
+    invalid.u32(Vektor::SerialCatalog::Parameter::PWMIN_TRIM_US.id);
+    invalid.u8(uint8_t(Vektor::Protocol::PrimitiveType::I16));
+    invalid.u16(1650);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::SET_MANY,
+                             3,
+                             invalid.data(),
+                             invalid.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type, Vektor::Protocol::MessageType::ERROR);
+    EXPECT_EQ(pwm_input.pwm_min.get(), 1600);
+    EXPECT_EQ(pwm_input.pwm_trim.get(), 1700);
+    EXPECT_EQ(pwm_input.pwm_max.get(), 1800);
+
+    pwm_output.failsafe_pwm.set(1900);
+    uart.clear_tx();
+    Vektor::Protocol::PayloadWriter output_valid(payload, sizeof(payload));
+    output_valid.u16(2);
+    output_valid.u32(Vektor::SerialCatalog::Parameter::PWMOUT_MAXIMUM_US.id);
+    output_valid.u8(uint8_t(Vektor::Protocol::PrimitiveType::I16));
+    output_valid.u16(1800);
+    output_valid.u32(Vektor::SerialCatalog::Parameter::PWMOUT_FAILSAFE_US.id);
+    output_valid.u8(uint8_t(Vektor::Protocol::PrimitiveType::I16));
+    output_valid.u16(1700);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::SET_MANY,
+                             4,
+                             output_valid.data(),
+                             output_valid.length()));
+    serial.update();
+    parser.reset();
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    EXPECT_EQ(response.message_type, Vektor::Protocol::MessageType::VALUES);
+    EXPECT_EQ(pwm_output.pwm_max.get(), 1800);
+    EXPECT_EQ(pwm_output.failsafe_pwm.get(), 1700);
 }
 
 TEST(VektorSerialProtocol, ManagesAssignmentsOverRouteMessages)
@@ -1577,7 +1954,7 @@ TEST(VektorSerialProtocol, NegotiatesAndStreamsRuntimeTelemetry)
     EXPECT_EQ(subscribe_response.remaining(), 0);
 
     uart.clear_tx();
-    usleep(20000);
+    usleep(50000);
     serial.update();
     parser.reset();
     ASSERT_TRUE(parse_single_frame(uart, parser, response));

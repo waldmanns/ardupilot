@@ -697,6 +697,12 @@ This is preferable to inventing a runtime alias mechanism in the wire protocol.
 
 A client must not rely on cached board data until the current device has replied to `HELLO`.
 
+Except for response frames, the device rejects every non-`HELLO` request with
+`INVALID_STATE` until a `HELLO` succeeds. An identical `HELLO` retry may replay
+the cached response. Any other valid `HELLO` starts a new logical session and
+clears request-replay and subscription state, irrespective of its sequence
+number.
+
 ### 18.1 HELLO request
 
 Message type:
@@ -1021,6 +1027,20 @@ Kind-specific bytes may follow the minimum record.
 
 The `record_len` envelope allows clients to skip unknown extensions safely.
 
+For UART and USB endpoint records, canonical v1 flags are:
+
+```text
+bit 0  ENDPOINT_INPUT
+bit 1  ENDPOINT_OUTPUT
+bit 2  ENDPOINT_VEKTOR_TRANSPORT
+bits 3..63 reserved
+```
+
+These direction flags describe the externally usable connector, not merely an
+MCU peripheral enabled in generated code. `ENDPOINT_VEKTOR_TRANSPORT` is set
+only on the endpoint actually carrying this protocol session. Flex records use
+the kind-specific mode bits below in the same flags word.
+
 ### 24.1 Flex mode flags
 
 A Flex endpoint advertises only electrically and firmware-supported modes.
@@ -1199,6 +1219,7 @@ repeat count times:
 `SET_MANY` is **validation-atomic** by default:
 
 - validate the complete request first;
+- validate cross-field invariants against the final staged values;
 - if any entry is invalid, apply none;
 - return `ERROR` identifying the failing field when possible.
 
@@ -1341,7 +1362,9 @@ Every requested field must:
 - exist;
 - be readable;
 - be suitable for subscription;
-- have a stable descriptor type.
+- have a stable descriptor type;
+- fit, together with the telemetry header and quality mask, in one negotiated
+  payload.
 
 If one field is invalid, the request is rejected as a whole.
 

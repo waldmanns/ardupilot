@@ -31,9 +31,9 @@ void App::setup()
     pwm_output.reset();
     pwm_output.init(_active_capability->pwm_outputs, 0);
     pwm_input.reset();
-    pwm_input.init();
+    pwm_input.init(_active_capability->pwm_inputs);
     pwm_output.set_reserved_channel_mask(pwm_input.reserved_output_mask());
-    assignments.configure_channel_limits(PwmInput::max_channels,
+    assignments.configure_channel_limits(_active_capability->pwm_inputs,
                                          _active_capability->pwm_outputs,
                                          pwm_input.reserved_output_mask());
     assignments.load_persistent();
@@ -57,12 +57,21 @@ void App::loop()
     update_attitude(now_us);
     update_rcin(now_us);
     pwm_input.update(now_us);
+    refresh_compiled_routes();
     apply_vsp_inputs();
     _vsp.update(now_us);
     apply_pwm_outputs();
     _serial_protocol.update();
-    _runtime.end_loop(AP_HAL::micros64());
-    hal.scheduler->delay(1000U / default_service_rate_hz);
+    const uint64_t completed_us = AP_HAL::micros64();
+    _runtime.end_loop(completed_us);
+    uint32_t delay_us = _runtime.delay_until_next_loop_us(completed_us);
+    while (delay_us > UINT16_MAX) {
+        hal.scheduler->delay_microseconds(UINT16_MAX);
+        delay_us -= UINT16_MAX;
+    }
+    if (delay_us != 0) {
+        hal.scheduler->delay_microseconds_boost(uint16_t(delay_us));
+    }
 }
 
 void App::setup_attitude()
@@ -182,7 +191,7 @@ void App::update_rcin(uint64_t now_us)
     _rcin.update(now_us);
 }
 
-SignalSample<float> App::assigned_float(uint32_t destination_id) const
+App::CompiledSource App::compile_source(uint32_t destination_id) const
 {
     const AssignmentMatrix::Entry *route =
         assignments.to_destination(destination_id);
@@ -197,26 +206,64 @@ SignalSample<float> App::assigned_float(uint32_t destination_id) const
         return {};
     }
 
-    const SignalSample<float> *sample = nullptr;
     if (rcin_channel_for_slot(source->slot, channel_index)) {
-        sample = _rcin.channel(channel_index);
-    } else if (pwmin_channel_for_slot(source->slot, channel_index)) {
-        sample = pwm_input.channel(channel_index);
-    } else if (source->slot == FieldSlot::VSP_SERVO_A) {
+        return { SourceKind::RCIN, channel_index };
+    }
+    if (pwmin_channel_for_slot(source->slot, channel_index)) {
+        return { SourceKind::PWMIN, channel_index };
+    }
+    if (source->slot == FieldSlot::VSP_SERVO_A) {
+        return { SourceKind::VSP_SERVO_A, 0 };
+    }
+    if (source->slot == FieldSlot::VSP_SERVO_B) {
+        return { SourceKind::VSP_SERVO_B, 0 };
+    }
+    return {};
+}
+
+SignalSample<float> App::sample_from(const CompiledSource &source) const
+{
+    const SignalSample<float> *sample = nullptr;
+    switch (source.kind) {
+    case SourceKind::RCIN:
+        sample = _rcin.channel(source.channel);
+        break;
+    case SourceKind::PWMIN:
+        sample = pwm_input.channel(source.channel);
+        break;
+    case SourceKind::VSP_SERVO_A:
         sample = &_vsp.servo_a();
-    } else if (source->slot == FieldSlot::VSP_SERVO_B) {
+        break;
+    case SourceKind::VSP_SERVO_B:
         sample = &_vsp.servo_b();
+        break;
+    case SourceKind::NONE:
+        break;
     }
     return sample == nullptr ? SignalSample<float> {} : *sample;
 }
 
+void App::refresh_compiled_routes()
+{
+    if (_compiled_routes_valid &&
+        _compiled_assignment_revision == assignments.revision()) {
+        return;
+    }
+
+    _vsp_input_sources[0] = compile_source(SerialCatalog::Input::VSP_X.id);
+    _vsp_input_sources[1] = compile_source(SerialCatalog::Input::VSP_Y.id);
+    for (uint8_t channel = 0; channel < PwmOutput::max_channels; channel++) {
+        _pwm_output_sources[channel] = compile_source(
+            SerialCatalog::Input::PWMOUT_CHANNELS[channel]->id);
+    }
+    _compiled_assignment_revision = assignments.revision();
+    _compiled_routes_valid = true;
+}
+
 void App::apply_vsp_inputs()
 {
-    const uint32_t x_id =
-        SerialCatalog::Input::VSP_X.id;
-    const uint32_t y_id =
-        SerialCatalog::Input::VSP_Y.id;
-    _vsp.set_inputs(assigned_float(x_id), assigned_float(y_id));
+    _vsp.set_inputs(sample_from(_vsp_input_sources[0]),
+                    sample_from(_vsp_input_sources[1]));
 }
 
 void App::apply_pwm_outputs()
@@ -228,11 +275,9 @@ void App::apply_pwm_outputs()
     const uint8_t count = MIN(_active_capability->pwm_outputs,
                               PwmOutput::max_channels);
     for (uint8_t channel = 0; channel < count; channel++) {
-        const uint32_t destination_id =
-            SerialCatalog::Input::PWMOUT_CHANNELS[channel]->id;
-        if (assignments.to_destination(destination_id) != nullptr) {
+        if (_pwm_output_sources[channel].kind != SourceKind::NONE) {
             assigned_mask |= 1U << channel;
-            _pwm_commands[channel] = assigned_float(destination_id);
+            _pwm_commands[channel] = sample_from(_pwm_output_sources[channel]);
         }
     }
     pwm_output.update(_pwm_commands, count, assigned_mask);

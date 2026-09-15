@@ -1,0 +1,324 @@
+/*
+ * Canonical descriptor and programming-binding manifest.
+ *
+ * Include sites define the five VEKTOR_* macros to generate firmware schema
+ * descriptors, strongly named C++ bindings, and complete lookup tables.
+ */
+
+VEKTOR_COMPONENT(PROTOCOL, "component/system/0",
+                 "component_type/system/protocol", "protocol", "Protocol", 0, 0)
+VEKTOR_COMPONENT(RUNTIME, "component/system/1",
+                 "component_type/system/runtime", "runtime", "Runtime", 1, 0)
+VEKTOR_COMPONENT(ATTITUDE, "component/attitude/0",
+                 "component_type/sensor/attitude", "attitude0", "Attitude", 0, 0)
+VEKTOR_COMPONENT(VSP, "component/vsp/1",
+                 "component_type/control/vsp", "vsp1", "VSP 1", 1, 0)
+VEKTOR_COMPONENT(RCIN, "component/rcin/0",
+                 "component_type/input/rcin", "rcin0", "RC Input", 0, 0)
+VEKTOR_COMPONENT(PWM_INPUT, "component/pwm_input/0",
+                 "component_type/input/pwm", "pwmin0", "PWM Input", 0, 0)
+VEKTOR_COMPONENT(PWM_OUTPUT, "component/pwm_output/0",
+                 "component_type/output/pwm", "pwmout0", "PWM Output", 0, 0)
+
+VEKTOR_OBSERVABLE(RX_FRAMES, "component/system/0/observable/rx_frames",
+                  U32, PROTOCOL, "rx_frames", "RX Frames", "",
+                  realtime_flags, RX_FRAMES)
+VEKTOR_OBSERVABLE(RX_DROPS, "component/system/0/observable/rx_drops",
+                  U32, PROTOCOL, "rx_drops", "RX Drops", "",
+                  realtime_flags, RX_DROPS)
+VEKTOR_OBSERVABLE(TX_DROPS, "component/system/0/observable/tx_drops",
+                  U32, PROTOCOL, "tx_drops", "TX Drops", "",
+                  realtime_flags, TX_DROPS)
+VEKTOR_OBSERVABLE(UPTIME_MS, "component/system/1/observable/uptime_ms",
+                  U32, RUNTIME, "uptime_ms", "Uptime", "ms",
+                  realtime_flags, UPTIME_MS)
+VEKTOR_OBSERVABLE(LOOP_COUNT, "component/system/1/observable/loop_count",
+                  U32, RUNTIME, "loop_count", "Loop Count", "",
+                  realtime_flags, LOOP_COUNT)
+VEKTOR_OBSERVABLE(LOOP_DT_US, "component/system/1/observable/loop_dt_us",
+                  U32, RUNTIME, "loop_dt_us", "Loop Delta", "us",
+                  realtime_flags, LOOP_DT_US)
+VEKTOR_OBSERVABLE(LOOP_WORK_US, "component/system/1/observable/loop_work_us",
+                  U32, RUNTIME, "loop_work_us", "Loop Work", "us",
+                  realtime_flags, LOOP_WORK_US)
+VEKTOR_OBSERVABLE(LOOP_MAX_WORK_US,
+                  "component/system/1/observable/loop_max_work_us",
+                  U32, RUNTIME, "loop_max_work_us", "Max Loop Work", "us",
+                  realtime_flags, LOOP_MAX_WORK_US)
+VEKTOR_OBSERVABLE(SERVICE_RATE_HZ,
+                  "component/system/1/observable/service_rate_hz",
+                  U16, RUNTIME, "service_rate_hz", "Service Rate", "Hz",
+                  realtime_flags, SERVICE_RATE_HZ)
+VEKTOR_OBSERVABLE(ATTITUDE_ROLL_DEG,
+                  "component/attitude/0/observable/roll_deg",
+                  FLOAT32, ATTITUDE, "roll_deg", "Roll", "deg",
+                  realtime_flags, ATTITUDE_ROLL_DEG)
+VEKTOR_OBSERVABLE(ATTITUDE_PITCH_DEG,
+                  "component/attitude/0/observable/pitch_deg",
+                  FLOAT32, ATTITUDE, "pitch_deg", "Pitch", "deg",
+                  realtime_flags, ATTITUDE_PITCH_DEG)
+VEKTOR_OBSERVABLE(ATTITUDE_YAW_DEG,
+                  "component/attitude/0/observable/yaw_deg",
+                  FLOAT32, ATTITUDE, "yaw_deg", "Yaw", "deg",
+                  realtime_flags, ATTITUDE_YAW_DEG)
+VEKTOR_OBSERVABLE(ATTITUDE_QUATERNION,
+                  "component/attitude/0/observable/quaternion",
+                  QUATERNIONF, ATTITUDE, "quaternion", "Quaternion", "",
+                  realtime_flags, ATTITUDE_QUATERNION)
+VEKTOR_OBSERVABLE(ATTITUDE_BODY_RATES_RAD_S,
+                  "component/attitude/0/observable/body_rates_rad_s",
+                  VECTOR3F, ATTITUDE, "body_rates_rad_s", "Body Rates", "rad/s",
+                  realtime_flags, ATTITUDE_BODY_RATES_RAD_S)
+
+VEKTOR_PARAMETER(SYS_OPTIONS, "component/system/0/parameter/sys_options",
+                 "SYS_OPTIONS", I32, PROTOCOL, "sys_options", "System Options",
+                 "", parameter_live_flags, 0, INT32_MAX, 0, SYS_OPTIONS)
+VEKTOR_PARAMETER(SYS_DESC_PAGE, "component/system/0/parameter/sys_desc_page",
+                 "SYS_DESC_PAGE", I16, PROTOCOL, "sys_desc_page",
+                 "Descriptor Page Size", "records", parameter_live_flags,
+                 Vektor::min_describe_page_records,
+                 Vektor::max_describe_page_records,
+                 Vektor::default_describe_page_records, SYS_DESC_PAGE)
+VEKTOR_PARAMETER(SYS_PROTOCOL_BAUD,
+                 "component/system/0/parameter/sys_protocol_baud",
+                 "SYS_PROTO_BAUD", I32, PROTOCOL, "sys_protocol_baud",
+                 "Protocol Baud", "baud", parameter_reboot_flags,
+                 Vektor::protocol_baud_min, Vektor::protocol_baud_max,
+                 Vektor::protocol_baud, SYS_PROTOCOL_BAUD)
+VEKTOR_PARAMETER(RCIN_UART_PORT, "component/rcin/0/parameter/uart_port",
+                 "RCIN_PORT", I16, RCIN, "uart_port", "Receiver UART",
+                 "serial index", parameter_reboot_flags,
+                 Vektor::rcin_port_min, Vektor::rcin_port_max,
+                 Vektor::default_rcin_port, RCIN_PORT)
+VEKTOR_PARAMETER(RCIN_TIMEOUT_MS, "component/rcin/0/parameter/timeout_ms",
+                 "RCIN_TIMEOUT", I16, RCIN, "timeout_ms", "RC Input Timeout",
+                 "ms", parameter_live_flags, Vektor::rcin_timeout_ms_min,
+                 Vektor::rcin_timeout_ms_max,
+                 Vektor::default_rcin_timeout_ms, RCIN_TIMEOUT_MS)
+VEKTOR_PARAMETER(RCIN_PROTOCOL_MASK,
+                 "component/rcin/0/parameter/protocol_mask",
+                 "RC_PROTOCOLS", I32, RCIN, "protocol_mask",
+                 "Receiver Protocols", "bitmask", parameter_live_flags,
+                 0, Vektor::rcin_protocol_mask_max, 1, RCIN_PROTOCOLS)
+
+VEKTOR_INPUT(VSP_X, "component/vsp/1/input/x", FLOAT32, VSP, "x",
+             "X Command", "normalized", routable_realtime_flags, VSP_X)
+VEKTOR_INPUT(VSP_Y, "component/vsp/1/input/y", FLOAT32, VSP, "y",
+             "Y Command", "normalized", routable_realtime_flags, VSP_Y)
+VEKTOR_OUTPUT(VSP_SERVO_A, "component/vsp/1/output/servo_a", FLOAT32,
+              VSP, "servo_a", "Servo A", "normalized",
+              realtime_flags, VSP_SERVO_A)
+VEKTOR_OUTPUT(VSP_SERVO_B, "component/vsp/1/output/servo_b", FLOAT32,
+              VSP, "servo_b", "Servo B", "normalized",
+              realtime_flags, VSP_SERVO_B)
+
+#define VEKTOR_RCIN_OUTPUT_BINDING(CHANNEL)                                 \
+    VEKTOR_OUTPUT(RCIN_CHANNEL_##CHANNEL,                                   \
+                  "component/rcin/0/output/channel_" #CHANNEL,              \
+                  FLOAT32, RCIN, "channel_" #CHANNEL,                       \
+                  "Channel " #CHANNEL, "normalized",                        \
+                  routable_realtime_flags, RCIN_CHANNEL_##CHANNEL)
+VEKTOR_RCIN_OUTPUT_BINDING(1)
+VEKTOR_RCIN_OUTPUT_BINDING(2)
+VEKTOR_RCIN_OUTPUT_BINDING(3)
+VEKTOR_RCIN_OUTPUT_BINDING(4)
+VEKTOR_RCIN_OUTPUT_BINDING(5)
+VEKTOR_RCIN_OUTPUT_BINDING(6)
+VEKTOR_RCIN_OUTPUT_BINDING(7)
+VEKTOR_RCIN_OUTPUT_BINDING(8)
+VEKTOR_RCIN_OUTPUT_BINDING(9)
+VEKTOR_RCIN_OUTPUT_BINDING(10)
+VEKTOR_RCIN_OUTPUT_BINDING(11)
+VEKTOR_RCIN_OUTPUT_BINDING(12)
+VEKTOR_RCIN_OUTPUT_BINDING(13)
+VEKTOR_RCIN_OUTPUT_BINDING(14)
+VEKTOR_RCIN_OUTPUT_BINDING(15)
+VEKTOR_RCIN_OUTPUT_BINDING(16)
+#undef VEKTOR_RCIN_OUTPUT_BINDING
+
+#define VEKTOR_RCIN_PWM_BINDING(CHANNEL)                                    \
+    VEKTOR_OBSERVABLE(RCIN_CHANNEL_##CHANNEL##_US,                          \
+                      "component/rcin/0/observable/channel_" #CHANNEL "_us",\
+                      U16, RCIN, "channel_" #CHANNEL "_us",                 \
+                      "Channel " #CHANNEL " Pulse", "us",                   \
+                      realtime_flags, RCIN_PWM_##CHANNEL)
+VEKTOR_RCIN_PWM_BINDING(1)
+VEKTOR_RCIN_PWM_BINDING(2)
+VEKTOR_RCIN_PWM_BINDING(3)
+VEKTOR_RCIN_PWM_BINDING(4)
+VEKTOR_RCIN_PWM_BINDING(5)
+VEKTOR_RCIN_PWM_BINDING(6)
+VEKTOR_RCIN_PWM_BINDING(7)
+VEKTOR_RCIN_PWM_BINDING(8)
+VEKTOR_RCIN_PWM_BINDING(9)
+VEKTOR_RCIN_PWM_BINDING(10)
+VEKTOR_RCIN_PWM_BINDING(11)
+VEKTOR_RCIN_PWM_BINDING(12)
+VEKTOR_RCIN_PWM_BINDING(13)
+VEKTOR_RCIN_PWM_BINDING(14)
+VEKTOR_RCIN_PWM_BINDING(15)
+VEKTOR_RCIN_PWM_BINDING(16)
+#undef VEKTOR_RCIN_PWM_BINDING
+
+#define VEKTOR_PWMIN_PIN_BINDING(CHANNEL)                                   \
+    VEKTOR_PARAMETER(PWMIN_CHANNEL_##CHANNEL##_PIN,                         \
+                     "component/pwm_input/0/parameter/channel_" #CHANNEL    \
+                     "_pin", "PWIN" #CHANNEL "_PIN", I16, PWM_INPUT,        \
+                     "channel_" #CHANNEL "_pin", "Channel " #CHANNEL " Pin",\
+                     "GPIO", parameter_reboot_flags, -1, UINT8_MAX, -1,     \
+                     PWMIN_PIN_##CHANNEL)
+VEKTOR_PWMIN_PIN_BINDING(1)
+VEKTOR_PWMIN_PIN_BINDING(2)
+VEKTOR_PWMIN_PIN_BINDING(3)
+VEKTOR_PWMIN_PIN_BINDING(4)
+VEKTOR_PWMIN_PIN_BINDING(5)
+VEKTOR_PWMIN_PIN_BINDING(6)
+#undef VEKTOR_PWMIN_PIN_BINDING
+
+#define VEKTOR_PWMIN_ATTACH_BINDING(CHANNEL)                                \
+    VEKTOR_OBSERVABLE(PWMIN_CHANNEL_##CHANNEL##_ATTACH_STATUS,              \
+                      "component/pwm_input/0/observable/channel_" #CHANNEL  \
+                      "_attach_status", U16, PWM_INPUT,                     \
+                      "channel_" #CHANNEL "_attach_status",                 \
+                      "Channel " #CHANNEL " Capture Status", "status",      \
+                      realtime_flags, PWMIN_ATTACH_STATUS_##CHANNEL)
+VEKTOR_PWMIN_ATTACH_BINDING(1)
+VEKTOR_PWMIN_ATTACH_BINDING(2)
+VEKTOR_PWMIN_ATTACH_BINDING(3)
+VEKTOR_PWMIN_ATTACH_BINDING(4)
+VEKTOR_PWMIN_ATTACH_BINDING(5)
+VEKTOR_PWMIN_ATTACH_BINDING(6)
+#undef VEKTOR_PWMIN_ATTACH_BINDING
+
+VEKTOR_OBSERVABLE(PWMIN_CONFIGURATION_VALID,
+                  "component/pwm_input/0/observable/configuration_valid",
+                  U16, PWM_INPUT, "configuration_valid",
+                  "Input Configuration Valid", "bool",
+                  realtime_flags, PWMIN_CONFIG_VALID)
+VEKTOR_PARAMETER(PWMIN_TIMEOUT_MS,
+                 "component/pwm_input/0/parameter/timeout_ms",
+                 "PWIN_TIMEOUT", I16, PWM_INPUT, "timeout_ms", "Input Timeout",
+                 "ms", parameter_live_flags, Vektor::pwmin_timeout_ms_min,
+                 Vektor::pwmin_timeout_ms_max,
+                 Vektor::default_pwmin_timeout_ms, PWMIN_TIMEOUT_MS)
+VEKTOR_PARAMETER(PWMIN_MINIMUM_US,
+                 "component/pwm_input/0/parameter/minimum_us",
+                 "PWIN_MIN", I16, PWM_INPUT, "minimum_us", "Input Minimum",
+                 "PWM", parameter_live_flags, Vektor::pwm_calibration_min_us,
+                 Vektor::pwm_calibration_max_us, Vektor::default_pwm_min_us,
+                 PWMIN_MIN_US)
+VEKTOR_PARAMETER(PWMIN_TRIM_US,
+                 "component/pwm_input/0/parameter/trim_us",
+                 "PWIN_TRIM", I16, PWM_INPUT, "trim_us", "Input Trim", "PWM",
+                 parameter_live_flags, Vektor::pwm_calibration_min_us,
+                 Vektor::pwm_calibration_max_us, Vektor::default_pwm_trim_us,
+                 PWMIN_TRIM_US)
+VEKTOR_PARAMETER(PWMIN_MAXIMUM_US,
+                 "component/pwm_input/0/parameter/maximum_us",
+                 "PWIN_MAX", I16, PWM_INPUT, "maximum_us", "Input Maximum",
+                 "PWM", parameter_live_flags, Vektor::pwm_calibration_min_us,
+                 Vektor::pwm_calibration_max_us, Vektor::default_pwm_max_us,
+                 PWMIN_MAX_US)
+
+VEKTOR_PARAMETER(PWMOUT_RATE_HZ,
+                 "component/pwm_output/0/parameter/rate_hz",
+                 "PWM_RATE", I16, PWM_OUTPUT, "rate_hz", "Output Rate", "Hz",
+                 parameter_live_flags, 50, 330, Vektor::default_pwm_rate_hz,
+                 PWMOUT_RATE_HZ)
+VEKTOR_PARAMETER(PWMOUT_MINIMUM_US,
+                 "component/pwm_output/0/parameter/minimum_us",
+                 "PWM_MIN", I16, PWM_OUTPUT, "minimum_us", "Output Minimum",
+                 "PWM", parameter_live_flags, Vektor::pwm_calibration_min_us,
+                 Vektor::pwm_calibration_max_us, Vektor::default_pwm_min_us,
+                 PWMOUT_MIN_US)
+VEKTOR_PARAMETER(PWMOUT_TRIM_US,
+                 "component/pwm_output/0/parameter/trim_us",
+                 "PWM_TRIM", I16, PWM_OUTPUT, "trim_us", "Output Trim", "PWM",
+                 parameter_live_flags, Vektor::pwm_calibration_min_us,
+                 Vektor::pwm_calibration_max_us, Vektor::default_pwm_trim_us,
+                 PWMOUT_TRIM_US)
+VEKTOR_PARAMETER(PWMOUT_MAXIMUM_US,
+                 "component/pwm_output/0/parameter/maximum_us",
+                 "PWM_MAX", I16, PWM_OUTPUT, "maximum_us", "Output Maximum",
+                 "PWM", parameter_live_flags, Vektor::pwm_calibration_min_us,
+                 Vektor::pwm_calibration_max_us, Vektor::default_pwm_max_us,
+                 PWMOUT_MAX_US)
+VEKTOR_PARAMETER(PWMOUT_REVERSE_MASK,
+                 "component/pwm_output/0/parameter/reverse_mask",
+                 "PWM_REVERSE", I16, PWM_OUTPUT, "reverse_mask",
+                 "Reverse Mask", "bitmask", parameter_live_flags,
+                 0, Vektor::pwm_reverse_mask_max, 0, PWMOUT_REVERSE_MASK)
+VEKTOR_PARAMETER(PWMOUT_FAILSAFE_US,
+                 "component/pwm_output/0/parameter/failsafe_us",
+                 "PWM_FAILSAFE", I16, PWM_OUTPUT, "failsafe_us",
+                 "Failsafe Pulse", "PWM", parameter_live_flags,
+                 0, Vektor::pwm_calibration_max_us, 0, PWMOUT_FAILSAFE_US)
+VEKTOR_OBSERVABLE(PWMOUT_CONFIGURATION_VALID,
+                  "component/pwm_output/0/observable/configuration_valid",
+                  U16, PWM_OUTPUT, "configuration_valid",
+                  "Output Configuration Valid", "bool",
+                  realtime_flags, PWMOUT_CONFIG_VALID)
+VEKTOR_OBSERVABLE(PWMOUT_EFFECTIVE_RATE_HZ,
+                  "component/pwm_output/0/observable/effective_rate_hz",
+                  U16, PWM_OUTPUT, "effective_rate_hz",
+                  "Effective Output Rate", "Hz",
+                  realtime_flags, PWMOUT_EFFECTIVE_RATE_HZ)
+VEKTOR_OBSERVABLE(PWMOUT_EFFECTIVE_FAILSAFE_US,
+                  "component/pwm_output/0/observable/effective_failsafe_us",
+                  U16, PWM_OUTPUT, "effective_failsafe_us",
+                  "Effective Output Failsafe", "PWM",
+                  realtime_flags, PWMOUT_EFFECTIVE_FAILSAFE_US)
+
+#define VEKTOR_PWMIN_OUTPUT_BINDING(CHANNEL)                                \
+    VEKTOR_OUTPUT(PWMIN_CHANNEL_##CHANNEL,                                  \
+                  "component/pwm_input/0/output/channel_" #CHANNEL,         \
+                  FLOAT32, PWM_INPUT, "channel_" #CHANNEL,                  \
+                  "Channel " #CHANNEL, "normalized",                        \
+                  routable_realtime_flags, PWMIN_CHANNEL_##CHANNEL)
+VEKTOR_PWMIN_OUTPUT_BINDING(1)
+VEKTOR_PWMIN_OUTPUT_BINDING(2)
+VEKTOR_PWMIN_OUTPUT_BINDING(3)
+VEKTOR_PWMIN_OUTPUT_BINDING(4)
+VEKTOR_PWMIN_OUTPUT_BINDING(5)
+VEKTOR_PWMIN_OUTPUT_BINDING(6)
+#undef VEKTOR_PWMIN_OUTPUT_BINDING
+
+#define VEKTOR_PWMOUT_INPUT_BINDING(CHANNEL)                                \
+    VEKTOR_INPUT(PWMOUT_CHANNEL_##CHANNEL,                                  \
+                 "component/pwm_output/0/input/channel_" #CHANNEL,          \
+                 FLOAT32, PWM_OUTPUT, "channel_" #CHANNEL,                  \
+                 "Channel " #CHANNEL, "normalized",                         \
+                 routable_realtime_flags, PWMOUT_CHANNEL_##CHANNEL)
+VEKTOR_PWMOUT_INPUT_BINDING(1)
+VEKTOR_PWMOUT_INPUT_BINDING(2)
+VEKTOR_PWMOUT_INPUT_BINDING(3)
+VEKTOR_PWMOUT_INPUT_BINDING(4)
+VEKTOR_PWMOUT_INPUT_BINDING(5)
+VEKTOR_PWMOUT_INPUT_BINDING(6)
+VEKTOR_PWMOUT_INPUT_BINDING(7)
+VEKTOR_PWMOUT_INPUT_BINDING(8)
+VEKTOR_PWMOUT_INPUT_BINDING(9)
+VEKTOR_PWMOUT_INPUT_BINDING(10)
+VEKTOR_PWMOUT_INPUT_BINDING(11)
+VEKTOR_PWMOUT_INPUT_BINDING(12)
+#undef VEKTOR_PWMOUT_INPUT_BINDING
+
+#define VEKTOR_PWMOUT_OUTPUT_BINDING(CHANNEL)                               \
+    VEKTOR_OUTPUT(PWMOUT_CHANNEL_##CHANNEL,                                 \
+                  "component/pwm_output/0/output/channel_" #CHANNEL,        \
+                  U16, PWM_OUTPUT, "channel_" #CHANNEL,                     \
+                  "Channel " #CHANNEL " Pulse", "us",                       \
+                  realtime_flags, PWMOUT_PULSE_##CHANNEL)
+VEKTOR_PWMOUT_OUTPUT_BINDING(1)
+VEKTOR_PWMOUT_OUTPUT_BINDING(2)
+VEKTOR_PWMOUT_OUTPUT_BINDING(3)
+VEKTOR_PWMOUT_OUTPUT_BINDING(4)
+VEKTOR_PWMOUT_OUTPUT_BINDING(5)
+VEKTOR_PWMOUT_OUTPUT_BINDING(6)
+VEKTOR_PWMOUT_OUTPUT_BINDING(7)
+VEKTOR_PWMOUT_OUTPUT_BINDING(8)
+VEKTOR_PWMOUT_OUTPUT_BINDING(9)
+VEKTOR_PWMOUT_OUTPUT_BINDING(10)
+VEKTOR_PWMOUT_OUTPUT_BINDING(11)
+VEKTOR_PWMOUT_OUTPUT_BINDING(12)
+#undef VEKTOR_PWMOUT_OUTPUT_BINDING

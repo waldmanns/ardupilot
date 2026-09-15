@@ -86,38 +86,54 @@ void PwmInput::reset()
         _have_pulse[i] = false;
         _value_valid[i] = false;
         _attached[i] = false;
+        _attach_status[i] = AttachStatus::DISABLED;
         _capture_pin[i] = 0;
         _rise_us[i] = 0;
+        _have_rise[i] = false;
         _captured_width_us[i] = 0;
+        _captured_timestamp_us[i] = 0;
         _new_pulse[i] = false;
     }
     _reserved_output_mask = 0;
+    _channel_count = 0;
 }
 
-void PwmInput::init()
+void PwmInput::init(uint8_t channel_count)
 {
-    if (hal.gpio == nullptr) {
-        return;
-    }
+    _channel_count = MIN(channel_count, max_channels);
 
     for (uint8_t channel_index = 0;
-        channel_index < max_channels;
+         channel_index < _channel_count;
          channel_index++) {
         const int16_t configured_pin = pins[channel_index].get();
-        if (configured_pin < 0 || configured_pin > UINT8_MAX) {
+        if (configured_pin < 0) {
+            continue;
+        }
+        if (configured_pin > UINT8_MAX) {
+            _attach_status[channel_index] = AttachStatus::INVALID_PIN;
             continue;
         }
 
         bool duplicate = false;
         for (uint8_t previous = 0; previous < channel_index; previous++) {
-            duplicate |= _attached[previous] &&
+            duplicate |= pins[previous].get() == configured_pin &&
                          _capture_pin[previous] == configured_pin;
         }
-        if (duplicate || !hal.gpio->valid_pin(uint8_t(configured_pin))) {
+        if (duplicate) {
+            _attach_status[channel_index] = AttachStatus::DUPLICATE_PIN;
             continue;
         }
 
         _capture_pin[channel_index] = uint8_t(configured_pin);
+        if (hal.gpio == nullptr) {
+            _attach_status[channel_index] = AttachStatus::GPIO_UNAVAILABLE;
+            continue;
+        }
+        if (!hal.gpio->valid_pin(uint8_t(configured_pin))) {
+            _attach_status[channel_index] = AttachStatus::INVALID_PIN;
+            continue;
+        }
+
         uint8_t output_channel = 0;
         if (hal.gpio->pin_to_servo_channel(uint8_t(configured_pin),
                                           output_channel) &&
@@ -136,8 +152,10 @@ void PwmInput::init()
                                 uint32_t),
             AP_HAL::GPIO::INTERRUPT_BOTH);
         if (!_attached[channel_index]) {
+            _attach_status[channel_index] = AttachStatus::ATTACH_FAILED;
             continue;
         }
+        _attach_status[channel_index] = AttachStatus::ATTACHED;
     }
 }
 
@@ -152,10 +170,12 @@ void PwmInput::update(uint64_t now_us)
 
     for (uint8_t i = 0; i < max_channels; i++) {
         uint32_t captured_width = 0;
+        uint32_t captured_timestamp = 0;
         bool have_new_pulse = false;
         void *irq_state = hal.scheduler->disable_interrupts_save();
         if (_new_pulse[i]) {
             captured_width = _captured_width_us[i];
+            captured_timestamp = _captured_timestamp_us[i];
             _new_pulse[i] = false;
             have_new_pulse = true;
         }
@@ -165,7 +185,7 @@ void PwmInput::update(uint64_t now_us)
             ingest_pulse(i,
                          captured_width > UINT16_MAX ?
                          UINT16_MAX : uint16_t(captured_width),
-                         now_us);
+                         extend_irq_timestamp(captured_timestamp, now_us));
         }
 
         if (!_have_pulse[i]) {
@@ -193,12 +213,13 @@ void PwmInput::ingest_pulse(uint8_t channel_index,
     uint16_t minimum = default_pwm_min_us;
     uint16_t trim = default_pwm_trim_us;
     uint16_t maximum = default_pwm_max_us;
-    (void)calibration(minimum, trim, maximum);
+    const bool calibration_ok = calibration(minimum, trim, maximum);
 
     _raw_pwm[channel_index] = pulse_us;
     _last_pulse_us[channel_index] = timestamp_us;
     _have_pulse[channel_index] = true;
-    _value_valid[channel_index] = pulse_us >= pwm_input_valid_min_us &&
+    _value_valid[channel_index] = calibration_ok &&
+                                  pulse_us >= pwm_input_valid_min_us &&
                                   pulse_us <= pwm_input_valid_max_us;
     _channels[channel_index].timestamp_us = timestamp_us;
     if (_value_valid[channel_index]) {
@@ -226,6 +247,26 @@ uint16_t PwmInput::raw_pwm(uint8_t index) const
 bool PwmInput::attached(uint8_t index) const
 {
     return index < max_channels && _attached[index];
+}
+
+PwmInput::AttachStatus PwmInput::attach_status(uint8_t index) const
+{
+    return index < max_channels ? _attach_status[index] :
+                                  AttachStatus::INVALID_PIN;
+}
+
+bool PwmInput::calibration_valid() const
+{
+    uint16_t minimum = 0;
+    uint16_t trim = 0;
+    uint16_t maximum = 0;
+    return calibration(minimum, trim, maximum);
+}
+
+uint64_t PwmInput::extend_irq_timestamp(uint32_t timestamp_us,
+                                        uint64_t now_us)
+{
+    return now_us - uint32_t(uint32_t(now_us) - timestamp_us);
 }
 
 float PwmInput::normalize_pwm(uint16_t pulse_us,
@@ -260,9 +301,11 @@ void PwmInput::irq_handler(uint8_t pin,
         }
         if (pin_high) {
             _rise_us[i] = timestamp_us;
-        } else if (_rise_us[i] != 0) {
+            _have_rise[i] = true;
+        } else if (_have_rise[i]) {
             _captured_width_us[i] = timestamp_us - _rise_us[i];
-            _rise_us[i] = 0;
+            _captured_timestamp_us[i] = timestamp_us;
+            _have_rise[i] = false;
             _new_pulse[i] = true;
         }
         return;

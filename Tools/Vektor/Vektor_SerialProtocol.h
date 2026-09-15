@@ -32,6 +32,12 @@ public:
     void update();
 
 private:
+    struct ParameterUpdate {
+        uint32_t field_id;
+        uint8_t type_id;
+        uint32_t raw;
+    };
+
     void handle_frame(const Protocol::FrameView &frame);
     void handle_hello(const Protocol::FrameView &frame);
     void handle_ping(const Protocol::FrameView &frame);
@@ -141,6 +147,11 @@ private:
                                   uint32_t raw,
                                   Protocol::ErrorCode &code,
                                   const char *&detail) const;
+    bool validate_parameter_set(const ParameterUpdate *updates,
+                                uint16_t count,
+                                Protocol::ErrorCode &code,
+                                uint32_t &failing_field_id,
+                                const char *&detail) const;
     bool read_typed_value(Protocol::PayloadReader &reader,
                           Protocol::PrimitiveType type,
                           uint32_t &raw) const;
@@ -164,6 +175,9 @@ private:
     uint16_t endpoint_count() const;
     uint16_t timer_group_count() const;
     uint16_t runtime_limit_count() const;
+    bool field_available(const FieldDescriptor &field) const;
+    const FieldDescriptor *available_field_by_index(uint16_t index,
+                                                    uint16_t *schema_index = nullptr) const;
 
     AP_HAL::UARTDriver *_uart = nullptr;
     const BoardCapability *_capability = nullptr;
@@ -184,6 +198,8 @@ private:
     uint16_t _capture_sequence = 0;
     uint32_t _capture_payload_crc = 0;
     uint32_t _server_nonce = 0;
+    uint16_t _hello_sequence = 0;
+    uint32_t _hello_payload_crc = 0;
     uint64_t _schema_hash = 0;
     uint64_t _capability_hash = 0;
     uint32_t _rx_frames = 0;

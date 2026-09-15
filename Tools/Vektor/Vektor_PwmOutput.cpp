@@ -110,10 +110,20 @@ void PwmOutput::update(const SignalSample<float> *commands,
     uint16_t minimum = default_pwm_min_us;
     uint16_t trim = default_pwm_trim_us;
     uint16_t maximum = default_pwm_max_us;
-    (void)calibration(minimum, trim, maximum);
+    if (!calibration(minimum, trim, maximum) || configured_rate() == 0) {
+        disable_all();
+        return;
+    }
+    const int16_t configured_failsafe_value = failsafe_pwm.get();
+    if (configured_failsafe_value < 0 ||
+        (configured_failsafe_value != 0 &&
+         (configured_failsafe_value < minimum ||
+          configured_failsafe_value > maximum))) {
+        disable_all();
+        return;
+    }
     const uint16_t configured_failsafe =
-        failsafe_pwm.get() <= 0 ? 0 :
-        constrain_int16(failsafe_pwm.get(), minimum, maximum);
+        uint16_t(configured_failsafe_value);
     const uint16_t reversed = uint16_t(reverse_mask.get());
 
     hal.rcout->cork();
@@ -238,13 +248,14 @@ bool PwmOutput::calibration(uint16_t &minimum,
 uint16_t PwmOutput::configured_rate() const
 {
     const uint16_t configured = uint16_t(rate_hz.get());
-    return supported_rate(configured) ? configured : default_pwm_rate_hz;
+    return supported_rate(configured) ? configured : 0;
 }
 
 void PwmOutput::apply_rate()
 {
     const uint16_t rate = configured_rate();
-    if (!_initialized || rate == _applied_rate_hz || _channel_count == 0) {
+    if (!_initialized || rate == 0 || rate == _applied_rate_hz ||
+        _channel_count == 0) {
         return;
     }
     const uint32_t channel_mask =
@@ -253,6 +264,49 @@ void PwmOutput::apply_rate()
         hal.rcout->set_freq(channel_mask, rate);
     }
     _applied_rate_hz = rate;
+}
+
+uint16_t PwmOutput::effective_failsafe_us() const
+{
+    uint16_t minimum = 0;
+    uint16_t trim = 0;
+    uint16_t maximum = 0;
+    if (!calibration(minimum, trim, maximum)) {
+        return 0;
+    }
+    const int16_t configured = failsafe_pwm.get();
+    return configured == 0 ||
+                   (configured >= minimum && configured <= maximum) ?
+               uint16_t(configured) : 0;
+}
+
+bool PwmOutput::configuration_valid() const
+{
+    uint16_t minimum = 0;
+    uint16_t trim = 0;
+    uint16_t maximum = 0;
+    if (!calibration(minimum, trim, maximum) || configured_rate() == 0) {
+        return false;
+    }
+    const int16_t configured_failsafe = failsafe_pwm.get();
+    return configured_failsafe >= 0 &&
+           (configured_failsafe == 0 ||
+            (configured_failsafe >= minimum &&
+             configured_failsafe <= maximum));
+}
+
+void PwmOutput::disable_all()
+{
+    if (!_initialized || hal.rcout == nullptr) {
+        return;
+    }
+    hal.rcout->cork();
+    for (uint8_t i = 0; i < _channel_count; i++) {
+        _pwm_us[i] = 0;
+        _active[i] = false;
+        hal.rcout->disable_ch(i);
+    }
+    hal.rcout->push();
 }
 
 } // namespace Vektor

@@ -72,6 +72,25 @@ public:
     static const AP_Param::Info var_info[];
 
 private:
+    enum class SourceKind : uint8_t {
+        NONE,
+        RCIN,
+        PWMIN,
+        VSP_SERVO_A,
+        VSP_SERVO_B,
+    };
+
+    struct CompiledSource {
+        SourceKind kind = SourceKind::NONE;
+        uint8_t channel = 0;
+
+        CompiledSource() = default;
+        constexpr CompiledSource(SourceKind source_kind, uint8_t source_channel) :
+            kind(source_kind),
+            channel(source_channel)
+        {}
+    };
+
     void load_parameters();
     void setup_rcin_uart();
     void setup_attitude();
@@ -79,7 +98,9 @@ private:
     void update_rcin(uint64_t now_us);
     void apply_vsp_inputs();
     void apply_pwm_outputs();
-    SignalSample<float> assigned_float(uint32_t destination_id) const;
+    void refresh_compiled_routes();
+    CompiledSource compile_source(uint32_t destination_id) const;
+    SignalSample<float> sample_from(const CompiledSource &source) const;
 
     AP_Param param_loader{var_info};
     // The ChibiOS RCOutput driver consults the SRV channel registry during
@@ -91,6 +112,10 @@ private:
     RcinSource _rcin;
     VspComponent _vsp;
     SignalSample<float> _pwm_commands[PwmOutput::max_channels] {};
+    CompiledSource _vsp_input_sources[2] {};
+    CompiledSource _pwm_output_sources[PwmOutput::max_channels] {};
+    uint32_t _compiled_assignment_revision = 0;
+    bool _compiled_routes_valid = false;
     SerialProtocol _serial_protocol;
 #if VEKTOR_ATTITUDE_ENABLED
     uint64_t _last_compass_update_us = 0;

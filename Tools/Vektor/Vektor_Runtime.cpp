@@ -16,6 +16,7 @@ void RuntimeState::init(uint32_t service_rate_hz, uint64_t now_us)
 {
     _boot_time_us = now_us;
     _last_loop_start_us = 0;
+    _next_loop_start_us = now_us;
     _loop_count = 0;
     _last_loop_dt_us = 0;
     _last_loop_work_us = 0;
@@ -23,6 +24,8 @@ void RuntimeState::init(uint32_t service_rate_hz, uint64_t now_us)
     _service_rate_hz = service_rate_hz > UINT16_MAX ?
         UINT16_MAX :
         uint16_t(service_rate_hz);
+    _loop_period_us = service_rate_hz == 0 ? 1 :
+        uint32_t((1000000ULL + service_rate_hz / 2U) / service_rate_hz);
     _started = false;
 }
 
@@ -34,6 +37,8 @@ void RuntimeState::begin_loop(uint64_t now_us)
             0;
     } else {
         _last_loop_dt_us = 0;
+        _next_loop_start_us = now_us > UINT64_MAX - _loop_period_us ?
+            UINT64_MAX : now_us + _loop_period_us;
         _started = true;
     }
 
@@ -41,6 +46,31 @@ void RuntimeState::begin_loop(uint64_t now_us)
     if (_loop_count != UINT32_MAX) {
         _loop_count++;
     }
+}
+
+uint32_t RuntimeState::delay_until_next_loop_us(uint64_t now_us)
+{
+    if (!_started || _next_loop_start_us == UINT64_MAX) {
+        return 0;
+    }
+
+    if (now_us > _next_loop_start_us) {
+        const uint64_t periods_missed =
+            ((now_us - _next_loop_start_us) / _loop_period_us) + 1U;
+        if (periods_missed >
+            (UINT64_MAX - _next_loop_start_us) / _loop_period_us) {
+            _next_loop_start_us = UINT64_MAX;
+            return 0;
+        }
+        _next_loop_start_us += periods_missed * _loop_period_us;
+    }
+
+    const uint64_t delay_us = _next_loop_start_us - now_us;
+    _next_loop_start_us = _next_loop_start_us >
+                                  UINT64_MAX - _loop_period_us ?
+                              UINT64_MAX :
+                              _next_loop_start_us + _loop_period_us;
+    return clamp_u32(delay_us);
 }
 
 void RuntimeState::end_loop(uint64_t now_us)

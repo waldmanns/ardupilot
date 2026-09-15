@@ -17,7 +17,8 @@ This scaffold intentionally starts small. It provides:
 - a `Vektor` application entry point;
 - a folder-local waf program definition;
 - a compile-time board capability model populated from the selected hwdef;
-- a small runtime state service with loop timing and uptime observables;
+- a runtime state service with absolute-deadline loop scheduling, timing, and
+  uptime observables;
 - a standard ArduPilot INS/DCM attitude estimator with realtime Euler,
   quaternion, and body-rate telemetry on IMU-equipped boards;
 - a minimal AP_Param-backed system parameter set;
@@ -25,15 +26,19 @@ This scaffold intentionally starts small. It provides:
 - a 16-channel RC input source with AP_RCProtocol UART autodetection,
   per-channel calibration, receiver failsafe/freshness tracking, and normalized
   typed outputs;
-- six GPIO edge-capture PWM inputs with independent freshness/quality state;
+- board-advertised GPIO edge-capture PWM inputs with independent
+  freshness/quality and capture-attachment state;
 - a normalized PWM output bank that drives the board-advertised output count,
   owns pulse calibration and frame rate, and disables unrouted outputs;
-- a common component/field schema registry that owns stable IDs and emits the
-  protocol descriptor records;
+- a component/field schema registry that owns stable IDs and emits only the
+  fields implemented by the selected board;
+- a single includable catalog manifest that generates the C++ field bindings
+  and complete lookup tables, with tests enforcing parity with the schema;
 - Vektor Serial Protocol v1 framing with COBS, CRC-32/ISO-HDLC, `PING`,
   `HELLO`, paged `DESCRIBE` for board/endpoints/timer groups/protocol/runtime
   diagnostics/system parameters, typed diagnostic and parameter `GET`/
-  `GET_MANY`, persistent parameter `SET`/`SET_MANY`, `GET_ALL_PARAMS`, and
+  `GET_MANY`, validation-atomic parameter `SET`/`SET_MANY`,
+  `GET_ALL_PARAMS`, and
   protocol `ERROR` responses;
 - stable schema/capability hashes over ID-sorted descriptor records, runtime
   limit discovery, and startup rejection of zero or colliding object IDs;
@@ -43,8 +48,11 @@ This scaffold intentionally starts small. It provides:
 - a bounded persistent assignment matrix with type, direction, multiplicity,
   stable route-ID, and component-cycle validation, exposed through
   `ROUTE_LIST`, `ROUTE_SET`, and `ROUTE_DELETE`;
+- revision-tracked compiled route endpoints for the fast control path;
 - a small duplicate-request cache that replays identical retries and rejects
-  sequence reuse with changed payloads.
+  sequence reuse with changed payloads;
+- a serial implementation partitioned into request, descriptor, parameter,
+  and identity/capability sections rather than one source monolith.
 
 The first exposed persistent parameters are:
 
@@ -64,8 +72,16 @@ channel, so it cannot simultaneously be targeted as a PWM output.
 The output bank uses `PWM_RATE` (50, 100, 200, or 330 Hz), `PWM_MIN`,
 `PWM_TRIM`, `PWM_MAX`, `PWM_REVERSE`, and `PWM_FAILSAFE`. A zero failsafe value
 disables a channel whenever its assigned signal is stale or invalid; a nonzero
-value sends that bounded pulse instead. Unassigned channels always remain
-disabled.
+value sends that pulse instead. Invalid calibration, frame-rate, or failsafe
+configuration disables the complete output bank rather than silently clamping
+or substituting defaults. Unassigned channels always remain disabled.
+
+Capture attachment failures are exposed as
+`component/pwm_input/0/observable/channel_N_attach_status`; values distinguish
+disabled, attached, unavailable GPIO, invalid pin, duplicate pin, and attach
+failure. PWM input/output `configuration_valid` and output
+`effective_rate_hz`/`effective_failsafe_us` observables make configured and
+applied state explicit.
 
 The standard `RC1_*` through `RC16_*` calibration parameters and
 `RC_PROTOCOLS` mask are also registered. The selected UART uses ArduPilot's
@@ -76,11 +92,12 @@ The native schema exposes that standard mask as
 appear as routable fields under
 `component/rcin/0/output/channel_1` through `channel_16`.
 
-Assignments are stored through `AP_Param` and allow one source per destination;
-setting a new source for an assigned destination replaces the old route. Route
-flags are reserved and must currently be zero. The VSP component consumes its
-assigned X/Y samples, but its control-law `update()` remains intentionally
-empty for manual implementation.
+Assignments are queued for persistence through `AP_Param` and allow one source
+per destination; setting a new source for an assigned destination replaces the
+old route. Route flags are reserved and must currently be zero. The VSP
+component consumes its assigned X/Y samples, but its control-law `update()`
+remains intentionally empty. Its invalid output observables are therefore not
+advertised as routable sources.
 
 Minimal direct routes use these stable schema paths:
 
@@ -96,15 +113,16 @@ component/pwm_input/0/output/channel_1
 
 `ROUTE_SET` carries the FNV-1a field IDs discovered from those descriptors.
 PWM input and serial receiver samples therefore use the same normalized,
-timestamped routing path. On the reduced F405 target only PWM output channels
-1 through 6 are accepted; the full-board capability permits channels 1
-through 12 once its H743 hwdef is available.
+timestamped routing path. Fields for channels not implemented by the selected
+board are omitted from `DESCRIBE` and rejected by value, subscription, and
+route operations.
 
 For firmware-side tools and C++ client utilities,
-`Vektor_SerialCatalog.h` exposes every built-in component, parameter,
-observable, input, and output as a canonical path, compile-time stable ID, and
-wire primitive type. Parameter entries also expose their short `AP_Param`
-name. For example:
+`Vektor_SerialCatalog.def` is the canonical binding manifest and generates the
+declarations and lookup tables in `Vektor_SerialCatalog.h`, which exposes every
+built-in component, parameter, observable, input, and output as a canonical
+path, compile-time stable ID, and wire primitive type. Parameter entries also
+expose their short `AP_Param` name. For example:
 
 ```cpp
 #include "Vektor_SerialCatalog.h"
@@ -157,6 +175,8 @@ build/sitl/tests/test_vektor_protocol
 The current `revo-mini` hwdef represents the reduced F405 target facts captured
 in the truth base. Generic facts (board ID, USB, PWM, CAN, sensor probes, and
 storage backends) come from generated HAL macros. Connector-specific facts use
-`VEKTOR_*` definitions in `hwdef.dat`; unspecified facts default to absent so a
-new board cannot inherit another board's capabilities. The full H743 target
-still needs its ChibiOS hwdef before it can be built as hardware firmware.
+`VEKTOR_*` definitions in `hwdef.dat`, including PWM input count, per-Flex mode
+bits, per-UART direction/transport bits, and per-timer-group supported rates.
+Unspecified facts default to absent so a new board cannot inherit another
+board's capabilities. The full H743 target still needs its ChibiOS hwdef before
+it can be built as hardware firmware.

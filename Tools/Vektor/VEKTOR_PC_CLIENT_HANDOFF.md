@@ -203,7 +203,10 @@ Use this sequence every time a port is opened or the device reconnects:
 9. Start requested realtime subscriptions.
 
 A new successful `HELLO` resets the firmware's subscriptions and request replay
-state. Treat it as the start of a new logical session.
+state. Treat it as the start of a new logical session. With the exception of
+protocol response frames, every other request is rejected with `INVALID_STATE`
+until `HELLO` succeeds. An identical `HELLO` retry is replayed; any other valid
+`HELLO` starts a fresh session even if it reuses a sequence number.
 
 ### HELLO
 
@@ -405,8 +408,11 @@ name                str8
 display_name        str8
 ```
 
-On the reduced board, endpoints currently describe USB, one PWM bank, six PWM
-channels, three UARTs, two ADCs, one IMU, and storage hardware.
+For UART and USB records, flags bit 0 means externally usable input, bit 1
+means externally usable output, and bit 2 identifies the endpoint carrying the
+Vektor protocol. Flex records interpret the same word as their per-port mode
+bits. On the reduced board, endpoints currently describe USB, one PWM bank,
+six PWM channels, three UARTs, three ADCs, one IMU, and storage hardware.
 
 TIMER_GROUP record v1:
 
@@ -489,9 +495,9 @@ type_id   u8
 value     typed bytes
 ```
 
-Successful response is `VALUE` containing the accepted persisted value. Honor
-the descriptor's bounds and type locally, but always handle firmware-side
-validation errors.
+Successful response is `VALUE` containing the accepted value, which firmware
+has queued for `AP_Param` persistence. Honor the descriptor's bounds and type
+locally, but always handle firmware-side validation errors.
 
 ### GET_MANY, SET_MANY, and GET_ALL_PARAMS
 
@@ -513,10 +519,10 @@ repeat count times:
 ```
 
 Both are currently limited to eight fields per request. Duplicate IDs in a
-`SET_MANY` request are rejected. For now, use individual `SET` operations for
-the related PWM `minimum_us`, `trim_us`, and `maximum_us` fields: current
-`SET_MANY` validation checks each entry against the values active before the
-batch and does not validate the final combined calibration tuple.
+`SET_MANY` request are rejected. Validation overlays the complete batch before
+checking related PWM `minimum_us`, `trim_us`, `maximum_us`, and `failsafe_us`
+constraints, so a valid coordinated calibration update succeeds and an invalid
+final tuple changes nothing.
 
 Successful bulk response type `0x15`:
 
@@ -529,9 +535,9 @@ repeat count times:
 ```
 
 `GET_ALL_PARAMS` is request type `0x16` with an empty payload. Current firmware
-returns all 22 readable parameters in one `VALUES` frame. Code the receiver so
-it can tolerate future `FLAG_MORE` pages even though the current implementation
-does not emit them here.
+returns all board-available readable parameters in one `VALUES` frame. Code the
+receiver so it can tolerate future `FLAG_MORE` pages even though the current
+implementation does not emit them here.
 
 ### Current parameter inventory
 
@@ -629,12 +635,13 @@ quaternion is `QUATERNIONF` in `w,x,y,z` order; body rates are `VECTOR3F` in
 `x,y,z` body axes and rad/s.
 
 The VSP control-law update remains intentionally empty. Its output fields stay
-invalid until that core is implemented manually; do not present them as a
-working mixer.
+invalid until that core is implemented manually and are not routable; do not
+present them as a working mixer.
 
-The common schema has 12 logical PWM output input fields, but the reduced F405
-has only six physical PWM endpoints. Use ENDPOINT/capability discovery to limit
-the UI to outputs 1..6 on this board. Firmware rejects a route to output 7..12.
+The schema is filtered by board capability. The reduced F405 descriptor surface
+contains only its six physical PWM input/output channels; absent channels are
+not returned by `DESCRIBE`, and direct operations on their stable IDs are
+rejected with `NOT_AVAILABLE`.
 
 ## Realtime subscriptions
 
@@ -655,7 +662,10 @@ Limits now:
 - up to 40 unique fields per subscription;
 - fastest period 10000 microseconds (100 Hz);
 - a requested period of zero means fastest available;
-- slower periods are rounded up to the 100 Hz scheduler tick.
+- slower periods are rounded up to the 100 Hz scheduler tick;
+- the complete encoded telemetry sample, including header and quality mask,
+  must fit the negotiated maximum payload; an unsendable field set is rejected
+  during `SUBSCRIBE`.
 
 Successful response type `0x20`, `FLAG_RESPONSE`:
 

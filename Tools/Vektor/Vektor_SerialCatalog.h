@@ -7,10 +7,11 @@
 /*
  * Programming-time names for the built-in Vektor Serial Protocol schema.
  *
- * GET, SET, SUBSCRIBE, and ROUTE_* carry the stable u32 ID, not the text path
- * or AP_Param name.  These references provide all three where applicable.
- * A client should still use DESCRIBE as the runtime source of truth because a
- * newer firmware can expose a different schema or board capability set.
+ * Vektor_SerialCatalog.def is the canonical path/type binding manifest. These
+ * declarations and their complete lookup arrays are generated from it by the
+ * preprocessor, so adding a field cannot leave a hand-maintained ALL list
+ * behind. Runtime clients must still use DESCRIBE because board capability
+ * filtering and newer firmware can expose a different descriptor surface.
  */
 namespace Vektor {
 namespace SerialCatalog {
@@ -47,22 +48,30 @@ struct ParameterReference {
 
 namespace Component {
 
-static constexpr Reference PROTOCOL("component/system/0");
-static constexpr Reference RUNTIME("component/system/1");
-static constexpr Reference ATTITUDE("component/attitude/0");
-static constexpr Reference VSP("component/vsp/1");
-static constexpr Reference RCIN("component/rcin/0");
-static constexpr Reference PWM_INPUT("component/pwm_input/0");
-static constexpr Reference PWM_OUTPUT("component/pwm_output/0");
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...) static constexpr Reference SYMBOL(PATH);
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
 
 static constexpr const Reference *ALL[] = {
-    &PROTOCOL,
-    &RUNTIME,
-    &ATTITUDE,
-    &VSP,
-    &RCIN,
-    &PWM_INPUT,
-    &PWM_OUTPUT,
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...) &SYMBOL,
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
 };
 static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 
@@ -70,86 +79,34 @@ static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 
 namespace Parameter {
 
-static constexpr ParameterReference SYS_OPTIONS(
-    "component/system/0/parameter/sys_options",
-    "SYS_OPTIONS",
-    Protocol::PrimitiveType::I32);
-static constexpr ParameterReference SYS_DESC_PAGE(
-    "component/system/0/parameter/sys_desc_page",
-    "SYS_DESC_PAGE",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference SYS_PROTOCOL_BAUD(
-    "component/system/0/parameter/sys_protocol_baud",
-    "SYS_PROTO_BAUD",
-    Protocol::PrimitiveType::I32);
-static constexpr ParameterReference RCIN_UART_PORT(
-    "component/rcin/0/parameter/uart_port",
-    "RCIN_PORT",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference RCIN_TIMEOUT_MS(
-    "component/rcin/0/parameter/timeout_ms",
-    "RCIN_TIMEOUT",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference RCIN_PROTOCOL_MASK(
-    "component/rcin/0/parameter/protocol_mask",
-    "RC_PROTOCOLS",
-    Protocol::PrimitiveType::I32);
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)                       \
+    static constexpr ParameterReference SYMBOL(                             \
+        PATH, AP_NAME, Protocol::PrimitiveType::TYPE);
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
 
-#define VEKTOR_PWMIN_PIN_PARAMETER(CHANNEL)                                  \
-    static constexpr ParameterReference PWMIN_CHANNEL_##CHANNEL##_PIN(       \
-        "component/pwm_input/0/parameter/channel_" #CHANNEL "_pin",       \
-        "PWIN" #CHANNEL "_PIN",                                           \
-        Protocol::PrimitiveType::I16)
-
-VEKTOR_PWMIN_PIN_PARAMETER(1);
-VEKTOR_PWMIN_PIN_PARAMETER(2);
-VEKTOR_PWMIN_PIN_PARAMETER(3);
-VEKTOR_PWMIN_PIN_PARAMETER(4);
-VEKTOR_PWMIN_PIN_PARAMETER(5);
-VEKTOR_PWMIN_PIN_PARAMETER(6);
-
-#undef VEKTOR_PWMIN_PIN_PARAMETER
-
-static constexpr ParameterReference PWMIN_TIMEOUT_MS(
-    "component/pwm_input/0/parameter/timeout_ms",
-    "PWIN_TIMEOUT",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMIN_MINIMUM_US(
-    "component/pwm_input/0/parameter/minimum_us",
-    "PWIN_MIN",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMIN_TRIM_US(
-    "component/pwm_input/0/parameter/trim_us",
-    "PWIN_TRIM",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMIN_MAXIMUM_US(
-    "component/pwm_input/0/parameter/maximum_us",
-    "PWIN_MAX",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMOUT_RATE_HZ(
-    "component/pwm_output/0/parameter/rate_hz",
-    "PWM_RATE",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMOUT_MINIMUM_US(
-    "component/pwm_output/0/parameter/minimum_us",
-    "PWM_MIN",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMOUT_TRIM_US(
-    "component/pwm_output/0/parameter/trim_us",
-    "PWM_TRIM",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMOUT_MAXIMUM_US(
-    "component/pwm_output/0/parameter/maximum_us",
-    "PWM_MAX",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMOUT_REVERSE_MASK(
-    "component/pwm_output/0/parameter/reverse_mask",
-    "PWM_REVERSE",
-    Protocol::PrimitiveType::I16);
-static constexpr ParameterReference PWMOUT_FAILSAFE_US(
-    "component/pwm_output/0/parameter/failsafe_us",
-    "PWM_FAILSAFE",
-    Protocol::PrimitiveType::I16);
+static constexpr const ParameterReference *ALL[] = {
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...) &SYMBOL,
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
+};
+static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 
 static constexpr const ParameterReference *PWMIN_CHANNEL_PINS[] = {
     &PWMIN_CHANNEL_1_PIN,
@@ -162,95 +119,37 @@ static constexpr const ParameterReference *PWMIN_CHANNEL_PINS[] = {
 static constexpr uint8_t PWMIN_CHANNEL_PIN_COUNT =
     sizeof(PWMIN_CHANNEL_PINS) / sizeof(PWMIN_CHANNEL_PINS[0]);
 
-static constexpr const ParameterReference *ALL[] = {
-    &SYS_OPTIONS,
-    &SYS_DESC_PAGE,
-    &SYS_PROTOCOL_BAUD,
-    &RCIN_UART_PORT,
-    &RCIN_TIMEOUT_MS,
-    &RCIN_PROTOCOL_MASK,
-    &PWMIN_CHANNEL_1_PIN,
-    &PWMIN_CHANNEL_2_PIN,
-    &PWMIN_CHANNEL_3_PIN,
-    &PWMIN_CHANNEL_4_PIN,
-    &PWMIN_CHANNEL_5_PIN,
-    &PWMIN_CHANNEL_6_PIN,
-    &PWMIN_TIMEOUT_MS,
-    &PWMIN_MINIMUM_US,
-    &PWMIN_TRIM_US,
-    &PWMIN_MAXIMUM_US,
-    &PWMOUT_RATE_HZ,
-    &PWMOUT_MINIMUM_US,
-    &PWMOUT_TRIM_US,
-    &PWMOUT_MAXIMUM_US,
-    &PWMOUT_REVERSE_MASK,
-    &PWMOUT_FAILSAFE_US,
-};
-static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
-
 } // namespace Parameter
 
 namespace Observable {
 
-static constexpr Reference RX_FRAMES(
-    "component/system/0/observable/rx_frames", Protocol::PrimitiveType::U32);
-static constexpr Reference RX_DROPS(
-    "component/system/0/observable/rx_drops", Protocol::PrimitiveType::U32);
-static constexpr Reference TX_DROPS(
-    "component/system/0/observable/tx_drops", Protocol::PrimitiveType::U32);
-static constexpr Reference UPTIME_MS(
-    "component/system/1/observable/uptime_ms", Protocol::PrimitiveType::U32);
-static constexpr Reference LOOP_COUNT(
-    "component/system/1/observable/loop_count", Protocol::PrimitiveType::U32);
-static constexpr Reference LOOP_DT_US(
-    "component/system/1/observable/loop_dt_us", Protocol::PrimitiveType::U32);
-static constexpr Reference LOOP_WORK_US(
-    "component/system/1/observable/loop_work_us", Protocol::PrimitiveType::U32);
-static constexpr Reference LOOP_MAX_WORK_US(
-    "component/system/1/observable/loop_max_work_us",
-    Protocol::PrimitiveType::U32);
-static constexpr Reference SERVICE_RATE_HZ(
-    "component/system/1/observable/service_rate_hz",
-    Protocol::PrimitiveType::U16);
-static constexpr Reference ATTITUDE_ROLL_DEG(
-    "component/attitude/0/observable/roll_deg",
-    Protocol::PrimitiveType::FLOAT32);
-static constexpr Reference ATTITUDE_PITCH_DEG(
-    "component/attitude/0/observable/pitch_deg",
-    Protocol::PrimitiveType::FLOAT32);
-static constexpr Reference ATTITUDE_YAW_DEG(
-    "component/attitude/0/observable/yaw_deg",
-    Protocol::PrimitiveType::FLOAT32);
-static constexpr Reference ATTITUDE_QUATERNION(
-    "component/attitude/0/observable/quaternion",
-    Protocol::PrimitiveType::QUATERNIONF);
-static constexpr Reference ATTITUDE_BODY_RATES_RAD_S(
-    "component/attitude/0/observable/body_rates_rad_s",
-    Protocol::PrimitiveType::VECTOR3F);
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)                               \
+    static constexpr Reference SYMBOL(PATH, Protocol::PrimitiveType::TYPE);
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
 
-#define VEKTOR_RCIN_PWM_OBSERVABLE(CHANNEL)                                 \
-    static constexpr Reference RCIN_CHANNEL_##CHANNEL##_US(                 \
-        "component/rcin/0/observable/channel_" #CHANNEL "_us",            \
-        Protocol::PrimitiveType::U16)
-
-VEKTOR_RCIN_PWM_OBSERVABLE(1);
-VEKTOR_RCIN_PWM_OBSERVABLE(2);
-VEKTOR_RCIN_PWM_OBSERVABLE(3);
-VEKTOR_RCIN_PWM_OBSERVABLE(4);
-VEKTOR_RCIN_PWM_OBSERVABLE(5);
-VEKTOR_RCIN_PWM_OBSERVABLE(6);
-VEKTOR_RCIN_PWM_OBSERVABLE(7);
-VEKTOR_RCIN_PWM_OBSERVABLE(8);
-VEKTOR_RCIN_PWM_OBSERVABLE(9);
-VEKTOR_RCIN_PWM_OBSERVABLE(10);
-VEKTOR_RCIN_PWM_OBSERVABLE(11);
-VEKTOR_RCIN_PWM_OBSERVABLE(12);
-VEKTOR_RCIN_PWM_OBSERVABLE(13);
-VEKTOR_RCIN_PWM_OBSERVABLE(14);
-VEKTOR_RCIN_PWM_OBSERVABLE(15);
-VEKTOR_RCIN_PWM_OBSERVABLE(16);
-
-#undef VEKTOR_RCIN_PWM_OBSERVABLE
+static constexpr const Reference *ALL[] = {
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...) &SYMBOL,
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
+};
+static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 
 static constexpr const Reference *ATTITUDE[] = {
     &ATTITUDE_ROLL_DEG,
@@ -283,68 +182,37 @@ static constexpr const Reference *RCIN_CHANNELS_US[] = {
 static constexpr uint8_t RCIN_CHANNEL_US_COUNT =
     sizeof(RCIN_CHANNELS_US) / sizeof(RCIN_CHANNELS_US[0]);
 
-static constexpr const Reference *ALL[] = {
-    &RX_FRAMES,
-    &RX_DROPS,
-    &TX_DROPS,
-    &UPTIME_MS,
-    &LOOP_COUNT,
-    &LOOP_DT_US,
-    &LOOP_WORK_US,
-    &LOOP_MAX_WORK_US,
-    &SERVICE_RATE_HZ,
-    &ATTITUDE_ROLL_DEG,
-    &ATTITUDE_PITCH_DEG,
-    &ATTITUDE_YAW_DEG,
-    &ATTITUDE_QUATERNION,
-    &ATTITUDE_BODY_RATES_RAD_S,
-    &RCIN_CHANNEL_1_US,
-    &RCIN_CHANNEL_2_US,
-    &RCIN_CHANNEL_3_US,
-    &RCIN_CHANNEL_4_US,
-    &RCIN_CHANNEL_5_US,
-    &RCIN_CHANNEL_6_US,
-    &RCIN_CHANNEL_7_US,
-    &RCIN_CHANNEL_8_US,
-    &RCIN_CHANNEL_9_US,
-    &RCIN_CHANNEL_10_US,
-    &RCIN_CHANNEL_11_US,
-    &RCIN_CHANNEL_12_US,
-    &RCIN_CHANNEL_13_US,
-    &RCIN_CHANNEL_14_US,
-    &RCIN_CHANNEL_15_US,
-    &RCIN_CHANNEL_16_US,
-};
-static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
-
 } // namespace Observable
 
 namespace Input {
 
-static constexpr Reference VSP_X(
-    "component/vsp/1/input/x", Protocol::PrimitiveType::FLOAT32);
-static constexpr Reference VSP_Y(
-    "component/vsp/1/input/y", Protocol::PrimitiveType::FLOAT32);
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)                                    \
+    static constexpr Reference SYMBOL(PATH, Protocol::PrimitiveType::TYPE);
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
 
-#define VEKTOR_PWMOUT_INPUT(CHANNEL)                                         \
-    static constexpr Reference PWMOUT_CHANNEL_##CHANNEL(                     \
-        "component/pwm_output/0/input/channel_" #CHANNEL,                  \
-        Protocol::PrimitiveType::FLOAT32)
-
-VEKTOR_PWMOUT_INPUT(1);
-VEKTOR_PWMOUT_INPUT(2);
-VEKTOR_PWMOUT_INPUT(3);
-VEKTOR_PWMOUT_INPUT(4);
-VEKTOR_PWMOUT_INPUT(5);
-VEKTOR_PWMOUT_INPUT(6);
-VEKTOR_PWMOUT_INPUT(7);
-VEKTOR_PWMOUT_INPUT(8);
-VEKTOR_PWMOUT_INPUT(9);
-VEKTOR_PWMOUT_INPUT(10);
-VEKTOR_PWMOUT_INPUT(11);
-VEKTOR_PWMOUT_INPUT(12);
-
-#undef VEKTOR_PWMOUT_INPUT
+static constexpr const Reference *ALL[] = {
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...) &SYMBOL,
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
+};
+static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 
 static constexpr const Reference *PWMOUT_CHANNELS[] = {
     &PWMOUT_CHANNEL_1,
@@ -363,90 +231,37 @@ static constexpr const Reference *PWMOUT_CHANNELS[] = {
 static constexpr uint8_t PWMOUT_CHANNEL_COUNT =
     sizeof(PWMOUT_CHANNELS) / sizeof(PWMOUT_CHANNELS[0]);
 
-static constexpr const Reference *ALL[] = {
-    &VSP_X,
-    &VSP_Y,
-    &PWMOUT_CHANNEL_1,
-    &PWMOUT_CHANNEL_2,
-    &PWMOUT_CHANNEL_3,
-    &PWMOUT_CHANNEL_4,
-    &PWMOUT_CHANNEL_5,
-    &PWMOUT_CHANNEL_6,
-    &PWMOUT_CHANNEL_7,
-    &PWMOUT_CHANNEL_8,
-    &PWMOUT_CHANNEL_9,
-    &PWMOUT_CHANNEL_10,
-    &PWMOUT_CHANNEL_11,
-    &PWMOUT_CHANNEL_12,
-};
-static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
-
 } // namespace Input
 
 namespace Output {
 
-static constexpr Reference VSP_SERVO_A(
-    "component/vsp/1/output/servo_a", Protocol::PrimitiveType::FLOAT32);
-static constexpr Reference VSP_SERVO_B(
-    "component/vsp/1/output/servo_b", Protocol::PrimitiveType::FLOAT32);
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...)                                   \
+    static constexpr Reference SYMBOL(PATH, Protocol::PrimitiveType::TYPE);
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
 
-#define VEKTOR_RCIN_OUTPUT(CHANNEL)                                          \
-    static constexpr Reference RCIN_CHANNEL_##CHANNEL(                       \
-        "component/rcin/0/output/channel_" #CHANNEL,                       \
-        Protocol::PrimitiveType::FLOAT32)
-
-VEKTOR_RCIN_OUTPUT(1);
-VEKTOR_RCIN_OUTPUT(2);
-VEKTOR_RCIN_OUTPUT(3);
-VEKTOR_RCIN_OUTPUT(4);
-VEKTOR_RCIN_OUTPUT(5);
-VEKTOR_RCIN_OUTPUT(6);
-VEKTOR_RCIN_OUTPUT(7);
-VEKTOR_RCIN_OUTPUT(8);
-VEKTOR_RCIN_OUTPUT(9);
-VEKTOR_RCIN_OUTPUT(10);
-VEKTOR_RCIN_OUTPUT(11);
-VEKTOR_RCIN_OUTPUT(12);
-VEKTOR_RCIN_OUTPUT(13);
-VEKTOR_RCIN_OUTPUT(14);
-VEKTOR_RCIN_OUTPUT(15);
-VEKTOR_RCIN_OUTPUT(16);
-
-#undef VEKTOR_RCIN_OUTPUT
-
-#define VEKTOR_PWMIN_OUTPUT(CHANNEL)                                         \
-    static constexpr Reference PWMIN_CHANNEL_##CHANNEL(                      \
-        "component/pwm_input/0/output/channel_" #CHANNEL,                  \
-        Protocol::PrimitiveType::FLOAT32)
-
-VEKTOR_PWMIN_OUTPUT(1);
-VEKTOR_PWMIN_OUTPUT(2);
-VEKTOR_PWMIN_OUTPUT(3);
-VEKTOR_PWMIN_OUTPUT(4);
-VEKTOR_PWMIN_OUTPUT(5);
-VEKTOR_PWMIN_OUTPUT(6);
-
-#undef VEKTOR_PWMIN_OUTPUT
-
-#define VEKTOR_PWMOUT_OUTPUT(CHANNEL)                                       \
-    static constexpr Reference PWMOUT_CHANNEL_##CHANNEL(                    \
-        "component/pwm_output/0/output/channel_" #CHANNEL,                 \
-        Protocol::PrimitiveType::U16)
-
-VEKTOR_PWMOUT_OUTPUT(1);
-VEKTOR_PWMOUT_OUTPUT(2);
-VEKTOR_PWMOUT_OUTPUT(3);
-VEKTOR_PWMOUT_OUTPUT(4);
-VEKTOR_PWMOUT_OUTPUT(5);
-VEKTOR_PWMOUT_OUTPUT(6);
-VEKTOR_PWMOUT_OUTPUT(7);
-VEKTOR_PWMOUT_OUTPUT(8);
-VEKTOR_PWMOUT_OUTPUT(9);
-VEKTOR_PWMOUT_OUTPUT(10);
-VEKTOR_PWMOUT_OUTPUT(11);
-VEKTOR_PWMOUT_OUTPUT(12);
-
-#undef VEKTOR_PWMOUT_OUTPUT
+static constexpr const Reference *ALL[] = {
+#define VEKTOR_COMPONENT(SYMBOL, PATH, ...)
+#define VEKTOR_PARAMETER(SYMBOL, PATH, AP_NAME, TYPE, ...)
+#define VEKTOR_OBSERVABLE(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_INPUT(SYMBOL, PATH, TYPE, ...)
+#define VEKTOR_OUTPUT(SYMBOL, PATH, TYPE, ...) &SYMBOL,
+#include "Vektor_SerialCatalog.def"
+#undef VEKTOR_COMPONENT
+#undef VEKTOR_PARAMETER
+#undef VEKTOR_OBSERVABLE
+#undef VEKTOR_INPUT
+#undef VEKTOR_OUTPUT
+};
+static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 
 static constexpr const Reference *RCIN_CHANNELS[] = {
     &RCIN_CHANNEL_1,
@@ -496,46 +311,6 @@ static constexpr const Reference *PWMOUT_CHANNELS[] = {
 };
 static constexpr uint8_t PWMOUT_CHANNEL_COUNT =
     sizeof(PWMOUT_CHANNELS) / sizeof(PWMOUT_CHANNELS[0]);
-
-static constexpr const Reference *ALL[] = {
-    &VSP_SERVO_A,
-    &VSP_SERVO_B,
-    &RCIN_CHANNEL_1,
-    &RCIN_CHANNEL_2,
-    &RCIN_CHANNEL_3,
-    &RCIN_CHANNEL_4,
-    &RCIN_CHANNEL_5,
-    &RCIN_CHANNEL_6,
-    &RCIN_CHANNEL_7,
-    &RCIN_CHANNEL_8,
-    &RCIN_CHANNEL_9,
-    &RCIN_CHANNEL_10,
-    &RCIN_CHANNEL_11,
-    &RCIN_CHANNEL_12,
-    &RCIN_CHANNEL_13,
-    &RCIN_CHANNEL_14,
-    &RCIN_CHANNEL_15,
-    &RCIN_CHANNEL_16,
-    &PWMIN_CHANNEL_1,
-    &PWMIN_CHANNEL_2,
-    &PWMIN_CHANNEL_3,
-    &PWMIN_CHANNEL_4,
-    &PWMIN_CHANNEL_5,
-    &PWMIN_CHANNEL_6,
-    &PWMOUT_CHANNEL_1,
-    &PWMOUT_CHANNEL_2,
-    &PWMOUT_CHANNEL_3,
-    &PWMOUT_CHANNEL_4,
-    &PWMOUT_CHANNEL_5,
-    &PWMOUT_CHANNEL_6,
-    &PWMOUT_CHANNEL_7,
-    &PWMOUT_CHANNEL_8,
-    &PWMOUT_CHANNEL_9,
-    &PWMOUT_CHANNEL_10,
-    &PWMOUT_CHANNEL_11,
-    &PWMOUT_CHANNEL_12,
-};
-static constexpr uint16_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 
 } // namespace Output
 

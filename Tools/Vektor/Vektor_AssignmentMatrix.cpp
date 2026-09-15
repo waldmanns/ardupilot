@@ -54,7 +54,7 @@ void save_without_gcs(Parameter &parameter, Value value)
         return;
     }
     parameter.set(value);
-    parameter.save_sync(true, false);
+    parameter.save(true);
 }
 
 } // namespace
@@ -95,6 +95,7 @@ void AssignmentMatrix::reset()
         _entries[i] = {};
     }
     _count = 0;
+    _revision++;
     _persistence_enabled = false;
 }
 
@@ -151,6 +152,7 @@ void AssignmentMatrix::load_persistent()
         _count++;
     }
     _persistence_enabled = true;
+    _revision++;
 }
 
 AssignmentMatrix::SetResult AssignmentMatrix::set(
@@ -202,6 +204,7 @@ AssignmentMatrix::SetResult AssignmentMatrix::set(
     if (_persistence_enabled) {
         store_slot(uint8_t(slot));
     }
+    _revision++;
     accepted = &entry;
     return SetResult::OK;
 }
@@ -218,6 +221,7 @@ bool AssignmentMatrix::remove(uint32_t route_id)
         if (_persistence_enabled) {
             clear_stored_slot(slot);
         }
+        _revision++;
         return true;
     }
     return false;
@@ -399,7 +403,6 @@ int8_t AssignmentMatrix::first_free_slot() const
 void AssignmentMatrix::store_slot(uint8_t slot)
 {
     const Entry &entry = _entries[slot];
-    save_without_gcs(_stored_source[slot], int32_t(0));
     save_without_gcs(_stored_destination[slot],
                      int32_t(entry.destination_input_id));
     save_without_gcs(_stored_flags[slot], int16_t(entry.flags));

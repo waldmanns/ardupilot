@@ -1417,22 +1417,24 @@ The current `Tools/Vektor` scaffold implements and tests:
 - a minimal `AP_Param`-backed system parameter set;
 - a common component/field schema registry used for stable-ID lookup,
   parameter enumeration, and protocol descriptor generation;
-- runtime uptime and loop-timing observables;
+- absolute-deadline runtime scheduling plus uptime and loop-timing observables;
 - Vektor Protocol v1 COBS framing, CRC-32/ISO-HDLC, bounded stream parsing, and the canonical frame vector;
 - `PING`, `HELLO`, paged board/component/field/endpoint/timer-group/runtime-limit `DESCRIBE`, `ERROR`, typed `GET`/`SET`, bulk parameter operations, and duplicate-request replay/conflict handling;
 - deterministic nonzero schema/capability hashes over ID-sorted descriptor records, with initialization-time stable-ID collision validation;
 - bounded `SUBSCRIBE`/`UNSUBSCRIBE` sessions and compact volatile `TELEMETRY` for the built-in realtime observables, with scheduler-rate negotiation and newest-sample behavior;
 - a 16-channel RC input component backed by HAL/AP_RCProtocol, with selectable receiver UART, serial receiver autodetection, standard RC calibration, frame freshness/failsafe quality, and normalized routable outputs;
-- six configurable GPIO edge-capture PWM inputs with independent freshness/quality and normalized routable outputs;
-- a board-count-limited PWM output bank with normalized routable inputs, shared pulse/rate calibration, reversal, configurable failsafe pulse, unrouted-channel disable, and PWM-input pin conflict rejection;
-- a bounded `AP_Param`-persistent assignment matrix with stable route IDs, one-source-per-input replacement, type/direction validation, and component-cycle rejection;
+- board-count-limited GPIO edge-capture PWM inputs with preserved IRQ timestamps, explicit attachment/configuration status, independent freshness/quality, and normalized routable outputs;
+- a board-count-limited PWM output bank with normalized routable inputs, explicit configured/effective state, strict pulse/rate/failsafe validation, reversal, unrouted-channel disable, and PWM-input pin conflict rejection;
+- a bounded asynchronously `AP_Param`-persistent assignment matrix with stable route IDs, one-source-per-input replacement, type/direction validation, component-cycle rejection, and compiled fast-path endpoints;
 - `ROUTE_LIST`, `ROUTE_SET`, and `ROUTE_DELETE` protocol handlers and the `CAP_ROUTING` capability bit;
-- host tests covering codec/parser behavior, schema registry serialization, RC input quality and normalization, assignment validation, route protocol operations, replay caching, runtime timing, subscription scheduling, and an end-to-end UART telemetry session.
+- a generated C++ catalog/binding table from one canonical manifest, with exhaustive schema parity tests;
+- a serial implementation partitioned into request, descriptor, parameter, and identity/capability sections;
+- host tests covering codec/parser behavior, schema registry serialization, hardware capability truth, RC/PWM quality and normalization, assignment validation, staged parameter validation, route protocol operations, replay/session behavior, runtime timing, subscription scheduling, and an end-to-end UART telemetry session.
 
 The following remain design or bring-up work rather than implemented product behavior:
 
 - full H743 ChibiOS hwdef and hardware build;
-- build-generated schema tables and build-time collision failure (the current common registry is hand-authored and validates IDs during initialization);
+- fully generated field-descriptor metadata and build-time collision failure (catalog declarations/tables are generated from one manifest, schema parity is tested, and IDs are validated during initialization);
 - hardware endpoint drivers beyond the UART RC input, GPIO PWM capture, and primary PWM output frontends, scheduler profiles, and measured realtime limits;
 - common attitude service across ICM-20602 and BMI088;
 - VSP/VRS control-law behavior (the VSP core remains an intentional skeleton);
