@@ -25,20 +25,20 @@ const AP_HAL::HAL &hal = AP_HAL::get_HAL();
 namespace {
 
 constexpr Vektor::TimerGroup h743_pwm_timer_groups[] = {
-    { "TIM2", 2, 0x0F },
-    { "TIM4", 4, 0x0F },
-    { "TIM8", 4, 0x0F },
-    { "TIM1", 2, 0x0F },
+    { "TIM2", 0x003, 0x0F },
+    { "TIM4", 0x03C, 0x0F },
+    { "TIM8", 0x3C0, 0x0F },
+    { "TIM1", 0xC00, 0x0F },
 };
 
 constexpr Vektor::TimerGroup h743_flex_timer_groups[] = {
-    { "TIM5", 2, 0 },
-    { "TIM3", 4, 0 },
+    { "TIM5", 0x03, 0 },
+    { "TIM3", 0x3C, 0 },
 };
 
 constexpr Vektor::TimerGroup f405_pwm_timer_groups[] = {
-    { "TIM3", 2, 0x0F },
-    { "TIM2", 4, 0x0F },
+    { "TIM3", 0x03, 0x0F },
+    { "TIM2", 0x3C, 0x0F },
 };
 
 constexpr uint8_t h743_flex_modes[] = {
@@ -52,6 +52,8 @@ constexpr uint8_t h743_flex_modes[] = {
 
 constexpr uint8_t h743_uart_flags[] = { 3, 3, 3, 3 };
 constexpr uint8_t f405_uart_flags[] = { 3, 3, 3 };
+constexpr uint8_t h743_uart_serial_indices[] = { 1, 2, 3, 4 };
+constexpr uint8_t f405_uart_serial_indices[] = { 1, 3, 4 };
 
 constexpr Vektor::BoardCapability h743_test_capability {
     "Vektor Core Evo H743",
@@ -84,8 +86,10 @@ constexpr Vektor::BoardCapability h743_test_capability {
     6,
     h743_flex_modes,
     h743_uart_flags,
+    h743_uart_serial_indices,
     Vektor::ProtocolTransport::USB,
     -1,
+    0,
 };
 
 constexpr Vektor::BoardCapability f405_test_capability {
@@ -118,8 +122,10 @@ constexpr Vektor::BoardCapability f405_test_capability {
     6,
     nullptr,
     f405_uart_flags,
+    f405_uart_serial_indices,
     Vektor::ProtocolTransport::USB,
     -1,
+    0,
 };
 
 template<typename ReferenceType, size_t count>
@@ -700,13 +706,25 @@ TEST(VektorCapability, RejectsDescriptorModelsThatOverpromiseHardware)
     invalid = h743_test_capability;
     invalid.pwm_outputs--;
     EXPECT_FALSE(Vektor::capability_valid(invalid));
+    invalid = h743_test_capability;
+    invalid.protocol_serial_index = -1;
+    EXPECT_FALSE(Vektor::capability_valid(invalid));
+    invalid = h743_test_capability;
+    invalid.protocol_transport = Vektor::ProtocolTransport::UART;
+    invalid.protocol_uart_endpoint = 0;
+    invalid.protocol_serial_index = 2;
+    EXPECT_FALSE(Vektor::capability_valid(invalid));
+    invalid = h743_test_capability;
+    invalid.pwm_timer_groups = f405_pwm_timer_groups;
+    invalid.pwm_timer_group_count = 2;
+    EXPECT_FALSE(Vektor::capability_valid(invalid));
 }
 
 TEST(VektorSchemaRegistry, ExposesStableComponentsAndFields)
 {
     const Vektor::SchemaRegistry &registry = Vektor::schema_registry();
     EXPECT_EQ(registry.component_count(), 7);
-    EXPECT_EQ(registry.field_count(), 112);
+    EXPECT_EQ(registry.field_count(), 115);
     EXPECT_EQ(registry.parameter_count(), 22);
 
     EXPECT_EQ(registry.component_id(0),
@@ -1177,6 +1195,9 @@ TEST(VektorRuntimeState, TracksLoopTimingAndUptime)
     EXPECT_EQ(runtime.last_loop_dt_us(), 0U);
     EXPECT_EQ(runtime.last_loop_work_us(), 300U);
     EXPECT_EQ(runtime.max_loop_work_us(), 300U);
+    EXPECT_FALSE(runtime.last_loop_late());
+    EXPECT_EQ(runtime.last_loop_lateness_us(), 0U);
+    EXPECT_EQ(runtime.late_loop_count(), 0U);
 
     runtime.begin_loop(13000);
     runtime.end_loop(13450);
@@ -1184,6 +1205,55 @@ TEST(VektorRuntimeState, TracksLoopTimingAndUptime)
     EXPECT_EQ(runtime.last_loop_dt_us(), 10000U);
     EXPECT_EQ(runtime.last_loop_work_us(), 450U);
     EXPECT_EQ(runtime.max_loop_work_us(), 450U);
+}
+
+TEST(VektorRuntimeState, ReportsEveryLateLoopExplicitly)
+{
+    Vektor::RuntimeState runtime;
+    runtime.init(100, 1000);
+
+    runtime.begin_loop(3000);
+    runtime.end_loop(3300);
+    EXPECT_EQ(runtime.delay_until_next_loop_us(3300), 9700U);
+    EXPECT_FALSE(runtime.last_loop_late());
+
+    // Wake 250 us after the scheduled 13,000 us start.
+    runtime.begin_loop(13250);
+    runtime.end_loop(13400);
+    EXPECT_EQ(runtime.delay_until_next_loop_us(13400), 9600U);
+    EXPECT_TRUE(runtime.last_loop_late());
+    EXPECT_EQ(runtime.last_loop_lateness_us(), 250U);
+    EXPECT_EQ(runtime.late_loop_count(), 1U);
+
+    // Start on time, but run 400 us through the next 23,000 us deadline.
+    runtime.begin_loop(23000);
+    runtime.end_loop(33400);
+    EXPECT_EQ(runtime.delay_until_next_loop_us(33400), 9600U);
+    EXPECT_TRUE(runtime.last_loop_late());
+    EXPECT_EQ(runtime.last_loop_lateness_us(), 400U);
+    EXPECT_EQ(runtime.late_loop_count(), 2U);
+}
+
+TEST(VektorAssignmentMatrix, RejectsInterruptedOrMixedStoredRecords)
+{
+    const uint32_t source_a =
+        Vektor::SerialCatalog::Output::RCIN_CHANNEL_1.id;
+    const uint32_t source_b =
+        Vektor::SerialCatalog::Output::RCIN_CHANNEL_2.id;
+    const uint32_t destination =
+        Vektor::SerialCatalog::Input::PWMOUT_CHANNEL_1.id;
+    const uint32_t commit_a = Vektor::AssignmentMatrix::storage_commit(
+        source_a, destination, 0);
+
+    ASSERT_NE(commit_a, 0U);
+    EXPECT_TRUE(Vektor::AssignmentMatrix::stored_record_valid(
+        source_a, destination, 0, commit_a));
+    EXPECT_FALSE(Vektor::AssignmentMatrix::stored_record_valid(
+        source_b, destination, 0, commit_a));
+    EXPECT_FALSE(Vektor::AssignmentMatrix::stored_record_valid(
+        source_a, destination, 1, commit_a));
+    EXPECT_FALSE(Vektor::AssignmentMatrix::stored_record_valid(
+        source_a, destination, 0, 0));
 }
 
 TEST(VektorRuntimeState, ClampsWideValues)
@@ -1403,6 +1473,91 @@ TEST(VektorSerialProtocol, EndpointDescriptorCarriesDirectionAndTransportFlags)
                        Vektor::ENDPOINT_OUTPUT |
                        Vektor::ENDPOINT_VEKTOR_TRANSPORT));
     EXPECT_NE(next_cursor, 0U);
+}
+
+TEST(VektorSerialProtocol, TimerDescriptorUsesExplicitChannelMembership)
+{
+    constexpr Vektor::TimerGroup noncontiguous_groups[] = {
+        { "odd", 0x555, Vektor::TIMER_RATE_50_HZ },
+        { "even", 0xAAA, Vektor::TIMER_RATE_50_HZ },
+    };
+    Vektor::BoardCapability capability = h743_test_capability;
+    capability.pwm_timer_groups = noncontiguous_groups;
+    capability.pwm_timer_group_count = 2;
+    ASSERT_TRUE(Vektor::capability_valid(capability));
+
+    static TestUart uart;
+    uart.reset();
+    Vektor::Parameters parameters;
+    Vektor::RuntimeState runtime;
+    runtime.init(Vektor::default_service_rate_hz, AP_HAL::micros64());
+    Vektor::AttitudeSource attitude;
+    Vektor::VspComponent vsp;
+    Vektor::RcinSource rcin;
+    Vektor::PwmInput pwm_input;
+    Vektor::PwmOutput pwm_output;
+    Vektor::AssignmentMatrix assignments;
+    Vektor::SerialProtocol serial;
+    serial.init(&uart,
+                capability,
+                parameters,
+                runtime,
+                attitude,
+                vsp,
+                rcin,
+                pwm_input,
+                pwm_output,
+                assignments);
+    ASSERT_TRUE(start_session(serial, uart, 1, 0x27182818));
+
+    uart.clear_tx();
+    uint8_t payload[Vektor::Protocol::MAX_PAYLOAD_SIZE];
+    Vektor::Protocol::PayloadWriter describe(payload, sizeof(payload));
+    describe.u8(uint8_t(Vektor::Protocol::DescriptorDomain::TIMER_GROUP));
+    describe.u32(0);
+    describe.u16(1);
+    ASSERT_TRUE(push_request(uart,
+                             Vektor::Protocol::MessageType::DESCRIBE,
+                             2,
+                             describe.data(),
+                             describe.length()));
+    serial.update();
+
+    Vektor::Protocol::Parser parser;
+    Vektor::Protocol::FrameView response {};
+    ASSERT_TRUE(parse_single_frame(uart, parser, response));
+    Vektor::Protocol::PayloadReader page(response.payload,
+                                         response.payload_len);
+    uint8_t domain = 0;
+    uint32_t next_cursor = 0;
+    uint16_t count = 0;
+    uint16_t record_len = 0;
+    const uint8_t *record_bytes = nullptr;
+    ASSERT_TRUE(page.u8(domain));
+    ASSERT_TRUE(page.u32(next_cursor));
+    ASSERT_TRUE(page.u16(count));
+    ASSERT_TRUE(page.u16(record_len));
+    ASSERT_TRUE(page.bytes(record_bytes, record_len));
+    ASSERT_EQ(count, 1);
+
+    Vektor::Protocol::PayloadReader group(record_bytes, record_len);
+    uint8_t version = 0;
+    uint32_t group_id = 0;
+    uint8_t member_count = 0;
+    ASSERT_TRUE(group.u8(version));
+    ASSERT_TRUE(group.u32(group_id));
+    ASSERT_TRUE(group.u8(member_count));
+    EXPECT_EQ(member_count, 6);
+    for (uint8_t channel = 1; channel <= 11; channel += 2) {
+        uint32_t member_id = 0;
+        ASSERT_TRUE(group.u32(member_id));
+        char path[32];
+        hal.util->snprintf(path,
+                           sizeof(path),
+                           "hw/pwm_bank/0/channel/%u",
+                           unsigned(channel));
+        EXPECT_EQ(member_id, Vektor::Protocol::fnv1a32(path));
+    }
 }
 
 TEST(VektorSerialProtocol, RequiresHelloAndAcceptsANewHelloSession)

@@ -430,15 +430,11 @@ bool SerialProtocol::build_timer_group_record(uint16_t index,
     static const uint16_t supported_rates[] = { 50, 100, 200, 330 };
 
     const TimerGroup *group = nullptr;
-    uint8_t member_start = 0;
     bool flex_group = false;
     uint16_t remaining = index;
 
     if (remaining < _capability->pwm_timer_group_count) {
         group = &_capability->pwm_timer_groups[remaining];
-        for (uint16_t i = 0; i < remaining; i++) {
-            member_start += _capability->pwm_timer_groups[i].channel_count;
-        }
     } else {
         remaining -= _capability->pwm_timer_group_count;
         if (remaining >= _capability->flex_timer_group_count) {
@@ -447,9 +443,6 @@ bool SerialProtocol::build_timer_group_record(uint16_t index,
         }
         flex_group = true;
         group = &_capability->flex_timer_groups[remaining];
-        for (uint16_t i = 0; i < remaining; i++) {
-            member_start += _capability->flex_timer_groups[i].channel_count;
-        }
     }
 
     char path[32];
@@ -468,12 +461,19 @@ bool SerialProtocol::build_timer_group_record(uint16_t index,
     Protocol::PayloadWriter writer(record, record_capacity);
     writer.u8(1); // record_version
     writer.u32(id_for_path(path));
-    writer.u8(group->channel_count);
-    for (uint8_t i = 0; i < group->channel_count; i++) {
-        const uint8_t member = member_start + i;
-        writer.u32(flex_group ?
-                   flex_id(member) :
-                   pwm_channel_id(member + 1));
+    uint8_t member_count = 0;
+    for (uint8_t member = 0; member < 16; member++) {
+        if ((group->channel_mask & (1U << member)) != 0) {
+            member_count++;
+        }
+    }
+    writer.u8(member_count);
+    for (uint8_t member = 0; member < 16; member++) {
+        if ((group->channel_mask & (1U << member)) == 0) {
+            continue;
+        }
+        writer.u32(flex_group ? flex_id(member) :
+                               pwm_channel_id(member + 1));
     }
     uint8_t rate_count = 0;
     for (uint8_t i = 0; i < sizeof(supported_rates) / sizeof(supported_rates[0]); i++) {
@@ -520,4 +520,3 @@ bool SerialProtocol::build_runtime_limit_record(uint16_t index,
     record_len = writer.length();
     return writer.ok();
 }
-

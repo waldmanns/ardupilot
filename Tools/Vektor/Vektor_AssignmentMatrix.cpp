@@ -29,6 +29,14 @@ static constexpr uint16_t stored_route_flags =
                        0,                                                    \
                        stored_route_flags)
 
+#define VEKTOR_ROUTE_COMMIT(NUMBER)                                          \
+    AP_GROUPINFO_FLAGS(#NUMBER,                                              \
+                       NUMBER,                                               \
+                       Vektor::AssignmentMatrixStorage,                      \
+                       commit[NUMBER - 1],                                   \
+                       0,                                                    \
+                       stored_route_flags)
+
 uint32_t owner_id(const Vektor::FieldDescriptor &field)
 {
     return Vektor::Protocol::fnv1a32(field.owner_component_path);
@@ -48,16 +56,38 @@ void append_hex32(char *destination, uint32_t value)
 }
 
 template <typename Parameter, typename Value>
-void save_without_gcs(Parameter &parameter, Value value)
+void save_synchronously_without_gcs(Parameter &parameter, Value value)
 {
     if (parameter.get() == value) {
         return;
     }
     parameter.set(value);
-    parameter.save(true);
+    parameter.save_sync(true, false);
 }
 
 } // namespace
+
+const AP_Param::GroupInfo Vektor::AssignmentMatrixStorage::var_info[] = {
+    VEKTOR_ROUTE_COMMIT(1),
+    VEKTOR_ROUTE_COMMIT(2),
+    VEKTOR_ROUTE_COMMIT(3),
+    VEKTOR_ROUTE_COMMIT(4),
+    VEKTOR_ROUTE_COMMIT(5),
+    VEKTOR_ROUTE_COMMIT(6),
+    VEKTOR_ROUTE_COMMIT(7),
+    VEKTOR_ROUTE_COMMIT(8),
+    VEKTOR_ROUTE_COMMIT(9),
+    VEKTOR_ROUTE_COMMIT(10),
+    VEKTOR_ROUTE_COMMIT(11),
+    VEKTOR_ROUTE_COMMIT(12),
+    VEKTOR_ROUTE_COMMIT(13),
+    VEKTOR_ROUTE_COMMIT(14),
+    VEKTOR_ROUTE_COMMIT(15),
+    VEKTOR_ROUTE_COMMIT(16),
+    AP_GROUPEND
+};
+
+#undef VEKTOR_ROUTE_COMMIT
 
 const AP_Param::GroupInfo Vektor::AssignmentMatrix::var_info[] = {
     VEKTOR_ROUTE_SLOT(1, 1),
@@ -76,12 +106,22 @@ const AP_Param::GroupInfo Vektor::AssignmentMatrix::var_info[] = {
     VEKTOR_ROUTE_SLOT(14, 40),
     VEKTOR_ROUTE_SLOT(15, 43),
     VEKTOR_ROUTE_SLOT(16, 46),
+    AP_SUBGROUPINFO(_storage,
+                    "C",
+                    49,
+                    Vektor::AssignmentMatrix,
+                    Vektor::AssignmentMatrixStorage),
     AP_GROUPEND
 };
 
 #undef VEKTOR_ROUTE_SLOT
 
 namespace Vektor {
+
+AssignmentMatrixStorage::AssignmentMatrixStorage()
+{
+    AP_Param::setup_object_defaults(this, var_info);
+}
 
 AssignmentMatrix::AssignmentMatrix()
 {
@@ -117,7 +157,8 @@ void AssignmentMatrix::load_persistent()
         const uint32_t destination =
             uint32_t(_stored_destination[slot].get());
         const uint16_t flags = uint16_t(_stored_flags[slot].get());
-        if (source == 0 || destination == 0) {
+        const uint32_t commit = uint32_t(_storage.commit[slot].get());
+        if (!stored_record_valid(source, destination, flags, commit)) {
             continue;
         }
 
@@ -271,6 +312,45 @@ uint32_t AssignmentMatrix::make_route_id(uint32_t source_output_id,
     return Protocol::fnv1a32(path);
 }
 
+uint32_t AssignmentMatrix::storage_commit(uint32_t source_output_id,
+                                          uint32_t destination_input_id,
+                                          uint16_t flags)
+{
+    if (source_output_id == 0 || destination_input_id == 0) {
+        return 0;
+    }
+
+    const uint8_t record[] = {
+        uint8_t(source_output_id),
+        uint8_t(source_output_id >> 8),
+        uint8_t(source_output_id >> 16),
+        uint8_t(source_output_id >> 24),
+        uint8_t(destination_input_id),
+        uint8_t(destination_input_id >> 8),
+        uint8_t(destination_input_id >> 16),
+        uint8_t(destination_input_id >> 24),
+        uint8_t(flags),
+        uint8_t(flags >> 8),
+    };
+    uint32_t commit = Protocol::crc32_iso_hdlc(record, sizeof(record));
+    if (commit == 0) {
+        // Zero is the invalid/uncommitted marker.
+        commit = UINT32_MAX;
+    }
+    return commit;
+}
+
+bool AssignmentMatrix::stored_record_valid(uint32_t source_output_id,
+                                           uint32_t destination_input_id,
+                                           uint16_t flags,
+                                           uint32_t commit)
+{
+    return commit != 0 &&
+           commit == storage_commit(source_output_id,
+                                    destination_input_id,
+                                    flags);
+}
+
 AssignmentMatrix::SetResult AssignmentMatrix::validate(
     uint32_t source_output_id,
     uint32_t destination_input_id,
@@ -403,18 +483,38 @@ int8_t AssignmentMatrix::first_free_slot() const
 void AssignmentMatrix::store_slot(uint8_t slot)
 {
     const Entry &entry = _entries[slot];
-    save_without_gcs(_stored_destination[slot],
-                     int32_t(entry.destination_input_id));
-    save_without_gcs(_stored_flags[slot], int16_t(entry.flags));
-    save_without_gcs(_stored_source[slot],
-                     int32_t(entry.source_output_id));
+    const uint32_t commit = storage_commit(entry.source_output_id,
+                                           entry.destination_input_id,
+                                           entry.flags);
+    // Invalidate first and commit last.  The invalid marker is the exact
+    // complement of the final marker, so even a torn final marker write has
+    // at least one incorrect bit. load_persistent() therefore cannot combine
+    // fields from two writes into a route that was never requested.
+    save_synchronously_without_gcs(_storage.commit[slot], int32_t(~commit));
+    save_synchronously_without_gcs(_stored_source[slot],
+                                   int32_t(entry.source_output_id));
+    save_synchronously_without_gcs(_stored_destination[slot],
+                                   int32_t(entry.destination_input_id));
+    save_synchronously_without_gcs(_stored_flags[slot], int16_t(entry.flags));
+    save_synchronously_without_gcs(
+        _storage.commit[slot],
+        int32_t(commit));
 }
 
 void AssignmentMatrix::clear_stored_slot(uint8_t slot)
 {
-    save_without_gcs(_stored_source[slot], int32_t(0));
-    save_without_gcs(_stored_destination[slot], int32_t(0));
-    save_without_gcs(_stored_flags[slot], int16_t(0));
+    // Once the complemented marker is durable, stale payload fields are
+    // harmless. If power fails while invalidating, the old genuine route may
+    // remain, but a mixed/fabricated route cannot be accepted.
+    const uint32_t stored_commit = storage_commit(
+        uint32_t(_stored_source[slot].get()),
+        uint32_t(_stored_destination[slot].get()),
+        uint16_t(_stored_flags[slot].get()));
+    save_synchronously_without_gcs(_storage.commit[slot],
+                                   int32_t(~stored_commit));
+    save_synchronously_without_gcs(_stored_source[slot], int32_t(0));
+    save_synchronously_without_gcs(_stored_destination[slot], int32_t(0));
+    save_synchronously_without_gcs(_stored_flags[slot], int16_t(0));
 }
 
 } // namespace Vektor

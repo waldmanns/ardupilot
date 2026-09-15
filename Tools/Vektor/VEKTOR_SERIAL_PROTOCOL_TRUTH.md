@@ -1038,7 +1038,9 @@ bits 3..63 reserved
 
 These direction flags describe the externally usable connector, not merely an
 MCU peripheral enabled in generated code. `ENDPOINT_VEKTOR_TRANSPORT` is set
-only on the endpoint actually carrying this protocol session. Flex records use
+only on the endpoint actually carrying this protocol session. Firmware must
+open the HAL serial index mapped to that same endpoint; it must not advertise
+one endpoint and unconditionally bind another serial port. Flex records use
 the kind-specific mode bits below in the same flags word.
 
 ### 24.1 Flex mode flags
@@ -1061,6 +1063,11 @@ A client must not infer `FLEX_ADC_INPUT` merely because another board's Flex por
 ## 25. Timer group descriptor
 
 Used so the configurator can explain shared PWM frame-rate constraints without exposing STM32 timer names.
+
+Timer-group membership is explicit board data. Firmware emits the endpoint IDs
+from each board-defined channel mask; it must not infer membership from group
+sizes, descriptor order, or contiguous channel numbers. Every advertised PWM
+or Flex timer endpoint belongs to exactly one corresponding timer group.
 
 Minimum TIMER_GROUP record v1:
 
@@ -1165,7 +1172,7 @@ value       typed value payload
 
 The returned `type_id` must match the field descriptor.
 
-For `SET`, `VALUE` returns the **accepted/applied value**, which may differ from the request if canonical firmware policy performs quantization or normalization.
+For `SET`, `VALUE` returns the **accepted/applied value**, which may differ from the request if canonical firmware policy performs quantization or normalization. Success means the value passed validation, is active in firmware, and any needed persistent `AP_Param` write was queued. It does **not** mean the nonvolatile medium has physically completed that write. A client that needs reboot confirmation must reconnect and read the value after reboot.
 
 Out-of-range values should normally be rejected rather than silently clamped unless the field descriptor/application semantics explicitly define clamping.
 
@@ -1185,11 +1192,15 @@ Firmware behavior:
 2. verify writable type;
 3. validate bounds/semantics;
 4. apply through `ParameterService` or appropriate state owner;
-5. persist when required;
+5. queue persistence when required;
 6. notify/reconfigure component as required;
 7. return `VALUE` with the accepted value.
 
 If a change requires reboot or reconfiguration, the accepted value is still returned and an appropriate status may also be indicated by event/observable policy.
+
+The successful `VALUE` response is an acceptance/apply acknowledgement, not a
+durability acknowledgement. Power loss immediately after the response may
+restore the prior persistent value.
 
 ## 31. GET_MANY
 
@@ -1226,6 +1237,9 @@ repeat count times:
 After validation, application/reconfiguration callbacks may occur sequentially but must observe the final accepted parameter set, not a partially rejected request.
 
 This makes configurator profile updates predictable.
+
+As with `SET`, a successful `VALUES` response reports accepted/applied values;
+it does not certify physical completion of the queued nonvolatile writes.
 
 ## 33. VALUES
 
@@ -1320,6 +1334,13 @@ Firmware validates:
 - the resulting graph does not violate a prohibited cycle rule.
 
 Successful response is `ROUTES` containing the accepted single route.
+
+Persistent route slots use an invalidate-payload-commit sequence. The commit
+marker is derived from the complete route payload and is written last; startup
+ignores missing or mismatched commits. Power interruption can therefore leave
+the previous genuine route or no route, but cannot turn mixed fields from two
+writes into an accepted route. The response confirms the active accepted
+route, not guaranteed survival of an immediate power loss.
 
 ## 39. ROUTE_DELETE
 
@@ -1445,7 +1466,24 @@ Types are known from descriptors and subscription order, so neither field IDs no
 
 This is the main bandwidth optimization for high-rate streams.
 
-### 41.4 Fast attitude example
+### 41.4 Realtime-loop lateness
+
+The runtime component exposes these realtime fields for every completed loop:
+
+```text
+component/system/1/observable/loop_late          BOOL
+component/system/1/observable/loop_lateness_us   U32
+component/system/1/observable/loop_late_count    U32
+```
+
+`loop_late` is true if the loop started after its absolute scheduled start or
+completed after the following scheduled start. `loop_lateness_us` is the
+larger of those two overruns and is zero when `loop_late` is false.
+`loop_late_count` increments once for each late loop and saturates at
+`UINT32_MAX`. Telemetry sent during a loop describes the preceding completed
+loop, because completion lateness is not known until that loop ends.
+
+### 41.5 Fast attitude example
 
 A typical attitude subscription requests:
 

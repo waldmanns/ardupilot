@@ -292,6 +292,9 @@ bool SerialProtocol::apply_parameter_value(uint32_t field_id,
     case FieldSlot::LOOP_DT_US:
     case FieldSlot::LOOP_WORK_US:
     case FieldSlot::LOOP_MAX_WORK_US:
+    case FieldSlot::LOOP_LATE:
+    case FieldSlot::LOOP_LATENESS_US:
+    case FieldSlot::LOOP_LATE_COUNT:
     case FieldSlot::SERVICE_RATE_HZ:
     case FieldSlot::ATTITUDE_ROLL_DEG:
     case FieldSlot::ATTITUDE_PITCH_DEG:
@@ -406,4 +409,3 @@ bool SerialProtocol::read_typed_value(Protocol::PayloadReader &reader,
         return false;
     }
 }
-

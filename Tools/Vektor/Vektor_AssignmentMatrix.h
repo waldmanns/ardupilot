@@ -8,9 +8,19 @@
 
 namespace Vektor {
 
-class AssignmentMatrix {
+class AssignmentMatrixStorage {
 public:
     static constexpr uint8_t max_routes = 16;
+
+    AssignmentMatrixStorage();
+
+    AP_Int32 commit[max_routes];
+    static const AP_Param::GroupInfo var_info[];
+};
+
+class AssignmentMatrix {
+public:
+    static constexpr uint8_t max_routes = AssignmentMatrixStorage::max_routes;
 
     struct Entry {
         uint32_t route_id = 0;
@@ -54,6 +64,13 @@ public:
 
     static uint32_t make_route_id(uint32_t source_output_id,
                                   uint32_t destination_input_id);
+    static uint32_t storage_commit(uint32_t source_output_id,
+                                   uint32_t destination_input_id,
+                                   uint16_t flags);
+    static bool stored_record_valid(uint32_t source_output_id,
+                                    uint32_t destination_input_id,
+                                    uint16_t flags,
+                                    uint32_t commit);
     static const AP_Param::GroupInfo var_info[];
 
 private:
@@ -73,6 +90,7 @@ private:
     AP_Int32 _stored_source[max_routes];
     AP_Int32 _stored_destination[max_routes];
     AP_Int16 _stored_flags[max_routes];
+    AssignmentMatrixStorage _storage;
     uint8_t _count = 0;
     uint8_t _pwm_input_count = 6;
     uint8_t _pwm_output_count = 12;

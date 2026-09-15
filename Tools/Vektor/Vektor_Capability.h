@@ -49,7 +49,10 @@ enum class ProtocolTransport : uint8_t {
 
 struct TimerGroup {
     const char *name;
-    uint8_t channel_count;
+    // Bit N identifies endpoint N within the corresponding PWM/Flex bank.
+    // Keeping the membership explicit avoids assuming that timer groups are
+    // contiguous or ordered like the connector.
+    uint16_t channel_mask;
     uint8_t supported_rate_flags;
 };
 
@@ -76,8 +79,10 @@ struct BoardCapability {
     uint8_t pwm_inputs;
     const uint8_t *flex_mode_flags;
     const uint8_t *uart_endpoint_flags;
+    const uint8_t *uart_serial_indices;
     ProtocolTransport protocol_transport;
     int8_t protocol_uart_endpoint;
+    int8_t protocol_serial_index;
 };
 
 const BoardCapability &default_capability_for_build();

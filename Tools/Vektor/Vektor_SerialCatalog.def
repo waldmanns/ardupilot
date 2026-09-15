@@ -45,6 +45,17 @@ VEKTOR_OBSERVABLE(LOOP_MAX_WORK_US,
                   "component/system/1/observable/loop_max_work_us",
                   U32, RUNTIME, "loop_max_work_us", "Max Loop Work", "us",
                   realtime_flags, LOOP_MAX_WORK_US)
+VEKTOR_OBSERVABLE(LOOP_LATE, "component/system/1/observable/loop_late",
+                  BOOL, RUNTIME, "loop_late", "Loop Late", "",
+                  realtime_flags, LOOP_LATE)
+VEKTOR_OBSERVABLE(LOOP_LATENESS_US,
+                  "component/system/1/observable/loop_lateness_us",
+                  U32, RUNTIME, "loop_lateness_us", "Loop Lateness", "us",
+                  realtime_flags, LOOP_LATENESS_US)
+VEKTOR_OBSERVABLE(LOOP_LATE_COUNT,
+                  "component/system/1/observable/loop_late_count",
+                  U32, RUNTIME, "loop_late_count", "Late Loop Count", "",
+                  realtime_flags, LOOP_LATE_COUNT)
 VEKTOR_OBSERVABLE(SERVICE_RATE_HZ,
                   "component/system/1/observable/service_rate_hz",
                   U16, RUNTIME, "service_rate_hz", "Service Rate", "Hz",

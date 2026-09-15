@@ -16,6 +16,9 @@ public:
     uint32_t last_loop_dt_us() const { return _last_loop_dt_us; }
     uint32_t last_loop_work_us() const { return _last_loop_work_us; }
     uint32_t max_loop_work_us() const { return _max_loop_work_us; }
+    bool last_loop_late() const { return _last_loop_late; }
+    uint32_t last_loop_lateness_us() const { return _last_loop_lateness_us; }
+    uint32_t late_loop_count() const { return _late_loop_count; }
     uint16_t service_rate_hz() const { return _service_rate_hz; }
 
 private:
@@ -24,12 +27,18 @@ private:
     uint64_t _boot_time_us = 0;
     uint64_t _last_loop_start_us = 0;
     uint64_t _next_loop_start_us = 0;
+    uint64_t _expected_loop_start_us = 0;
     uint32_t _loop_period_us = 1;
     uint32_t _loop_count = 0;
     uint32_t _last_loop_dt_us = 0;
     uint32_t _last_loop_work_us = 0;
     uint32_t _max_loop_work_us = 0;
+    uint32_t _last_loop_lateness_us = 0;
+    uint32_t _current_loop_lateness_us = 0;
+    uint32_t _late_loop_count = 0;
     uint16_t _service_rate_hz = 0;
+    bool _last_loop_late = false;
+    bool _have_expected_loop_start = false;
     bool _started = false;
 };
 

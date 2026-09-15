@@ -234,6 +234,8 @@ bool write_typed_payload(Protocol::PayloadWriter &writer,
                          uint32_t raw)
 {
     switch (type) {
+    case Protocol::PrimitiveType::BOOL:
+        return writer.u8(raw == 0 ? 0 : 1);
     case Protocol::PrimitiveType::U16:
     case Protocol::PrimitiveType::I16:
         return writer.u16(uint16_t(raw));

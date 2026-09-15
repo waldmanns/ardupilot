@@ -38,7 +38,12 @@ void App::setup()
                                          pwm_input.reserved_output_mask());
     assignments.load_persistent();
     _vsp.reset();
-    _serial_protocol.init(hal.serial(0),
+    AP_HAL::UARTDriver *protocol_uart = nullptr;
+    if (_active_capability->protocol_serial_index >= 0) {
+        protocol_uart = hal.serial(
+            uint8_t(_active_capability->protocol_serial_index));
+    }
+    _serial_protocol.init(protocol_uart,
                           *_active_capability,
                           g,
                           _runtime,
@@ -135,7 +140,9 @@ void App::setup_rcin_uart()
 {
 #if AP_RCPROTOCOL_ENABLED
     const int16_t port = g.rcin_port.get();
-    if (port <= 0 || port > rcin_port_max || AP::RC().has_uart()) {
+    if (port <= 0 || port > rcin_port_max ||
+        port == _active_capability->protocol_serial_index ||
+        AP::RC().has_uart()) {
         return;
     }
     AP_HAL::UARTDriver *uart = hal.serial(uint8_t(port));

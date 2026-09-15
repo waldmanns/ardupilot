@@ -617,6 +617,24 @@ bool SerialProtocol::write_field_payload(Protocol::PayloadWriter &writer,
         }
         raw = _runtime->max_loop_work_us();
         break;
+    case FieldSlot::LOOP_LATE:
+        if (_runtime == nullptr) {
+            return false;
+        }
+        raw = _runtime->last_loop_late() ? 1U : 0U;
+        break;
+    case FieldSlot::LOOP_LATENESS_US:
+        if (_runtime == nullptr) {
+            return false;
+        }
+        raw = _runtime->last_loop_lateness_us();
+        break;
+    case FieldSlot::LOOP_LATE_COUNT:
+        if (_runtime == nullptr) {
+            return false;
+        }
+        raw = _runtime->late_loop_count();
+        break;
     case FieldSlot::SERVICE_RATE_HZ:
         if (_runtime == nullptr) {
             return false;
@@ -954,6 +972,9 @@ uint8_t SerialProtocol::field_quality_code(uint32_t field_id) const
     case FieldSlot::LOOP_DT_US:
     case FieldSlot::LOOP_WORK_US:
     case FieldSlot::LOOP_MAX_WORK_US:
+    case FieldSlot::LOOP_LATE:
+    case FieldSlot::LOOP_LATENESS_US:
+    case FieldSlot::LOOP_LATE_COUNT:
     case FieldSlot::SERVICE_RATE_HZ:
     case FieldSlot::SYS_OPTIONS:
     case FieldSlot::SYS_DESC_PAGE:

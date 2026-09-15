@@ -20,7 +20,8 @@ Build a client that can:
 3. complete `HELLO`;
 4. download all current descriptors with `DESCRIBE`;
 5. fetch all exposed parameters with `GET_ALL_PARAMS`;
-6. read and persist one parameter with `GET` and `SET`;
+6. read and apply one parameter with `GET` and `SET`, understanding the
+   asynchronous persistence contract;
 7. list, create, replace, and delete assignment routes;
 8. subscribe to current realtime fields and expose their quality state;
 9. reconnect cleanly after the device resets or re-enumerates.
@@ -30,9 +31,13 @@ carries the native Vektor binary protocol.
 
 ## USB CDC transport
 
-On `revo-mini`, the hardware serial order begins with `OTG1`. Vektor attaches
-its protocol adapter to `hal.serial(0)`, so the application USB connection is a
-CDC serial byte stream.
+On `revo-mini`, the hardware serial order begins with `OTG1`. The board
+capability explicitly maps the Vektor transport to HAL serial index 0, and the
+firmware opens that same index. The advertised USB endpoint is therefore the
+application CDC serial byte stream carrying this session. UART-capable future
+boards must provide endpoint-to-HAL-index mappings, and capability validation
+rejects a claimed UART endpoint whose mapped index differs from the index the
+firmware will open.
 
 Current reduced-board USB information:
 
@@ -426,6 +431,11 @@ supported_rates_hz   u16[rate_count]
 current_rate_hz      u16
 ```
 
+Treat `member_endpoint_ids` as authoritative. Firmware builds this list from
+explicit board channel masks, not from contiguous channel assumptions. On
+`revo-mini`, the two records are PWM 1-2 (TIM3) and PWM 3-6 (TIM2); the timer
+names are an implementation note and are not carried on the wire.
+
 RUNTIME_LIMIT record v1:
 
 ```text
@@ -495,9 +505,12 @@ type_id   u8
 value     typed bytes
 ```
 
-Successful response is `VALUE` containing the accepted value, which firmware
-has queued for `AP_Param` persistence. Honor the descriptor's bounds and type
-locally, but always handle firmware-side validation errors.
+Successful response is `VALUE` containing the accepted/applied value, which
+firmware has queued for `AP_Param` persistence. This is not a physical-save
+acknowledgement: immediate power loss can restore the prior value. If a
+workflow needs proof across reboot, reconnect after reboot and `GET` the value.
+Honor the descriptor's bounds and type locally, but always handle firmware-side
+validation errors.
 
 ### GET_MANY, SET_MANY, and GET_ALL_PARAMS
 
@@ -524,6 +537,9 @@ checking related PWM `minimum_us`, `trim_us`, `maximum_us`, and `failsafe_us`
 constraints, so a valid coordinated calibration update succeeds and an invalid
 final tuple changes nothing.
 
+Like `SET`, a successful `SET_MANY` response means accepted/applied and queued,
+not physically durable.
+
 Successful bulk response type `0x15`:
 
 ```text
@@ -548,7 +564,7 @@ an acceptance-test and UI-semantics reference.
 | --- | --- | --- | --- |
 | `component/system/0/parameter/sys_options` | I32 | 0..2147483647, default 0 | live |
 | `component/system/0/parameter/sys_desc_page` | I16 | 1..16, default 4 | live |
-| `component/system/0/parameter/sys_protocol_baud` | I32 | 9600..921600, default 115200 | reboot |
+| `component/system/0/parameter/sys_protocol_baud` | I32 | 9600..921600, default 115200; UART transport builds only | reboot |
 | `component/rcin/0/parameter/uart_port` | I16 | 0..9, default 1 | reboot |
 | `component/rcin/0/parameter/timeout_ms` | I16 | 50..5000, default 500 | live |
 | `component/rcin/0/parameter/protocol_mask` | I32 | 0..131071, default 1 | live |
@@ -605,6 +621,9 @@ component/system/1/observable/loop_count
 component/system/1/observable/loop_dt_us
 component/system/1/observable/loop_work_us
 component/system/1/observable/loop_max_work_us
+component/system/1/observable/loop_late
+component/system/1/observable/loop_lateness_us
+component/system/1/observable/loop_late_count
 component/system/1/observable/service_rate_hz
 component/attitude/0/observable/roll_deg
 component/attitude/0/observable/pitch_deg
@@ -612,15 +631,24 @@ component/attitude/0/observable/yaw_deg
 component/attitude/0/observable/quaternion
 component/attitude/0/observable/body_rates_rad_s
 component/rcin/0/observable/channel_1_us through channel_16_us
+component/pwm_input/0/observable/channel_1_attach_status through channel_6_attach_status
+component/pwm_input/0/observable/configuration_valid
+component/pwm_output/0/observable/configuration_valid
+component/pwm_output/0/observable/effective_rate_hz
+component/pwm_output/0/observable/effective_failsafe_us
 ```
+
+`loop_late` explicitly reports whether the preceding completed loop started
+after its scheduled time or finished after the following deadline.
+`loop_lateness_us` reports the larger overrun, and `loop_late_count` increments
+once per late loop. A realtime monitor should alert on `loop_late` or a change
+in the counter instead of inferring lateness from `loop_dt_us`.
 
 Current routable/readable FLOAT32 fields:
 
 ```text
 component/vsp/1/input/x
 component/vsp/1/input/y
-component/vsp/1/output/servo_a
-component/vsp/1/output/servo_b
 component/rcin/0/output/channel_1 through channel_16
 component/pwm_input/0/output/channel_1 through channel_6
 component/pwm_output/0/input/channel_1 through channel_12
@@ -712,6 +740,18 @@ field. There is one source per destination. Setting another source for an
 already assigned destination replaces the old route. Routes are persisted in
 AP_Param storage and survive reset. The matrix currently holds at most 16
 routes.
+
+Each stored slot has a payload-derived commit marker. Firmware synchronously
+invalidates the marker, writes source/destination/flags, then writes the final
+marker. Startup rejects absent or mismatched markers, so losing power during a
+replacement can leave the previous genuine route or no route but cannot create
+a mixed, never-requested route. A successful response still means the route was
+accepted into the live matrix; it is not a promise that an immediate power cut
+will preserve the new route.
+
+Route slots created by firmware predating commit markers have no trustworthy
+transaction boundary and are deliberately ignored after upgrade. Recreate
+those routes once; subsequently committed routes retain normal reset survival.
 
 ### ROUTE_LIST
 
@@ -878,7 +918,8 @@ The initial PC client is ready for current firmware when all of these pass:
   verifies the application through `HELLO`.
 - `HELLO` parses the current reduced board and runtime limits.
 - All implemented descriptor domains page to completion.
-- The reduced board yields 6 components, 69 fields, and 22 readable parameters.
+- The reduced board yields 7 components, 102 fields, and 21 readable
+  parameters. `sys_protocol_baud` is omitted because this build uses USB.
 - `GET_ALL_PARAMS` populates the editor using descriptor types and constraints.
 - `SET` returns and displays the accepted value; reboot-policy fields are marked.
 - Closing and reopening the client starts with a fresh `HELLO` and refreshes
@@ -895,8 +936,8 @@ The initial PC client is ready for current firmware when all of these pass:
 - There is no file service, action service, or event stream yet.
 - There are no enum-table descriptors yet.
 - The VSP core is intentionally only a skeleton.
-- Raw RC/PWM pulse-width observables are not exposed; current channel fields are
-  normalized FLOAT32 values.
+- Raw RC input and physical PWM output pulse widths are exposed as U16
+  realtime fields; routable command fields remain normalized FLOAT32 values.
 - The final H743 ChibiOS hardware definition is not available in this
   workspace, so no H743 capability record is compiled yet. Build and test the
   first PC integration against `revo-mini` and remain descriptor-driven for

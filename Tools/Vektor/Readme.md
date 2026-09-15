@@ -18,7 +18,8 @@ This scaffold intentionally starts small. It provides:
 - a folder-local waf program definition;
 - a compile-time board capability model populated from the selected hwdef;
 - a runtime state service with absolute-deadline loop scheduling, timing, and
-  uptime observables;
+  uptime observables, including explicit per-loop lateness and a cumulative
+  late-loop count;
 - a standard ArduPilot INS/DCM attitude estimator with realtime Euler,
   quaternion, and body-rate telemetry on IMU-equipped boards;
 - a minimal AP_Param-backed system parameter set;
@@ -58,7 +59,8 @@ The first exposed persistent parameters are:
 
 - `SYS_OPTIONS`: reserved system option bitmask;
 - `SYS_DESC_PAGE`: default descriptor records per `DESCRIBE` page;
-- `SYS_PROTO_BAUD`: protocol UART baud rate used on boot.
+- `SYS_PROTO_BAUD`: protocol UART baud rate used on boot; it is omitted from
+  Vektor field descriptors when the active transport is USB;
 - `RCIN_PORT`: HAL serial index used for the receiver UART (`1` by default,
   `0` disables the added UART);
 - `RCIN_TIMEOUT`: receiver freshness timeout in milliseconds.
@@ -92,12 +94,23 @@ The native schema exposes that standard mask as
 appear as routable fields under
 `component/rcin/0/output/channel_1` through `channel_16`.
 
-Assignments are queued for persistence through `AP_Param` and allow one source
-per destination; setting a new source for an assigned destination replaces the
-old route. Route flags are reserved and must currently be zero. The VSP
+Assignments are persisted through `AP_Param` and allow one source per
+destination; setting a new source for an assigned destination replaces the old
+route. Each slot is invalidated before its payload is written and has a
+payload-derived commit marker written last. Startup ignores an uncommitted or
+mismatched slot, so interrupted saving cannot synthesize a route from mixed old
+and new fields. Route flags are reserved and must currently be zero. The VSP
 component consumes its assigned X/Y samples, but its control-law `update()`
 remains intentionally empty. Its invalid output observables are therefore not
 advertised as routable sources.
+
+A successful protocol `SET`/`SET_MANY` response means that firmware validated
+and applied the returned value and queued any needed `AP_Param` write. It does not
+certify that nonvolatile media has physically completed the write; an immediate
+power loss can restore the previous value. Route mutation responses likewise
+confirm the accepted runtime route, while their commit protocol guarantees
+crash consistency rather than promising that a just-accepted change survives
+an immediate loss of power.
 
 Minimal direct routes use these stable schema paths:
 
@@ -176,7 +189,10 @@ The current `revo-mini` hwdef represents the reduced F405 target facts captured
 in the truth base. Generic facts (board ID, USB, PWM, CAN, sensor probes, and
 storage backends) come from generated HAL macros. Connector-specific facts use
 `VEKTOR_*` definitions in `hwdef.dat`, including PWM input count, per-Flex mode
-bits, per-UART direction/transport bits, and per-timer-group supported rates.
+bits, UART endpoint-to-HAL-index mappings, the actual protocol serial index,
+and explicit per-timer-group channel masks and supported rates. On this board
+Vektor runs on `OTG1`/`hal.serial(0)` and advertises only the USB endpoint as
+`ENDPOINT_VEKTOR_TRANSPORT`; PWM 1-2 share TIM3 and PWM 3-6 share TIM2.
 Unspecified facts default to absent so a new board cannot inherit another
 board's capabilities. The full H743 target still needs its ChibiOS hwdef before
 it can be built as hardware firmware.

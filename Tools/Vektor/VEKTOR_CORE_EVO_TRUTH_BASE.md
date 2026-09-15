@@ -212,10 +212,10 @@ TIM1_CH2
 The main bank has four hardware timer groups:
 
 ```text
-TIM2 : 2 channels
-TIM4 : 4 channels
-TIM8 : 4 channels
-TIM1 : 2 channels
+PWM 1-2   : TIM2
+PWM 3-6   : TIM4
+PWM 7-10  : TIM8
+PWM 11-12 : TIM1
 ```
 
 **[DECIDED]** Channels that share one timer should be presented as a frame-rate group in the configurator. The user should not need to know the STM32 timer name.
@@ -270,8 +270,8 @@ Therefore the correct product description is:
 The six timer Flex channels form two timer groups:
 
 ```text
-TIM5 : 2 channels
-TIM3 : 4 channels
+Flex 1-2 : TIM5
+Flex 3-6 : TIM3
 ```
 
 That grouping matters when PWM frame rate is configured.
@@ -612,9 +612,13 @@ PWM6 PA0 TIM2_CH1
 This creates two physical timer groups:
 
 ```text
-TIM3 : 2 channels
-TIM2 : 4 channels
+PWM 1-2 : TIM3
+PWM 3-6 : TIM2
 ```
+
+The reduced hwdef encodes these memberships as explicit channel masks. Runtime
+TIMER_GROUP descriptors enumerate those exact endpoint IDs rather than deriving
+membership from group sizes or assuming channels are contiguous.
 
 ### 16.3 BMI088
 
@@ -1178,11 +1182,17 @@ VALUES
 GET_ALL_PARAMS
 ```
 
-**[DECIDED]** Firmware validates and persists through the same `AP_Param` objects available to MAVLink.
+**[DECIDED]** Firmware validates and queues persistence through the same
+`AP_Param` objects available to MAVLink.
 
-**[DECIDED]** A successful SET should return the accepted value rather than assuming the requested value was accepted unchanged.
+**[DECIDED]** A successful SET returns the accepted/applied value rather than
+assuming the requested value was accepted unchanged. It confirms that the
+`AP_Param` write was queued, not that nonvolatile media physically completed
+the write. Durability-sensitive workflows verify by reconnecting after reboot.
 
-**[OPEN]** Exact typed-value binary encoding, string length encoding, enum metadata, and bulk-message size limits are not yet fixed.
+**[CANONICAL]** Exact typed-value and string encodings and current bulk limits
+are defined in `VEKTOR_SERIAL_PROTOCOL_TRUTH.md`. Enum-table descriptors remain
+unimplemented in the current firmware.
 
 ---
 
@@ -1417,7 +1427,9 @@ The current `Tools/Vektor` scaffold implements and tests:
 - a minimal `AP_Param`-backed system parameter set;
 - a common component/field schema registry used for stable-ID lookup,
   parameter enumeration, and protocol descriptor generation;
-- absolute-deadline runtime scheduling plus uptime and loop-timing observables;
+- absolute-deadline runtime scheduling plus uptime, loop timing, explicit
+  previous-loop lateness, lateness magnitude, and cumulative late-loop
+  observables;
 - Vektor Protocol v1 COBS framing, CRC-32/ISO-HDLC, bounded stream parsing, and the canonical frame vector;
 - `PING`, `HELLO`, paged board/component/field/endpoint/timer-group/runtime-limit `DESCRIBE`, `ERROR`, typed `GET`/`SET`, bulk parameter operations, and duplicate-request replay/conflict handling;
 - deterministic nonzero schema/capability hashes over ID-sorted descriptor records, with initialization-time stable-ID collision validation;
@@ -1425,10 +1437,16 @@ The current `Tools/Vektor` scaffold implements and tests:
 - a 16-channel RC input component backed by HAL/AP_RCProtocol, with selectable receiver UART, serial receiver autodetection, standard RC calibration, frame freshness/failsafe quality, and normalized routable outputs;
 - board-count-limited GPIO edge-capture PWM inputs with preserved IRQ timestamps, explicit attachment/configuration status, independent freshness/quality, and normalized routable outputs;
 - a board-count-limited PWM output bank with normalized routable inputs, explicit configured/effective state, strict pulse/rate/failsafe validation, reversal, unrouted-channel disable, and PWM-input pin conflict rejection;
-- a bounded asynchronously `AP_Param`-persistent assignment matrix with stable route IDs, one-source-per-input replacement, type/direction validation, component-cycle rejection, and compiled fast-path endpoints;
+- a bounded `AP_Param`-persistent assignment matrix with stable route IDs,
+  one-source-per-input replacement, type/direction validation, component-cycle
+  rejection, compiled fast-path endpoints, and invalidate-payload-commit slot
+  writes that reject interrupted or mixed records at startup;
 - `ROUTE_LIST`, `ROUTE_SET`, and `ROUTE_DELETE` protocol handlers and the `CAP_ROUTING` capability bit;
 - a generated C++ catalog/binding table from one canonical manifest, with exhaustive schema parity tests;
 - a serial implementation partitioned into request, descriptor, parameter, and identity/capability sections;
+- reduced-board transport metadata that maps the advertised USB session to
+  `OTG1`/HAL serial index 0, plus validated UART endpoint-to-index mappings for
+  future UART transport selection;
 - host tests covering codec/parser behavior, schema registry serialization, hardware capability truth, RC/PWM quality and normalization, assignment validation, staged parameter validation, route protocol operations, replay/session behavior, runtime timing, subscription scheduling, and an end-to-end UART telemetry session.
 
 The following remain design or bring-up work rather than implemented product behavior:
@@ -1450,7 +1468,7 @@ The following remain design or bring-up work rather than implemented product beh
 
 - action schemas, action/event handlers, and operation lifecycle behavior;
 - file-service handlers and board-specific chunk limits where storage is advertised;
-- a finalized physical USB/UART port-selection policy and MAVLink coexistence validation.
+- the full H743 physical USB/UART selection and MAVLink coexistence validation.
 
 ---
 

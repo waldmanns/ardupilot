@@ -150,26 +150,36 @@ constexpr const uint8_t *flex_mode_flags = nullptr;
 #ifndef VEKTOR_UART_ENDPOINT_FLAGS
 #error "VEKTOR_UART_ENDPOINT_FLAGS is required when UART endpoints are advertised"
 #endif
+#ifndef VEKTOR_UART_SERIAL_INDICES
+#error "VEKTOR_UART_SERIAL_INDICES is required when UART endpoints are advertised"
+#endif
 constexpr uint8_t uart_endpoint_flags[] = { VEKTOR_UART_ENDPOINT_FLAGS };
+constexpr uint8_t uart_serial_indices[] = { VEKTOR_UART_SERIAL_INDICES };
 static_assert(sizeof(uart_endpoint_flags) / sizeof(uart_endpoint_flags[0]) ==
                   VEKTOR_UART_ENDPOINT_COUNT,
               "Vektor UART endpoint flag count does not match its endpoint count");
+static_assert(sizeof(uart_serial_indices) / sizeof(uart_serial_indices[0]) ==
+                  VEKTOR_UART_ENDPOINT_COUNT,
+              "Vektor UART serial-index count does not match its endpoint count");
 #define VEKTOR_UART_ENDPOINT_FLAG_PTR uart_endpoint_flags
+#define VEKTOR_UART_SERIAL_INDEX_PTR uart_serial_indices
 #else
 constexpr const uint8_t *uart_endpoint_flags = nullptr;
+constexpr const uint8_t *uart_serial_indices = nullptr;
 #define VEKTOR_UART_ENDPOINT_FLAG_PTR uart_endpoint_flags
+#define VEKTOR_UART_SERIAL_INDEX_PTR uart_serial_indices
 #endif
 
 #ifndef VEKTOR_PROTOCOL_TRANSPORT_KIND
-#if VEKTOR_HAS_NATIVE_USB
-#define VEKTOR_PROTOCOL_TRANSPORT_KIND 1
-#else
 #define VEKTOR_PROTOCOL_TRANSPORT_KIND 0
-#endif
 #endif
 
 #ifndef VEKTOR_PROTOCOL_UART_ENDPOINT
 #define VEKTOR_PROTOCOL_UART_ENDPOINT -1
+#endif
+
+#ifndef VEKTOR_PROTOCOL_SERIAL_INDEX
+#define VEKTOR_PROTOCOL_SERIAL_INDEX -1
 #endif
 
 #ifndef VEKTOR_HEARTBEAT_LED_GPIO
@@ -264,8 +274,10 @@ constexpr Vektor::BoardCapability build_capability {
     VEKTOR_PWM_INPUT_COUNT,
     VEKTOR_FLEX_MODE_PTR,
     VEKTOR_UART_ENDPOINT_FLAG_PTR,
+    VEKTOR_UART_SERIAL_INDEX_PTR,
     Vektor::ProtocolTransport(VEKTOR_PROTOCOL_TRANSPORT_KIND),
     VEKTOR_PROTOCOL_UART_ENDPOINT,
+    VEKTOR_PROTOCOL_SERIAL_INDEX,
 };
 
 } // namespace
@@ -296,7 +308,8 @@ bool capability_valid(const BoardCapability &capability)
     if ((capability.flex_timer_channels != 0 &&
          capability.flex_mode_flags == nullptr) ||
         (capability.uart_endpoints != 0 &&
-         capability.uart_endpoint_flags == nullptr) ||
+         (capability.uart_endpoint_flags == nullptr ||
+          capability.uart_serial_indices == nullptr)) ||
         (capability.pwm_timer_group_count != 0 &&
          capability.pwm_timer_groups == nullptr) ||
         (capability.flex_timer_group_count != 0 &&
@@ -305,27 +318,36 @@ bool capability_valid(const BoardCapability &capability)
     }
 
     uint16_t pwm_members = 0;
+    const uint16_t pwm_available_mask = capability.pwm_outputs == 0 ? 0 :
+        uint16_t((1U << capability.pwm_outputs) - 1U);
     for (uint8_t i = 0; i < capability.pwm_timer_group_count; i++) {
         const TimerGroup &group = capability.pwm_timer_groups[i];
-        if (group.name == nullptr || group.channel_count == 0 ||
+        if (group.name == nullptr || group.channel_mask == 0 ||
+            (group.channel_mask & ~pwm_available_mask) != 0 ||
+            (group.channel_mask & pwm_members) != 0 ||
             group.supported_rate_flags == 0 ||
             (group.supported_rate_flags &
              ~(TIMER_RATE_50_HZ | TIMER_RATE_100_HZ |
                TIMER_RATE_200_HZ | TIMER_RATE_330_HZ)) != 0) {
             return false;
         }
-        pwm_members += group.channel_count;
+        pwm_members |= group.channel_mask;
     }
     uint16_t flex_members = 0;
+    const uint16_t flex_available_mask =
+        capability.flex_timer_channels == 0 ? 0 :
+        uint16_t((1U << capability.flex_timer_channels) - 1U);
     for (uint8_t i = 0; i < capability.flex_timer_group_count; i++) {
         const TimerGroup &group = capability.flex_timer_groups[i];
-        if (group.name == nullptr || group.channel_count == 0) {
+        if (group.name == nullptr || group.channel_mask == 0 ||
+            (group.channel_mask & ~flex_available_mask) != 0 ||
+            (group.channel_mask & flex_members) != 0) {
             return false;
         }
-        flex_members += group.channel_count;
+        flex_members |= group.channel_mask;
     }
-    if (pwm_members != capability.pwm_outputs ||
-        flex_members != capability.flex_timer_channels) {
+    if (pwm_members != pwm_available_mask ||
+        flex_members != flex_available_mask) {
         return false;
     }
     for (uint8_t i = 0; i < capability.flex_timer_channels; i++) {
@@ -343,17 +365,29 @@ bool capability_valid(const BoardCapability &capability)
              ~(ENDPOINT_INPUT | ENDPOINT_OUTPUT)) != 0) {
             return false;
         }
+        for (uint8_t j = 0; j < i; j++) {
+            if (capability.uart_serial_indices[j] ==
+                capability.uart_serial_indices[i]) {
+                return false;
+            }
+        }
     }
 
     switch (capability.protocol_transport) {
     case ProtocolTransport::NONE:
-        return capability.protocol_uart_endpoint < 0;
+        return capability.protocol_uart_endpoint < 0 &&
+               capability.protocol_serial_index < 0;
     case ProtocolTransport::USB:
         return capability_has(capability, CAP_NATIVE_USB) &&
-               capability.protocol_uart_endpoint < 0;
+               capability.protocol_uart_endpoint < 0 &&
+               capability.protocol_serial_index >= 0;
     case ProtocolTransport::UART:
-        return capability.protocol_uart_endpoint >= 0 &&
+        return capability.protocol_serial_index >= 0 &&
+               capability.protocol_uart_endpoint >= 0 &&
                capability.protocol_uart_endpoint < capability.uart_endpoints &&
+               capability.protocol_serial_index ==
+                   capability.uart_serial_indices[
+                       capability.protocol_uart_endpoint] &&
                (capability.uart_endpoint_flags[
                     capability.protocol_uart_endpoint] &
                 (ENDPOINT_INPUT | ENDPOINT_OUTPUT)) ==
@@ -366,3 +400,4 @@ bool capability_valid(const BoardCapability &capability)
 
 #undef VEKTOR_FLEX_MODE_PTR
 #undef VEKTOR_UART_ENDPOINT_FLAG_PTR
+#undef VEKTOR_UART_SERIAL_INDEX_PTR

@@ -336,9 +336,9 @@ void SerialProtocol::handle_set(const Protocol::FrameView &frame)
 
     if (!apply_parameter_value(field_id, type_id, raw)) {
         send_error(frame,
-                   Protocol::ErrorCode::STORAGE_ERROR,
+                   Protocol::ErrorCode::INTERNAL_ERROR,
                    field_id,
-                   "failed to save parameter");
+                   "failed to apply parameter");
         return;
     }
 
@@ -511,9 +511,9 @@ void SerialProtocol::handle_set_many(const Protocol::FrameView &frame)
                                    pending[i].type_id,
                                    pending[i].raw)) {
             send_error(frame,
-                       Protocol::ErrorCode::STORAGE_ERROR,
+                       Protocol::ErrorCode::INTERNAL_ERROR,
                        pending[i].field_id,
-                       "failed to save parameter");
+                       "failed to apply parameter");
             return;
         }
     }
@@ -858,4 +858,3 @@ void SerialProtocol::handle_route_delete(const Protocol::FrameView &frame)
                    "failed ROUTE_DELETE");
     }
 }
-
