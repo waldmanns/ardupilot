@@ -1,0 +1,65 @@
+# encoding: utf-8
+
+# Vektor2 intentionally keeps the application object graph small. The library
+# list below is explicit enough to document the intended dependency boundary,
+# while still including common transitive support needed by AHRS/EKF3/GCS.
+
+def build(bld):
+    # These are application-level exclusions, not runtime state machines.
+    # They keep the generic GCS/AHRS libraries from pulling vehicle concepts
+    # into Vektor2 while leaving EKF3, GPS, RCProtocol and MAVLink enabled.
+    bld.env.DEFINES += [
+        'AP_ARMING_ENABLED=0',
+        'AP_RC_CHANNEL_ENABLED=0',
+        'AP_MISSION_ENABLED=0',
+        'AP_COMPASS_ENABLED=0',
+        'AP_BARO_ENABLED=0',
+    ]
+
+    libraries = [
+        'AP_Common',
+        'AP_HAL',
+        'AP_HAL_Empty',
+        'AP_Math',
+        'AP_Param',
+        'StorageManager',
+        'AP_BoardConfig',
+        'AP_InternalError',
+        'Filter',
+        'AP_AccelCal',
+        'AP_InertialSensor',
+        'AP_NavEKF',
+        'AP_NavEKF3',
+        'AP_AHRS',
+        'AP_GPS',
+        'AP_SerialManager',
+        'AP_RCProtocol',
+        'GCS_MAVLink',
+        'SRV_Channel',
+        # AHRS/GCS compile-time references are feature-gated, but these small
+        # support libraries keep the target compatible with normal ChibiOS
+        # board configurations without instantiating vehicle subsystems.
+        'AP_Compass',
+        'AP_Baro',
+        'AP_RTC',
+        'AP_Filesystem',
+    ]
+
+    # Platform libraries are supplied by the selected board.
+    board_libraries = bld.env.AP_LIBRARIES[:]
+    for library in board_libraries:
+        if library.startswith('AP_HAL_') and library not in libraries:
+            libraries.append(library)
+
+    bld.ap_stlib(
+        name='Vektor2_libs',
+        ap_vehicle='Vektor2',
+        ap_libraries=libraries,
+        dynamic_source=[],
+    )
+
+    bld.ap_program(
+        program_name='Vektor2',
+        program_groups=['bin', 'vektor2'],
+        use=['Vektor2_libs'],
+    )
