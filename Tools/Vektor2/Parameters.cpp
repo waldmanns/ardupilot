@@ -1,8 +1,28 @@
 #include "Vektor2.h"
 
+const AP_Param::GroupInfo RC_Channels::var_info[] = {
+    AP_GROUPEND
+};
+
+#if !AP_MISSION_ENABLED
+namespace AP {
+AP_Mission *mission()
+{
+    return nullptr;
+}
+}
+#endif
+
 namespace Vektor2 {
 
+#define APP_SCALAR(v, name, def) { name, (const void *)&app.v, {def_value : def}, 0, Parameters::k_param_ ## v, app.v.vtype }
+
 const AP_Param::Info App::var_info[] = {
+    APP_SCALAR(format_version, "FORMAT_VERSION", 0),
+#if AP_SIM_ENABLED
+    GOBJECT(sitl, "SIM_", SITL::SIM),
+#endif
+
     // Board-level orientation and hardware configuration.
     GOBJECT(board_config, "BRD_", AP_BoardConfig),
 
@@ -26,7 +46,7 @@ const AP_Param::Info App::var_info[] = {
     // AHRS frontend and EKF3 parameters.
     GOBJECT(ahrs, "AHRS_", AP_AHRS),
 #if HAL_NAVEKF3_AVAILABLE
-    GOBJECTN(ahrs.ekf3.EKF3, NavEKF3, "EK3_", NavEKF3),
+    GOBJECTN(ahrs.EKF3, NavEKF3, "EK3_", NavEKF3),
 #endif
 
     // Kept from day one but disabled by AP_GPS defaults until a receiver is
@@ -41,6 +61,7 @@ const AP_Param::Info App::var_info[] = {
 
     AP_VAREND
 };
+#undef APP_SCALAR
 
 void App::load_parameters()
 {

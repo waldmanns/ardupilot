@@ -31,7 +31,7 @@ extern const AP_HAL::HAL& hal;
 /// map a function to a servo channel and output it
 void SRV_Channel::output_ch(void)
 {
-#ifndef HAL_BUILD_AP_PERIPH
+#if !defined(HAL_BUILD_AP_PERIPH) && AP_RC_CHANNEL_ENABLED
     int8_t passthrough_from = -1;
     bool passthrough_mapped = false;
 
@@ -94,7 +94,7 @@ void SRV_Channel::output_ch(void)
             }
         }
     }
-#endif // HAL_BUILD_AP_PERIPH
+#endif // !HAL_BUILD_AP_PERIPH && AP_RC_CHANNEL_ENABLED
 
     if (!(SRV_Channels::disabled_mask & (1U<<ch_num))) {
         hal.rcout->write(ch_num, output_pwm);

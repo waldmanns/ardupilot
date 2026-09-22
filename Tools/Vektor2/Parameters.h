@@ -13,7 +13,8 @@ namespace Vektor2 {
 class Parameters {
 public:
     enum : uint16_t {
-        k_param_board_config = 0,
+        k_param_format_version = 0,
+        k_param_board_config,
         k_param_serial_manager,
         k_param_logic,
         k_param_route_params,
@@ -22,6 +23,7 @@ public:
         k_param_NavEKF3,
         k_param_gps,
         k_param__gcs,
+        k_param_sitl,
     };
 };
 

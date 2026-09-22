@@ -65,6 +65,7 @@ void App::setup()
     // without hardware and makes GPS a parameter-only addition later.
     gps.init();
 
+    scheduler.init(nullptr, 0, 0);
     init_estimator();
     pwm.init();
 

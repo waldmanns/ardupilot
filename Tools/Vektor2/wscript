@@ -10,13 +10,17 @@ def build(bld):
     # into Vektor2 while leaving EKF3, GPS, RCProtocol and MAVLink enabled.
     bld.env.DEFINES += [
         'AP_ARMING_ENABLED=0',
-        'AP_RC_CHANNEL_ENABLED=0',
         'AP_MISSION_ENABLED=0',
-        'AP_COMPASS_ENABLED=0',
         'AP_BARO_ENABLED=0',
+        'AP_EXTERNAL_AHRS_ENABLED=0',
+        'AP_AHRS_DCM_ENABLED=0',
+        'HAL_WITH_FRSKY_TELEM_BIDIRECTIONAL=0',
     ]
 
-    libraries = [
+    # ArduPilot libraries contain compile-time feature gates but do not encode
+    # their complete link dependencies. Start with the standard dependency
+    # closure, while Vektor2's object graph below remains deliberately small.
+    libraries = bld.ap_common_vehicle_libraries() + [
         'AP_Common',
         'AP_HAL',
         'AP_HAL_Empty',
@@ -43,6 +47,9 @@ def build(bld):
         'AP_Baro',
         'AP_RTC',
         'AP_Filesystem',
+        'AP_AdvancedFailsafe',
+        'AP_Avoidance',
+        'AP_LTM_Telem',
     ]
 
     # Platform libraries are supplied by the selected board.
@@ -53,9 +60,8 @@ def build(bld):
 
     bld.ap_stlib(
         name='Vektor2_libs',
-        ap_vehicle='Vektor2',
+        ap_vehicle='UNKNOWN',
         ap_libraries=libraries,
-        dynamic_source=[],
     )
 
     bld.ap_program(

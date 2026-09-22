@@ -53,7 +53,8 @@ void AP_DAL::start_frame(AP_DAL::FrameType frametype)
     _RFRF.frame_types = uint8_t(frametype);
 
 #if AP_VEHICLE_ENABLED
-    _RFRH.time_flying_ms = AP::vehicle()->get_time_flying_ms();
+    const AP_Vehicle *vehicle = AP::vehicle();
+    _RFRH.time_flying_ms = vehicle == nullptr ? 0 : vehicle->get_time_flying_ms();
 #else
     _RFRH.time_flying_ms = 0;
 #endif
@@ -590,4 +591,3 @@ void rprintf(const char *format, ...)
     va_end(ap);
 #endif
 }
-

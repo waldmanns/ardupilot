@@ -19,14 +19,21 @@ struct SourceEndpoint {
     uint8_t instance = 0; // ComponentId when kind == ComponentOutput
     uint8_t port = 0;     // RC channel or component output port
 
+    SourceEndpoint() = default;
+    constexpr SourceEndpoint(SourceKind endpoint_kind, uint8_t endpoint_instance, uint8_t endpoint_port) :
+        kind(endpoint_kind),
+        instance(endpoint_instance),
+        port(endpoint_port)
+    {}
+
     static SourceEndpoint rc(uint8_t channel)
     {
-        return {SourceKind::RcInput, 0, channel};
+        return SourceEndpoint(SourceKind::RcInput, 0, channel);
     }
 
     static SourceEndpoint component(ComponentId id, uint8_t output_port)
     {
-        return {SourceKind::ComponentOutput, uint8_t(id), output_port};
+        return SourceEndpoint(SourceKind::ComponentOutput, uint8_t(id), output_port);
     }
 };
 
@@ -40,14 +47,21 @@ struct ConsumerEndpoint {
     uint8_t instance = 0; // ComponentId when kind == ComponentInput
     uint8_t port = 0;     // component input port or PWM channel
 
+    ConsumerEndpoint() = default;
+    constexpr ConsumerEndpoint(ConsumerKind endpoint_kind, uint8_t endpoint_instance, uint8_t endpoint_port) :
+        kind(endpoint_kind),
+        instance(endpoint_instance),
+        port(endpoint_port)
+    {}
+
     static ConsumerEndpoint component(ComponentId id, uint8_t input_port)
     {
-        return {ConsumerKind::ComponentInput, uint8_t(id), input_port};
+        return ConsumerEndpoint(ConsumerKind::ComponentInput, uint8_t(id), input_port);
     }
 
     static ConsumerEndpoint pwm(uint8_t channel)
     {
-        return {ConsumerKind::PwmOutput, 0, channel};
+        return ConsumerEndpoint(ConsumerKind::PwmOutput, 0, channel);
     }
 };
 
