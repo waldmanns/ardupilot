@@ -1,9 +1,5 @@
 #include "Vektor2.h"
 
-const AP_Param::GroupInfo RC_Channels::var_info[] = {
-    AP_GROUPEND
-};
-
 #if !AP_MISSION_ENABLED
 namespace AP {
 AP_Mission *mission()
@@ -43,6 +39,9 @@ const AP_Param::Info App::var_info[] = {
     // Raw inertial drivers/calibration.
     GOBJECT(ins, "INS", AP_InertialSensor),
 
+    // Optional magnetometer hardware and calibration parameters.
+    GOBJECT(compass, "COMPASS_", Compass),
+
     // AHRS frontend and EKF3 parameters.
     GOBJECT(ahrs, "AHRS_", AP_AHRS),
 #if HAL_NAVEKF3_AVAILABLE
@@ -73,6 +72,7 @@ void App::load_parameters()
     // disabled. GPS can later be enabled by changing EK3_SRC1_* and GPS/SERIAL
     // parameters, without touching the application architecture.
     AP_Param::set_default_by_name("AHRS_EKF_TYPE", 3);
+    AP_Param::set_default_by_name("SERIAL0_PROTOCOL", 2); // MAVLink2
 #if HAL_NAVEKF3_AVAILABLE
     AP_Param::set_default_by_name("EK3_SRC1_POSXY", 0);
     AP_Param::set_default_by_name("EK3_SRC1_VELXY", 0);

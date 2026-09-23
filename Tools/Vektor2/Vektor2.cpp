@@ -64,6 +64,7 @@ void App::setup()
     // GPS_TYPE defaults to none in current ArduPilot. Calling init() is safe
     // without hardware and makes GPS a parameter-only addition later.
     gps.init();
+    compass.init();
 
     scheduler.init(nullptr, 0, 0);
     init_estimator();
@@ -117,6 +118,13 @@ void App::loop()
     }
 #endif
 
+    // Compass samples can feed the estimator and standard IMU telemetry.
+    const uint32_t compass_now_ms = AP_HAL::millis();
+    if (compass_now_ms - _last_compass_read_ms >= 100) {
+        _last_compass_read_ms = compass_now_ms;
+        compass.read();
+    }
+
     // We already updated INS explicitly, so tell AHRS not to do it again.
     ahrs.update(true);
 
@@ -125,6 +133,7 @@ void App::loop()
     // Pick up RTn_SRC/RTn_DST changes made through the normal MAVLink parameter
     // protocol. This is intentionally low-rate configuration work.
     sync_route_parameters(now_ms);
+    report_imu_health(now_ms);
 
     // Route uint16 microsecond signals through the two logic components and
     // on to final PWM consumers. Sources may fan out; each consumer has only
@@ -151,6 +160,31 @@ void App::sync_route_parameters(uint32_t now_ms)
     }
 #endif
     _route_config_valid = valid;
+}
+
+void App::report_imu_health(uint32_t now_ms)
+{
+#if HAL_GCS_ENABLED
+    // Report once after startup, then only on a health transition.
+    if (now_ms - _last_imu_health_ms < 1000) {
+        return;
+    }
+    _last_imu_health_ms = now_ms;
+    const bool healthy = ins.get_gyro_count() > 0 &&
+                         ins.get_accel_count() > 0 && ins.healthy();
+    if (_imu_health_reported && healthy == _imu_healthy) {
+        return;
+    }
+    _imu_health_reported = true;
+    _imu_healthy = healthy;
+    gcs().send_text(healthy ? MAV_SEVERITY_INFO : MAV_SEVERITY_WARNING,
+                    "IMU %s: %u gyro, %u accel",
+                    healthy ? "healthy" : "unhealthy",
+                    unsigned(ins.get_gyro_count()),
+                    unsigned(ins.get_accel_count()));
+#else
+    (void)now_ms;
+#endif
 }
 
 void App::update_mavlink(uint32_t now_ms)

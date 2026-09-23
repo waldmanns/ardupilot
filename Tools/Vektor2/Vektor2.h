@@ -15,9 +15,7 @@
 #include <AP_Compass/AP_Compass.h>
 #include <AP_GPS/AP_GPS.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
-#include <AP_Logger/AP_Logger.h>
 #include <AP_Scheduler/AP_Scheduler.h>
-#include <RC_Channel/RC_Channel.h>
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <SRV_Channel/SRV_Channel.h>
 #if AP_SIM_ENABLED
@@ -25,12 +23,6 @@
 #endif
 
 namespace Vektor2 {
-
-class RCRegistry : public RC_Channels {
-public:
-    RC_Channel *channel(uint8_t) override { return nullptr; }
-    int8_t flight_mode_channel_number() const override { return -1; }
-};
 
 class App {
 public:
@@ -50,12 +42,10 @@ public:
     AP_SerialManager serial_manager;
     AP_InertialSensor ins;
     AP_Baro baro;
-    AP_Logger logger;
     AP_Scheduler scheduler;
 #if AP_SIM_ENABLED
     SITL::SIM sitl;
 #endif
-    RCRegistry _rc_registry;
     AP_GPS gps;
     AP_AHRS ahrs;
     RcInput rcin;
@@ -78,11 +68,16 @@ private:
     void init_estimator();
     void update_mavlink(uint32_t now_ms);
     void sync_route_parameters(uint32_t now_ms);
+    void report_imu_health(uint32_t now_ms);
 
     AP_Param param_loader{var_info};
 
     uint32_t _last_heartbeat_ms = 0;
     uint32_t _last_route_sync_ms = 0;
+    uint32_t _last_imu_health_ms = 0;
+    uint32_t _last_compass_read_ms = 0;
+    bool _imu_health_reported = false;
+    bool _imu_healthy = false;
     bool _route_config_valid = true;
 };
 

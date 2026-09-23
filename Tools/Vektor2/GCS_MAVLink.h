@@ -58,7 +58,7 @@ private:
 
     MAV_TYPE frame_type() const override
     {
-        return MAV_TYPE_GENERIC;
+        return MAV_TYPE_SURFACE_BOAT;
     }
 
     uint32_t custom_mode() const override

@@ -13,6 +13,7 @@ second serial protocol.
 
 - AP_HAL / AP_BoardConfig
 - AP_InertialSensor
+- optional AP_Compass, with standard `COMPASS_*` parameters
 - AP_AHRS with EKF3 selected
 - AP_GPS compiled in for later use, disabled by configuration initially
 - AP_SerialManager
@@ -140,7 +141,8 @@ authoritative about how many outputs physically exist.
 The intended desktop interface is deliberately small:
 
 ```text
-HEARTBEAT          device presence
+HEARTBEAT          device presence, reported as a surface boat
+RAW_IMU            accelerometer, gyro, and optional compass samples
 ATTITUDE           EKF attitude
 RC_CHANNELS        RC values in us
 SERVO_OUTPUT_RAW   PWM values in us
@@ -149,8 +151,15 @@ STATUSTEXT         status/events such as RC protocol detection
 PARAM_VALUE/SET    all configuration
 ```
 
-Normal ArduPilot message scheduling and `MAV_CMD_SET_MESSAGE_INTERVAL` remain
-authoritative. There is no Vektor telemetry scheduler.
+The raw sensor and attitude streams default to 10 Hz. Normal ArduPilot
+message scheduling and `MAV_CMD_SET_MESSAGE_INTERVAL` remain authoritative.
+IMU health and sensor counts are reported through `STATUSTEXT` after startup
+and when health changes. There is no Vektor telemetry scheduler.
+
+Vektor2 enables GCS and defaults `SERIAL0_PROTOCOL` to MAVLink2, including
+on AP_Periph-style boards whose generic defaults disable both. The selected
+board must expose the intended serial port; saved `SERIALx_PROTOCOL` values
+can override this default.
 
 ## Logic components
 
@@ -341,7 +350,5 @@ Conceptually:
 ./waf --targets bin/Vektor2
 ```
 
-This archive was statically reviewed against current ArduPilot APIs, but a full
-firmware link cannot be performed without the complete ArduPilot source tree
-and your board configuration. The first real validation should therefore be a
-clean target build followed by USB MAVLink, RCIN, and safe bench PWM tests.
+Validate a clean target build for the chosen board, then verify boat heartbeat,
+RAW_IMU, ATTITUDE, optional compass data, RCIN, and safe bench PWM behavior.

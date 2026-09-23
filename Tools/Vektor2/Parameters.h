@@ -24,6 +24,7 @@ public:
         k_param_gps,
         k_param__gcs,
         k_param_sitl,
+        k_param_compass,
     };
 };
 

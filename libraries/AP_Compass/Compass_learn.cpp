@@ -4,10 +4,10 @@
 
 #include "Compass_learn.h"
 #include <GCS_MAVLink/GCS.h>
+#if COMPASS_LEARN_ENABLED
+
 #include <AP_Vehicle/AP_Vehicle.h>
 #include <AP_NavEKF/EKFGSF_yaw.h>
-
-#if COMPASS_LEARN_ENABLED
 
 #include <AP_Logger/AP_Logger.h>
 
