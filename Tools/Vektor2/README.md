@@ -109,15 +109,29 @@ to the protocol using the port.
 
 ## RC input
 
-`RcInput` uses AP_RCProtocol and the HAL RC input snapshot. A serial receiver
-can be attached by setting the relevant `SERIALx_PROTOCOL` to RC input.
+`RcInput` reads the HAL RC input snapshot. On ChibiOS, the dedicated RC input
+thread runs AP_RCProtocol and decodes the serial receiver. A serial receiver
+can be attached by setting the relevant `SERIALx_PROTOCOL` to `23` (RCIN),
+then rebooting. For the Revo Mini board definition in this tree, the mapping is:
 
-When a receiver protocol is detected, Vektor2 emits a standard MAVLink
-`STATUSTEXT`, for example:
+| Parameter | Physical interface |
+| --- | --- |
+| `SERIAL0` | USB |
+| `SERIAL1` | USART1, PA10 RX / PA9 TX |
+| `SERIAL2` | Unused slot |
+| `SERIAL3` | USART3, PB11 RX / PB10 TX |
+| `SERIAL4` | USART6, PC7 RX / PC6 TX |
 
-```text
-RCIN detected: CRSF
-```
+For example, set `SERIAL1_PROTOCOL=23` to receive RC on USART1 RX.
+Keep `SERIAL0_PROTOCOL=2` for USB MAVLink. Only one serial port can have
+RCIN enabled at a time. AP_RCProtocol scans the supported receiver baud rates
+and framing, so `SERIAL1_BAUD` does not select the RC wire speed.
+
+Every five seconds, Vektor2 sends ArduPilot's MAVLink
+`NAMED_VALUE_STRING` with key `RC_PROTO` and the decoded protocol name as
+its value (for example, `CRSF`). The value is `NONE` when there is no fresh
+valid RC input. This is an ArduPilot MAVLink dialect message, so the receiver
+must support `NAMED_VALUE_STRING`.
 
 ArduPilot's AP_RCProtocol also produces its own debug detection announcement.
 Realtime channel values use the standard `RC_CHANNELS` message. Vektor2 sends
@@ -129,12 +143,23 @@ No RC_Channel mapping, aux-switch logic or vehicle RC failsafe is used.
 ## PWM output
 
 `PwmOut` talks directly to `hal.rcout` and retains only the most recently
-written pulse width for telemetry.
+written pulse width for telemetry. Vektor2 has no safety or arming workflow;
+startup releases the HAL RCOutput safety gate so configured routes can produce
+physical PWM pulses.
 
 The standard MAVLink `SERVO_OUTPUT_RAW` message reports the first 16 output
 values in microseconds. Disabled outputs are reported as zero. The application
 router supports up to 32 PWM endpoint numbers, but the selected board remains
 authoritative about how many outputs physically exist.
+
+Each physical output has persistent `PWMn_MIN`, `PWMn_MAX`, and `PWMn_INV`
+parameters (`n` is 1..32). Defaults are 1000 us, 2000 us, and 0. The final
+output stage clamps its routed input to 1000..2000 us and scales that range to
+`PWMn_MIN`..`PWMn_MAX`; `PWMn_INV=1` swaps the output endpoints. These settings
+apply to the physical output regardless of its route. Both endpoints must be
+within 500..2500 us, `MIN` must be below `MAX`, and `INV` must be 0 or 1.
+Invalid settings disable that output until corrected. `SERVO_OUTPUT_RAW`
+reports the scaled pulse width.
 
 ## Standard MAVLink surface
 
@@ -191,16 +216,19 @@ persistence, MAVLink and hardware writes stay outside the component function.
 
 ### VSP parameters
 
-Both components expose normal persistent AP_Param values:
+Both components expose normal persistent AP_Param values. The direction and configuration values range from 0 to 10:
 
 ```text
 VSP1_LIM = 25
 VSP1_X_C = 1500
 VSP1_Y_C = 1500
+VSP1_DIR = 0
 
 VSP2_LIM = 25
 VSP2_X_C = 1500
 VSP2_Y_C = 1500
+VSP2_DIR = 0
+VSP_CONF = 0
 ```
 
 Inside `VSP1.cpp` they are simply:

@@ -21,6 +21,13 @@ const AP_Param::GroupInfo VSP1ParameterStore::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("Y_C", 3, VSP1ParameterStore, y_c, 1500),
 
+    // @Param: DIR
+    // @DisplayName: VSP1 direction
+    // @Description: VSP1 direction value.
+    // @Range: 0 10
+    // @User: Standard
+    AP_GROUPINFO("DIR", 4, VSP1ParameterStore, dir, 0),
+
     AP_GROUPEND
 };
 
@@ -42,6 +49,13 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
     // @Description: Custom VSP2 Y_C value. Interpretation belongs to VSP2 logic.
     // @User: Standard
     AP_GROUPINFO("Y_C", 3, VSP2ParameterStore, y_c, 1500),
+
+    // @Param: DIR
+    // @DisplayName: VSP2 direction
+    // @Description: VSP2 direction value.
+    // @Range: 0 10
+    // @User: Standard
+    AP_GROUPINFO("DIR", 4, VSP2ParameterStore, dir, 0),
 
     AP_GROUPEND
 };

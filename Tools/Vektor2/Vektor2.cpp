@@ -43,9 +43,15 @@ void App::setup()
     // behaviour. It applies board orientation and board-level driver options.
     board_config.init();
 
-    // RC protocol must exist before SerialManager attaches a port configured
-    // as SERIALx_PROTOCOL=23 (RCIN).
-    rcin.init();
+#if AP_RCPROTOCOL_ENABLED && !AP_RC_CHANNEL_ENABLED
+    // RC_Channels normally supplies this mask. Vektor2 has no RC_Channels,
+    // so explicitly enable AP_RCProtocol's built-in decoders (bit 0 = all).
+    AP::RC().set_rc_protocols(1);
+#endif
+
+    // board_config.init() owns ChibiOS RC-input initialization. It creates
+    // AP::RC(), which must happen exactly once before SerialManager attaches
+    // a port configured as SERIALx_PROTOCOL=23 (RCIN).
 
 #if HAL_GCS_ENABLED
     // Register the lightweight GCS singleton before serial ports are scanned.
@@ -109,14 +115,7 @@ void App::loop()
     gps.update();
     rcin.update();
 
-#if HAL_GCS_ENABLED
-    if (rcin.take_protocol_changed()) {
-        const char* protocol = rcin.protocol_name();
-        if (protocol != nullptr) {
-            gcs().send_text(MAV_SEVERITY_INFO, "RCIN detected: %s", protocol);
-        }
-    }
-#endif
+
 
     // Compass samples can feed the estimator and standard IMU telemetry.
     const uint32_t compass_now_ms = AP_HAL::millis();
@@ -134,6 +133,7 @@ void App::loop()
     // protocol. This is intentionally low-rate configuration work.
     sync_route_parameters(now_ms);
     report_imu_health(now_ms);
+    report_rc_protocol(now_ms);
 
     // Route uint16 microsecond signals through the two logic components and
     // on to final PWM consumers. Sources may fan out; each consumer has only
@@ -182,6 +182,22 @@ void App::report_imu_health(uint32_t now_ms)
                     healthy ? "healthy" : "unhealthy",
                     unsigned(ins.get_gyro_count()),
                     unsigned(ins.get_accel_count()));
+#else
+    (void)now_ms;
+#endif
+}
+
+void App::report_rc_protocol(uint32_t now_ms)
+{
+#if HAL_GCS_ENABLED
+    if (now_ms - _last_rc_protocol_report_ms < 5000) {
+        return;
+    }
+    _last_rc_protocol_report_ms = now_ms;
+    const char* protocol = rcin.valid() ? rcin.protocol_name() : nullptr;
+    gcs().send_named_string("RC_PROTO",
+                            protocol != nullptr ? protocol : "NONE");
+
 #else
     (void)now_ms;
 #endif

@@ -2,15 +2,31 @@
 
 #include "Config.h"
 
+#include <AP_Param/AP_Param.h>
 #include <stdint.h>
 
 namespace Vektor2 {
+
+class PwmChannelParameters {
+public:
+    PwmChannelParameters() { AP_Param::setup_object_defaults(this, var_info); }
+
+    static const AP_Param::GroupInfo var_info[];
+
+    AP_Int16 min_us;
+    AP_Int16 max_us;
+    AP_Int8 inverted;
+};
 
 // Intentionally tiny PWM facade. No servo-function layer and no arming state
 // machine. The last values written are retained only for standard MAVLink
 // SERVO_OUTPUT_RAW telemetry.
 class PwmOut {
 public:
+    PwmOut() { AP_Param::setup_object_defaults(this, var_info); }
+
+    static const AP_Param::GroupInfo var_info[];
+    PwmChannelParameters channels[max_pwm_channels];
     void init();
 
     bool write_us(uint8_t channel, uint16_t pulse_us);

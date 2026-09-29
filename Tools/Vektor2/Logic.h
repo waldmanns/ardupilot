@@ -51,6 +51,12 @@ public:
     // The AP_Param prefixes are provided by Logic::var_info.
     VSP1ParameterStore vsp1_params;
     VSP2ParameterStore vsp2_params;
+    AP_Int16 vsp_conf;
+
+    uint16_t vsp_configuration() const
+    {
+        return vsp_parameter_value(vsp_conf.get());
+    }
 
 private:
     struct Runtime {

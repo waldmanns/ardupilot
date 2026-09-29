@@ -94,6 +94,7 @@ def build(bld):
         'AP_RCProtocol',
         'GCS_MAVLink',
         'SRV_Channel',
+        'AP_BLHeli',
         # AHRS/GCS compile-time references are feature-gated, but these small
         # support libraries keep the target compatible with normal ChibiOS
         # board configurations without instantiating vehicle subsystems.

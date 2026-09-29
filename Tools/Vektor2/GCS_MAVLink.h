@@ -53,6 +53,14 @@ protected:
         return NEW_NOTHROW GCS_MAVLINK_Vektor2(uart);
     }
 
+    // Vektor2 owns a simple IMU-clocked loop and intentionally does not run
+    // AP_Scheduler tasks. The base GCS time-budget guard would therefore
+    // suppress queued MAVLink messages, including HEARTBEAT.
+    uint16_t min_loop_time_remaining_for_message_send_us() const override
+    {
+        return 0;
+    }
+
 private:
     GCS_MAVLINK_CHAN_METHOD_DEFINITIONS(GCS_MAVLINK_Vektor2);
 

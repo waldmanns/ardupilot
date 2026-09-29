@@ -69,6 +69,7 @@ private:
     void update_mavlink(uint32_t now_ms);
     void sync_route_parameters(uint32_t now_ms);
     void report_imu_health(uint32_t now_ms);
+    void report_rc_protocol(uint32_t now_ms);
 
     AP_Param param_loader{var_info};
 
@@ -76,6 +77,7 @@ private:
     uint32_t _last_route_sync_ms = 0;
     uint32_t _last_imu_health_ms = 0;
     uint32_t _last_compass_read_ms = 0;
+    uint32_t _last_rc_protocol_report_ms = 0;
     bool _imu_health_reported = false;
     bool _imu_healthy = false;
     bool _route_config_valid = true;

@@ -51,6 +51,13 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // prefixes, producing VSP1_LIM / VSP1_X_C / VSP1_Y_C and VSP2_*.
     AP_SUBGROUPINFO(vsp1_params, "VSP1_", 1, Logic, VSP1ParameterStore),
     AP_SUBGROUPINFO(vsp2_params, "VSP2_", 2, Logic, VSP2ParameterStore),
+
+    // @Param: VSP_CONF
+    // @DisplayName: VSP configuration
+    // @Description: VSP configuration value.
+    // @Range: 0 10
+    // @User: Standard
+    AP_GROUPINFO("VSP_CONF", 3, Logic, vsp_conf, 0),
     AP_GROUPEND
 };
 

@@ -11,7 +11,6 @@ class RcInput {
 public:
     static constexpr uint8_t max_channels = 18;
 
-    void init();
     void update();
 
     bool fresh() const { return _fresh; }
@@ -32,12 +31,6 @@ public:
     uint64_t last_update_us() const { return _last_update_us; }
 
     const char* protocol_name() const;
-    bool take_protocol_changed()
-    {
-        const bool changed = _protocol_changed;
-        _protocol_changed = false;
-        return changed;
-    }
 
 private:
     uint16_t _channels[max_channels] {};
@@ -45,8 +38,6 @@ private:
     uint64_t _last_update_us = 0;
     bool _fresh = false;
     bool _failsafe = false;
-    uint8_t _protocol_code = 0xFF;
-    bool _protocol_changed = false;
 };
 
 } // namespace Vektor2

@@ -6,32 +6,16 @@ extern const AP_HAL::HAL &hal;
 
 namespace Vektor2 {
 
-void RcInput::init()
-{
-#if AP_RCPROTOCOL_ENABLED
-    // Initialise the protocol decoder before AP_SerialManager scans ports.
-    // SERIALx_PROTOCOL=23 will then be attached to this decoder by
-    // AP_SerialManager::init().
-    AP::RC().init();
-#endif
-}
-
 void RcInput::update()
 {
     _fresh = false;
 
 #if AP_RCPROTOCOL_ENABLED
-    AP::RC().update();
+    // ChibiOS polls the serial RC decoder in its dedicated RC input thread.
+    // Calling update() here would read the same UART from a second thread and
+    // can split receiver frames before either reader has a complete packet.
     _failsafe = AP::RC().failsafe_active();
 
-    const auto detected = AP::RC().protocol_detected();
-    const uint8_t detected_code = uint8_t(detected);
-    if (detected_code != _protocol_code) {
-        _protocol_code = detected_code;
-        if (AP::RC().detected_protocol_name() != nullptr) {
-            _protocol_changed = true;
-        }
-    }
 #else
     _failsafe = false;
 #endif
