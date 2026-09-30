@@ -191,8 +191,8 @@ can override this default.
 Two fixed components are present:
 
 ```text
-VSP1: 2 inputs, 2 outputs, prefix VSP1
-VSP2: 2 inputs, 2 outputs, prefix VSP2
+VSP1: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP1
+VSP2: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP2
 ```
 
 All routed values are `uint16_t` microseconds.
@@ -207,6 +207,7 @@ void vsp1_loop(const uint16_t* inputs,
     // add VSP1 logic here
     outputs[0] = inputs[0];
     outputs[1] = inputs[1];
+    outputs[2] = inputs[2]; // RPM_OUT <- RPM_IN
 }
 ```
 
@@ -294,8 +295,10 @@ Source encoding:
 1..18    RC1..RC18
 101      VSP1 output 1
 102      VSP1 output 2
+103      VSP1 RPM_OUT
 111      VSP2 output 1
 112      VSP2 output 2
+113      VSP2 RPM_OUT
 ```
 
 Destination encoding:
@@ -304,8 +307,10 @@ Destination encoding:
 1..32    PWM1..PWM32
 101      VSP1 input 1
 102      VSP1 input 2
+103      VSP1 RPM_IN
 111      VSP2 input 1
 112      VSP2 input 2
+113      VSP2 RPM_IN
 ```
 
 Examples:

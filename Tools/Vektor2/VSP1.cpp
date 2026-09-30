@@ -11,6 +11,7 @@ void vsp1_loop(const uint16_t* inputs,
     (void)params;
     outputs[0] = inputs[0];
     outputs[1] = inputs[1];
+    outputs[2] = inputs[2]; // RPM_OUT <- RPM_IN
 }
 
 } // namespace Vektor2::Components

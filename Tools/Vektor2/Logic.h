@@ -29,8 +29,8 @@ struct ComponentDefinition {
 class Logic {
 public:
     static constexpr uint8_t component_count = uint8_t(ComponentId::Count);
-    static constexpr uint8_t max_inputs = 2;
-    static constexpr uint8_t max_outputs = 2;
+    static constexpr uint8_t max_inputs = 3;
+    static constexpr uint8_t max_outputs = 3;
 
     static const AP_Param::GroupInfo var_info[];
 
