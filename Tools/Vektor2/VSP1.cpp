@@ -1,4 +1,5 @@
 #include "LibVSP.h"
+#include "Telemetry.h"
 #include "VSP1.h"
 
 namespace Vektor2::Components {
@@ -25,6 +26,12 @@ void vsp1_loop(const uint16_t* inputs,
     outputs[0] = pulse_width(result.x_coordinate);
     outputs[1] = pulse_width(result.y_coordinate);
     outputs[2] = inputs[2]; // RPM_OUT <- RPM_IN
+}
+
+void vsp1_emit_telemetry(const uint16_t* outputs, const VspTelemetry& telemetry)
+{
+    telemetry.send_float("VSP1_XA", float(outputs[0]));
+    telemetry.send_float("VSP1_YA", float(outputs[1]));
 }
 
 } // namespace Vektor2::Components

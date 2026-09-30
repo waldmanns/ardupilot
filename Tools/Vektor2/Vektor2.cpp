@@ -140,6 +140,8 @@ void App::loop()
     // one producer. Component dependency order is compiled when routes change.
     routing.update(rcin, logic, pwm);
 
+    vsp_telemetry.update(now_ms, logic.vsp_tel_hz.get(), logic);
+
     update_mavlink(now_ms);
 }
 

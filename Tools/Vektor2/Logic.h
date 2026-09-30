@@ -52,6 +52,7 @@ public:
     VSP1ParameterStore vsp1_params;
     VSP2ParameterStore vsp2_params;
     AP_Int16 vsp_conf;
+    AP_Int16 vsp_tel_hz;
 
     uint16_t vsp_configuration() const
     {

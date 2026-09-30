@@ -8,6 +8,7 @@
 #include "RcInput.h"
 #include "RouteParameters.h"
 #include "Routing.h"
+#include "Telemetry.h"
 
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Baro/AP_Baro.h>
@@ -53,6 +54,7 @@ public:
     Logic logic;
     Routing routing;
     RoutingParameters route_params;
+    VspTelemetry vsp_telemetry;
 
     // ChibiOS RCOutput currently asks SRV_Channels whether output pins were
     // reassigned as GPIO/alarm during hal.rcout->init(). This object exists

@@ -222,7 +222,18 @@ VSP2_X_C = 1500
 VSP2_Y_C = 1500
 VSP2_DIR = 0
 VSP_CONF = 0
+VSP_TEL_HZ = 5
 ```
+
+`VSP_TEL_HZ` controls each VSP named-value telemetry key in Hz. Set it to
+`0` to disable those messages. Values above 50 are limited to 50 Hz.
+
+Each VSP emits two MAVLink `NAMED_VALUE_FLOAT` values after the routing cycle:
+`VSP1_XA` and `VSP1_YA` for VSP1, and `VSP2_XA` and `VSP2_YA` for VSP2.
+These are the component's first two output pulse widths in microseconds.
+`Telemetry.cpp` owns the shared rate limit and transport; the named values
+for each component are declared in its own `.cpp` file. Sending is skipped
+when a MAVLink link has no payload space, without delaying a component loop.
 
 Inside `VSP1.cpp` they are simply:
 
@@ -356,8 +367,9 @@ Routing.cpp/.h             realtime route engine
 RouteParameters.cpp/.h     RT1..RT32 standard parameter binding
 Logic.cpp/.h               component registry/runtime
 ComponentParameters.*      AP_Param-backed VSP parameters
-VSP1.cpp/.h                VSP1 algorithm only
-VSP2.cpp/.h                VSP2 algorithm only
+VSP1.cpp/.h                VSP1 algorithm and telemetry values
+VSP2.cpp/.h                VSP2 algorithm and telemetry values
+Telemetry.cpp/.h           shared rate limit and MAVLink publisher
 Config.h                   small application constants
 wscript                    ArduPilot build target
 ```

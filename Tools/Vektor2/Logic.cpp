@@ -58,6 +58,14 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // @Range: 0 10
     // @User: Standard
     AP_GROUPINFO("VSP_CONF", 3, Logic, vsp_conf, 0),
+
+    // @Param: VSP_TEL_HZ
+    // @DisplayName: VSP named-value telemetry rate
+    // @Description: Rate for each VSP named-value telemetry key. Zero disables it.
+    // @Units: Hz
+    // @Range: 0 50
+    // @User: Standard
+    AP_GROUPINFO("VSP_TEL_HZ", 4, Logic, vsp_tel_hz, 5),
     AP_GROUPEND
 };
 

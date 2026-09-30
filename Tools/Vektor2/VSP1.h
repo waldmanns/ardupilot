@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+namespace Vektor2 { class VspTelemetry; }
+
 namespace Vektor2::Components {
 
 struct VSP1Params {
@@ -16,5 +18,7 @@ struct VSP1Params {
 void vsp1_loop(const uint16_t* inputs,
                uint16_t* outputs,
                const VSP1Params& params);
+
+void vsp1_emit_telemetry(const uint16_t* outputs, const VspTelemetry& telemetry);
 
 } // namespace Vektor2::Components
