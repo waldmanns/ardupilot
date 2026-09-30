@@ -197,19 +197,11 @@ VSP2: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP2
 
 All routed values are `uint16_t` microseconds.
 
-The actual component files stay intentionally simple:
-
-```cpp
-void vsp1_loop(const uint16_t* inputs,
-               uint16_t* outputs,
-               const VSP1Params& params)
-{
-    // add VSP1 logic here
-    outputs[0] = inputs[0];
-    outputs[1] = inputs[1];
-    outputs[2] = inputs[2]; // RPM_OUT <- RPM_IN
-}
-```
+Each VSP builds a small stack-allocated `Limiter` from its current
+parameters on every cycle, then uses `mapCoordinates()` for the first two
+outputs. `RPM_IN` passes directly to `RPM_OUT`. Coordinate results are clamped
+to the `uint16_t` output range before routing. The default `LIM=25` constrains
+coordinates to a radius of 25 microseconds around `(1500, 1500)`.
 
 The component may later read existing ArduPilot services such as `AP::ahrs()`,
 `AP::gps()` or `AP::ins()` when it needs read-only system data. Routing,
