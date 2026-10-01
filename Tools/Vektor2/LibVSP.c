@@ -10,6 +10,35 @@
 
 #include <math.h>
 
+int32_t vsp_common_map(int32_t x, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max)
+{
+    // Match AP_Math::linear_interpolate's endpoint and input-polarity behavior.
+    if (in_min > in_max) {
+        const int32_t input_end = in_min;
+        const int32_t output_end = out_min;
+        in_min = in_max;
+        in_max = input_end;
+        out_min = out_max;
+        out_max = output_end;
+    }
+    if (x <= in_min) {
+        return out_min;
+    }
+    if (x >= in_max) {
+        return out_max;
+    }
+
+    // Widen before subtracting; the product of two full int32_t spans needs
+    // uint64_t. Integer division truncates the fractional output step.
+    const uint64_t input_offset = (uint64_t)((int64_t)x - in_min);
+    const uint64_t input_span = (uint64_t)((int64_t)in_max - in_min);
+    const int64_t output_span = (int64_t)out_max - out_min;
+    const uint64_t output_magnitude = (uint64_t)(output_span < 0 ? -output_span : output_span);
+    const int64_t scaled = (int64_t)(input_offset * output_magnitude / input_span);
+    return (int32_t)((int64_t)out_min + (output_span < 0 ? -scaled : scaled));
+}
+
+
 struct Limiter setupLimiter(int32_t rad, int32_t x_off, int32_t y_off) {
 	struct Limiter out;
 	out.radius = rad;

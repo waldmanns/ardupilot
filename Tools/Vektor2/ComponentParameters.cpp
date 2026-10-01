@@ -28,6 +28,14 @@ const AP_Param::GroupInfo VSP1ParameterStore::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("DIR", 4, VSP1ParameterStore, dir, 0),
 
+    // @Param: THR_ANG
+    // @DisplayName: VSP1 threshold angle
+    // @Description: Threshold angle supplied to VSP1 logic; values outside 0..359 are clamped for the loop.
+    // @Units: deg
+    // @Range: 0 359
+    // @User: Standard
+    AP_GROUPINFO("THR_ANG", 5, VSP1ParameterStore, thr_ang, 0),
+
     AP_GROUPEND
 };
 
@@ -56,6 +64,14 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
     // @Range: 0 10
     // @User: Standard
     AP_GROUPINFO("DIR", 4, VSP2ParameterStore, dir, 0),
+
+    // @Param: THR_ANG
+    // @DisplayName: VSP2 threshold angle
+    // @Description: Threshold angle supplied to VSP2 logic; values outside 0..359 are clamped for the loop.
+    // @Units: deg
+    // @Range: 0 359
+    // @User: Standard
+    AP_GROUPINFO("THR_ANG", 5, VSP2ParameterStore, thr_ang, 0),
 
     AP_GROUPEND
 };

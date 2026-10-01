@@ -48,7 +48,7 @@ static_assert(sizeof(component_definitions) / sizeof(component_definitions[0]) =
 
 const AP_Param::GroupInfo Logic::var_info[] = {
     // These subgroup prefixes intentionally match the component definition
-    // prefixes, producing VSP1_LIM / VSP1_X_C / VSP1_Y_C and VSP2_*.
+    // prefixes, producing VSP1_LIM / VSP1_THR_ANG and matching VSP2_*.
     AP_SUBGROUPINFO(vsp1_params, "VSP1_", 1, Logic, VSP1ParameterStore),
     AP_SUBGROUPINFO(vsp2_params, "VSP2_", 2, Logic, VSP2ParameterStore),
 

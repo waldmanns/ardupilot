@@ -29,7 +29,7 @@ const AP_Param::Info App::var_info[] = {
     GOBJECT(serial_manager, "SERIAL", AP_SerialManager),
 
     // Vektor2 logic components. Their nested prefixes produce exactly
-    // VSP1_LIM / VSP1_X_C / VSP1_Y_C and the matching VSP2_* parameters.
+    // VSP1_LIM / VSP1_THR_ANG and the matching VSP2_* parameters.
     GOBJECT(logic, "", Logic),
 
     // Compact 32-slot routing configuration exposed through standard MAVLink
@@ -76,6 +76,7 @@ void App::load_parameters()
     // parameters, without touching the application architecture.
     AP_Param::set_default_by_name("AHRS_EKF_TYPE", 3);
     AP_Param::set_default_by_name("SERIAL0_PROTOCOL", 2); // MAVLink2
+    AP_Param::set_default_by_name("SERIAL1_PROTOCOL", 23); // RC input
 #if HAL_NAVEKF3_AVAILABLE
     AP_Param::set_default_by_name("EK3_SRC1_POSXY", 0);
     AP_Param::set_default_by_name("EK3_SRC1_VELXY", 0);

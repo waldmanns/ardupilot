@@ -12,6 +12,11 @@ inline uint16_t vsp_parameter_value(int16_t value)
     return uint16_t(value < 0 ? 0 : (value > 10 ? 10 : value));
 }
 
+inline int16_t vsp_angle_value(int16_t value)
+{
+    return value < 0 ? 0 : (value > 359 ? 359 : value);
+}
+
 // AP_Param-backed storage stays outside the component algorithms. Each store
 // exposes a plain typed snapshot that the logic framework passes to the loop.
 class VSP1ParameterStore {
@@ -27,6 +32,7 @@ public:
             int16_t(x_c.get()),
             int16_t(y_c.get()),
             vsp_parameter_value(dir.get()),
+            vsp_angle_value(thr_ang.get()),
         };
     }
 
@@ -34,6 +40,7 @@ public:
     AP_Int16 x_c;
     AP_Int16 y_c;
     AP_Int16 dir;
+    AP_Int16 thr_ang;
 };
 
 class VSP2ParameterStore {
@@ -49,6 +56,7 @@ public:
             int16_t(x_c.get()),
             int16_t(y_c.get()),
             vsp_parameter_value(dir.get()),
+            vsp_angle_value(thr_ang.get()),
         };
     }
 
@@ -56,6 +64,7 @@ public:
     AP_Int16 x_c;
     AP_Int16 y_c;
     AP_Int16 dir;
+    AP_Int16 thr_ang;
 };
 
 } // namespace Vektor2

@@ -11,6 +11,7 @@ struct VSP1Params {
     int16_t x_c;
     int16_t y_c;
     uint16_t dir;
+    int16_t thr_ang;
 };
 
 // VSP1 logic only. Inputs and outputs are pulse-width values in microseconds.

@@ -122,10 +122,10 @@ then rebooting. For the Revo Mini board definition in this tree, the mapping is:
 | `SERIAL3` | USART3, PB11 RX / PB10 TX |
 | `SERIAL4` | USART6, PC7 RX / PC6 TX |
 
-For example, set `SERIAL1_PROTOCOL=23` to receive RC on USART1 RX.
-Keep `SERIAL0_PROTOCOL=2` for USB MAVLink. Only one serial port can have
-RCIN enabled at a time. AP_RCProtocol scans the supported receiver baud rates
-and framing, so `SERIAL1_BAUD` does not select the RC wire speed.
+`SERIAL1_PROTOCOL` defaults to `23` to receive RC on USART1 RX.
+`SERIAL0_PROTOCOL` defaults to `2` for USB MAVLink. Only one serial port can
+have RCIN enabled at a time. AP_RCProtocol scans the supported receiver baud
+rates and framing, so `SERIAL1_BAUD` does not select the RC wire speed.
 
 Every five seconds, Vektor2 sends ArduPilot's MAVLink
 `NAMED_VALUE_STRING` with key `RC_PROTO` and the decoded protocol name as
@@ -181,6 +181,13 @@ message scheduling and `MAV_CMD_SET_MESSAGE_INTERVAL` remain authoritative.
 IMU health and sensor counts are reported through `STATUSTEXT` after startup
 and when health changes. There is no Vektor telemetry scheduler.
 
+A GCS can send `MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN` in `COMMAND_LONG` or
+`COMMAND_INT` to reboot Vektor2. Set parameter 1 to `1` for a normal reboot or
+`3` to reboot and hold in the bootloader. Other parameter 1 values receive
+`MAV_RESULT_UNSUPPORTED`. Accepted requests receive `COMMAND_ACK` before the
+reset. Vektor2 has no arming state, so an accepted command also interrupts
+active PWM routing; the ChibiOS reboot path engages output safety before reset.
+
 Vektor2 enables GCS and defaults `SERIAL0_PROTOCOL` to MAVLink2, including
 on AP_Periph-style boards whose generic defaults disable both. The selected
 board must expose the intended serial port; saved `SERIALx_PROTOCOL` values
@@ -216,14 +223,21 @@ VSP1_LIM = 25
 VSP1_X_C = 1500
 VSP1_Y_C = 1500
 VSP1_DIR = 0
+VSP1_THR_ANG = 0
 
 VSP2_LIM = 25
 VSP2_X_C = 1500
 VSP2_Y_C = 1500
 VSP2_DIR = 0
+VSP2_THR_ANG = 0
 VSP_CONF = 0
 VSP_TEL_HZ = 5
 ```
+
+`VSP1_THR_ANG` and `VSP2_THR_ANG` default to 0 degrees. Their values
+are clamped to 0..359 before being supplied as signed 16-bit values to their
+respective component loops. They do not change the current VSP output
+algorithm until the loops use them.
 
 `VSP_TEL_HZ` controls each VSP named-value telemetry key in Hz. Set it to
 `0` to disable those messages. Values above 50 are limited to 50 Hz.

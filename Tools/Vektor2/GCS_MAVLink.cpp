@@ -91,12 +91,19 @@ MAV_RESULT GCS_MAVLINK_Vektor2::handle_preflight_reboot(
     const mavlink_command_int_t &packet,
     const mavlink_message_t &msg)
 {
-    // Vektor2 intentionally starts with no remote reboot policy. This keeps
-    // the control surface minimal while still using the standard MAVLink
-    // command/parameter infrastructure.
-    (void)packet;
-    (void)msg;
-    return MAV_RESULT_UNSUPPORTED;
+    // Keep this handler limited to reboot requests. The base implementation
+    // also accepts developer fault-injection commands, which Vektor2 does not
+    // expose through its MAVLink interface.
+    if (!is_equal(packet.param1, 1.0f) && !is_equal(packet.param1, 3.0f)) {
+        return MAV_RESULT_UNSUPPORTED;
+    }
+
+    // The reboot does not return. Acknowledge the request before resetting,
+    // as the ArduPilot vehicle handler does.
+    mavlink_msg_command_ack_send(get_chan(), packet.command, MAV_RESULT_ACCEPTED,
+                                 0, 0, msg.sysid, msg.compid);
+    hal.scheduler->reboot(is_equal(packet.param1, 3.0f));
+    return MAV_RESULT_FAILED;
 }
 
 #endif // HAL_GCS_ENABLED
