@@ -15,7 +15,7 @@ second serial protocol.
 - AP_InertialSensor
 - optional AP_Compass, with standard `COMPASS_*` parameters
 - AP_AHRS with EKF3 selected
-- AP_GPS compiled in for later use, disabled by configuration initially
+- AP_GPS receiver detection and GPS-aided EKF3 position estimation
 - AP_SerialManager
 - AP_RCProtocol + `hal.rcin`
 - direct `hal.rcout` PWM
@@ -46,7 +46,7 @@ wait for IMU sample
       |
       v
 update INS
-update GPS (inactive until configured)
+update GPS and look for a receiver
 update RC input
       |
       v
@@ -67,22 +67,81 @@ receive/send standard MAVLink
 
 The IMU clocks the application at 100 Hz by default.
 
-## EKF / future GPS
+## GPS and EKF3
 
-EKF3 is selected from the start. The default EKF source configuration is
-explicitly unaided:
+On Revo Mini, GPS1 uses `SERIAL3` / USART3 by default. Connect both signal
+wires: GPS TX -> PB11 (FC RX), GPS RX <- PB10 (FC TX), plus power and ground.
+Vektor2 defaults to `SERIAL3_PROTOCOL=5`, `GPS1_TYPE=2` (u-blox),
+`GPS_AUTO_CONFIG=1`, and `GPS_DRV_OPTIONS=4` (115200 u-blox startup path).
+Other receiver types and ports remain configurable with the standard
+parameters; reboot after changing the serial role or GPS type.
+
+The M10 SPG 5.10 UART1 factory default is 38400 baud with NAV-PVT output
+disabled; a module may have different saved settings. The shared AP_GPS u-blox
+startup sequence now asks older receivers for NAV-SOL and M9/M10 receivers
+for NAV-PVT on UART1 in RAM, then sends `PUBX,41` to select UBX output and
+the target baud. The RAM request does not write receiver flash or BBR. The
+legacy NAV-SOL request stays for M8 and older receivers. AUTO (`GPS1_TYPE=1`)
+does not automatically fall back to NMEA; select `GPS1_TYPE=5` for a pure
+NMEA receiver. AP_GPS detects and reports a receiver independently of a
+position fix.
+
+Saved parameter values survive reflashing and override these compiled
+defaults. Vektor2 also sets the AP_GPS board default to u-blox so GPS init
+retains the default receiver type. Check the effective `GPS1_TYPE`,
+`GPS_AUTO_CONFIG`, and `GPS_DRV_OPTIONS` in the startup `STATUSTEXT` or
+parameter list. A previously stored `GPS1_TYPE=1` will stay AUTO until
+changed explicitly.
+
+EKF3 uses the GPS for horizontal position and velocity, height, and vertical
+velocity by default:
 
 ```text
-EK3_SRC1_POSXY = 0
-EK3_SRC1_VELXY = 0
-EK3_SRC1_POSZ  = 0
-EK3_SRC1_VELZ  = 0
-EK3_SRC1_YAW   = 0
+EK3_SRC1_POSXY = 3  (GPS)
+EK3_SRC1_VELXY = 3  (GPS)
+EK3_SRC1_POSZ  = 3  (GPS; barometer support is disabled)
+EK3_SRC1_VELZ  = 3  (GPS)
+EK3_SRC1_YAW   = 1  (compass yaw, gyro propagation)
 ```
 
-GPS is already part of the object graph. Later, configure a serial port for
-GPS, select the receiver type, and set the appropriate EKF source parameters.
-No application architecture change is required.
+EKF3 uses its primary source set and manages GPS availability through the
+standard estimator. GPS configuration does not switch EKF source sets or
+change a saved compass yaw setting. A receiver can report a raw 3D fix before
+EKF3 has a fused position.
+
+Compass calibration uses ArduPilot's standard `MAV_CMD_DO_START_MAG_CAL`,
+`MAV_CMD_DO_ACCEPT_MAG_CAL`, and `MAV_CMD_DO_CANCEL_MAG_CAL` handlers. The
+compass is sampled and the calibration task is updated at 10 Hz. Calibration
+requires a detected, healthy compass but does not require a GPS fix. The DCM
+attitude component is included because ArduPilot's compass calibrator uses it
+for attitude samples.
+
+Vektor2 reports the first five GPS1 baud changes and the effective GPS
+settings in `STATUSTEXT`. While no backend is detected, a warning every 15
+seconds shows the current baud and copied UART traffic as `no RX`, `NMEA`,
+`UBX`, `NMEA+UBX`, or `unknown`. The UART tap observes bytes after AP_GPS reads
+them; it never consumes parser input. `RX=NMEA` with no backend suggests a
+protocol/configuration issue or an unconnected FC TX wire. `no RX` suggests
+wiring, power, UART assignment, or baud problems. `GPS_RAW_INT` reports the
+receiver and fix independently of EKF validity.
+
+### GPS bench checks
+
+- **A — factory M10:** Confirm initial NMEA at its UART1 baud; verify the
+  legacy CFG-MSG and RAM-only NAV-PVT VALSET precede PUBX,41. After the switch,
+  expect periodic UBX-NAV-PVT and a detected u-blox backend.
+- **B — M8:** Confirm the legacy NAV-SOL request still produces a detectable
+  stream; the extra VALSET should be harmless if unsupported.
+- **C — RX-only wiring:** Disconnect FC TX (PB10) while retaining GPS TX to
+  PB11. Expect an RX classification, but AP_GPS may fail to configure and
+  detect the receiver. Restore both wires for normal operation.
+- **D — pure NMEA:** Set `GPS1_TYPE=5` and `GPS_AUTO_CONFIG=0` on a factory
+  receiver. Expect NMEA detection; this checks FC RX and port assignment
+  independently of the u-blox wake-up sequence. Restore the u-blox settings
+  afterward.
+
+GPS and EKF settings remain ordinary ArduPilot parameters. Saved compass
+yaw settings are left intact.
 
 ## Serial ports
 
@@ -171,13 +230,16 @@ RAW_IMU            accelerometer, gyro, and optional compass samples
 ATTITUDE           EKF attitude
 RC_CHANNELS        RC values in us
 SERVO_OUTPUT_RAW   PWM values in us
-GPS_RAW_INT        GPS when enabled
+GPS_RAW_INT        receiver status and raw GPS position
+GLOBAL_POSITION_INT EKF3 position when available
 STATUSTEXT         status/events such as RC protocol detection
 PARAM_VALUE/SET    all configuration
 ```
 
-The raw sensor and attitude streams default to 10 Hz. Normal ArduPilot
-message scheduling and `MAV_CMD_SET_MESSAGE_INTERVAL` remain authoritative.
+The raw sensor and attitude streams default to 10 Hz. The extended-status
+and position streams default to 1 Hz, including `GPS_RAW_INT` and
+`GLOBAL_POSITION_INT`. Normal ArduPilot message scheduling and
+`MAV_CMD_SET_MESSAGE_INTERVAL` remain authoritative.
 IMU health and sensor counts are reported through `STATUSTEXT` after startup
 and when health changes. There is no Vektor telemetry scheduler.
 
@@ -200,9 +262,12 @@ Two fixed components are present:
 ```text
 VSP1: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP1
 VSP2: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP2
+ThrusterBow: 1 input, 1 output, prefix THRBOW
+ThrusterStern: 1 input, 1 output, prefix THRSTN
 ```
 
 All routed values are `uint16_t` microseconds.
+Both thruster components currently pass their inputs through unchanged; their parameters are reserved for future control logic.
 
 Each VSP builds a small stack-allocated `Limiter` from its current
 parameters on every cycle, then uses `mapCoordinates()` for the first two
@@ -232,6 +297,10 @@ VSP2_DIR = 0
 VSP2_THR_ANG = 0
 VSP_CONF = 0
 VSP_TEL_HZ = 5
+THRBOW_MID = 1500
+THRBOW_DST = 0
+THRSTN_MID = 1500
+THRSTN_DST = 0
 ```
 
 `VSP1_THR_ANG` and `VSP2_THR_ANG` default to 0 degrees. Their values
@@ -316,6 +385,8 @@ Source encoding:
 111      VSP2 output 1
 112      VSP2 output 2
 113      VSP2 RPM_OUT
+121      ThrusterBow output
+131      ThrusterStern output
 ```
 
 Destination encoding:
@@ -328,6 +399,8 @@ Destination encoding:
 111      VSP2 input 1
 112      VSP2 input 2
 113      VSP2 RPM_IN
+121      ThrusterBow input
+131      ThrusterStern input
 ```
 
 Examples:

@@ -274,6 +274,6 @@ protected:
 private:
 
 #if AP_UART_MONITOR_ENABLED
-    ByteBuffer *_monitor_read_buffer;
+    ByteBuffer *_monitor_read_buffer = nullptr;
 #endif
 };

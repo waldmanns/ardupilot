@@ -76,4 +76,38 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
     AP_GROUPEND
 };
 
+const AP_Param::GroupInfo ThrusterBowParameterStore::var_info[] = {
+    // @Param: MID
+    // @DisplayName: Bow thruster midpoint
+    // @Description: Midpoint reserved for bow thruster control logic.
+    // @Units: us
+    // @User: Standard
+    AP_GROUPINFO("MID", 1, ThrusterBowParameterStore, mid, 1500),
+
+    // @Param: DST
+    // @DisplayName: Bow thruster distance
+    // @Description: Distance reserved for bow thruster control logic.
+    // @User: Standard
+    AP_GROUPINFO("DST", 2, ThrusterBowParameterStore, dst, 0),
+
+    AP_GROUPEND
+};
+
+const AP_Param::GroupInfo ThrusterSternParameterStore::var_info[] = {
+    // @Param: MID
+    // @DisplayName: Stern thruster midpoint
+    // @Description: Midpoint reserved for stern thruster control logic.
+    // @Units: us
+    // @User: Standard
+    AP_GROUPINFO("MID", 1, ThrusterSternParameterStore, mid, 1500),
+
+    // @Param: DST
+    // @DisplayName: Stern thruster distance
+    // @Description: Distance reserved for stern thruster control logic.
+    // @User: Standard
+    AP_GROUPINFO("DST", 2, ThrusterSternParameterStore, dst, 0),
+
+    AP_GROUPEND
+};
+
 } // namespace Vektor2

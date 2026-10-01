@@ -7,7 +7,7 @@
      - AP_SerialManager
      - AP_RCProtocol / HAL RC input
      - HAL RC output
-     - AP_GPS, disabled by default but ready for later use
+     - AP_GPS, active on a configured GPS serial port
      - standard MAVLink/GCS parameter and telemetry transport
 
    Intentionally absent:
@@ -67,9 +67,13 @@ void App::setup()
     gcs().setup_uarts();
 #endif
 
-    // GPS_TYPE defaults to none in current ArduPilot. Calling init() is safe
-    // without hardware and makes GPS a parameter-only addition later.
+    // AP_GPS discovers the configured GPS serial port and probes for a
+    // receiver. It is safe to initialize when no GPS is connected.
     gps.init();
+    _gps_port = serial_manager.find_serial(AP_SerialManager::SerialProtocol_GPS, 0);
+    if (_gps_port != nullptr) {
+        _gps_port->set_monitor_read_buffer(&_gps_monitor);
+    }
     compass.init();
 
     scheduler.init(nullptr, 0, 0);
@@ -113,6 +117,19 @@ void App::loop()
     ins.update();
 
     gps.update();
+    // This buffer contains copies of bytes AP_GPS has already read. Reading it
+    // cannot take bytes away from the GPS parser.
+    uint8_t gps_byte;
+    while (_gps_monitor.read_byte(&gps_byte)) {
+        _gps_rx_bytes++;
+        if (_gps_previous_byte == '$' && (gps_byte == 'G' || gps_byte == 'P')) {
+            _gps_nmea_seen = true;
+        }
+        if (_gps_previous_byte == 0xB5 && gps_byte == 0x62) {
+            _gps_ubx_seen = true;
+        }
+        _gps_previous_byte = gps_byte;
+    }
     rcin.update();
 
 
@@ -122,6 +139,9 @@ void App::loop()
     if (compass_now_ms - _last_compass_read_ms >= 100) {
         _last_compass_read_ms = compass_now_ms;
         compass.read();
+#if COMPASS_CAL_ENABLED
+        compass.cal_update();
+#endif
     }
 
     // We already updated INS explicitly, so tell AHRS not to do it again.
@@ -133,6 +153,7 @@ void App::loop()
     // protocol. This is intentionally low-rate configuration work.
     sync_route_parameters(now_ms);
     report_imu_health(now_ms);
+    report_gps_diagnostics(now_ms);
     report_rc_protocol(now_ms);
 
     // Route uint16 microsecond signals through the two logic components and
@@ -184,6 +205,57 @@ void App::report_imu_health(uint32_t now_ms)
                     healthy ? "healthy" : "unhealthy",
                     unsigned(ins.get_gyro_count()),
                     unsigned(ins.get_accel_count()));
+#else
+    (void)now_ms;
+#endif
+}
+
+void App::report_gps_diagnostics(uint32_t now_ms)
+{
+#if HAL_GCS_ENABLED
+    if (_gps_port == nullptr) {
+        if (now_ms >= 2000 && !_gps_settings_reported) {
+            _gps_settings_reported = true;
+            gcs().send_text(MAV_SEVERITY_WARNING, "GPS1: no GPS serial port");
+        }
+        return;
+    }
+
+    const uint32_t baud = _gps_port->get_baud_rate();
+    if (baud != _gps_last_baud) {
+        _gps_last_baud = baud;
+        if (_gps_baud_reports < 5) {
+            _gps_baud_reports++;
+            gcs().send_text(MAV_SEVERITY_INFO, "GPS1 probing %lu baud",
+                            (unsigned long)baud);
+        }
+    }
+
+    if (now_ms >= 2000 && !_gps_settings_reported) {
+        _gps_settings_reported = true;
+        enum ap_var_type type;
+        AP_Param *auto_config = AP_Param::find("GPS_AUTO_CONFIG", &type);
+        const int auto_value = auto_config != nullptr && type == AP_PARAM_INT8 ?
+            static_cast<AP_Int8 *>(auto_config)->get() : -1;
+        AP_Param *driver_options = AP_Param::find("GPS_DRV_OPTIONS", &type);
+        const int options_value = driver_options != nullptr && type == AP_PARAM_INT16 ?
+            static_cast<AP_Int16 *>(driver_options)->get() : -1;
+        gcs().send_text(MAV_SEVERITY_INFO, "GPS1 type=%u auto=%d drv=%d",
+                        unsigned(gps.get_type(0)), auto_value, options_value);
+    }
+
+    if (gps.status(0) != AP_GPS::NO_GPS ||
+        now_ms - _last_gps_diagnostic_ms < 15000) {
+        return;
+    }
+    _last_gps_diagnostic_ms = now_ms;
+    const char *rx = _gps_rx_bytes == 0 ? "no RX" :
+                     _gps_nmea_seen && _gps_ubx_seen ? "NMEA+UBX" :
+                     _gps_nmea_seen ? "NMEA" :
+                     _gps_ubx_seen ? "UBX" : "unknown";
+    gcs().send_text(MAV_SEVERITY_WARNING,
+                    "GPS1 RX=%s baud=%lu; no backend", rx,
+                    (unsigned long)baud);
 #else
     (void)now_ms;
 #endif

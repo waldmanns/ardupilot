@@ -30,30 +30,17 @@
 #include <AP_HAL/AP_HAL.h>
 
 /*
- *  try to put a UBlox into binary mode. This is in two parts. 
- *
- * First we send a ubx binary message that enables the NAV_SOL message
- * at rate 1. Then we send a NMEA message to set the baud rate to our
- * desired rate. The reason for doing the NMEA message second is if we
- * send it first the second message will be ignored for a baud rate
- * change.
- * The reason we need the NAV_SOL rate message at all is some uBlox
- * modules are configured with all ubx binary messages off, which
- * would mean we would never detect it.
-
- * running a uBlox at less than 38400 will lead to packet
- * corruption, as we can't receive the packets in the 200ms
- * window for 5Hz fixes. The NMEA startup message should force
- * the uBlox into 230400 no matter what rate it is configured
- * for.
+ * Wake receivers before switching their UART protocol and baud with PUBX,41.
+ * Older u-blox receivers can emit NAV-SOL after CFG-MSG; M9/M10 use a
+ * RAM-only CFG-VALSET to emit NAV-PVT on UART1. Keep both requests so a
+ * receiver with its UBX output disabled produces a packet for detection.
  */
-#define UBLOX_SET_BINARY_115200 "\265\142\006\001\003\000\001\006\001\022\117$PUBX,41,1,0023,0001,115200,0*1C\r\n"
+#define UBLOX_ENABLE_NAV_SOL "\265\142\006\001\003\000\001\006\001\022\117"
+#define UBLOX_ENABLE_NAV_PVT_UART1 "\265\142\006\212\011\000\000\001\000\000\007\000\221\040\001\123\110"
 
-// a variant with 230400 baudrate
-#define UBLOX_SET_BINARY_230400 "\265\142\006\001\003\000\001\006\001\022\117$PUBX,41,1,0023,0001,230400,0*1E\r\n"
-
-// a variant with 460800 baudrate
-#define UBLOX_SET_BINARY_460800 "\265\142\006\001\003\000\001\006\001\022\117$PUBX,41,1,0023,0001,460800,0*11\r\n"
+#define UBLOX_SET_BINARY_115200 UBLOX_ENABLE_NAV_SOL UBLOX_ENABLE_NAV_PVT_UART1 "$PUBX,41,1,0023,0001,115200,0*1C\r\n"
+#define UBLOX_SET_BINARY_230400 UBLOX_ENABLE_NAV_SOL UBLOX_ENABLE_NAV_PVT_UART1 "$PUBX,41,1,0023,0001,230400,0*1E\r\n"
+#define UBLOX_SET_BINARY_460800 UBLOX_ENABLE_NAV_SOL UBLOX_ENABLE_NAV_PVT_UART1 "$PUBX,41,1,0023,0001,460800,0*11\r\n"
 
 #define UBLOX_RXM_RAW_LOGGING 1
 #define UBLOX_MAX_RXM_RAW_SATS 22

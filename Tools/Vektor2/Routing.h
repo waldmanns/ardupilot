@@ -132,6 +132,8 @@ private:
     ComponentId _execution_order[Logic::component_count] {
         ComponentId::VSP1,
         ComponentId::VSP2,
+        ComponentId::ThrusterBow,
+        ComponentId::ThrusterStern,
     };
 };
 

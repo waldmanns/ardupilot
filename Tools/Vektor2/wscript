@@ -21,6 +21,11 @@ def build(bld):
         'HAL_GCS_ENABLED=1',
         'COMPASS_LEARN_ENABLED=0',
         'COMPASS_MOT_ENABLED=0',
+        'COMPASS_CAL_ENABLED=1',
+        'AP_GPS_NMEA_ENABLED=1',
+        'AP_GPS_NMEA_UNICORE_ENABLED=0',
+        'HAL_GPS1_TYPE_DEFAULT=2',
+        'AP_UART_MONITOR_ENABLED=1',
         'AP_SCRIPTING_ENABLED=0',
         'AP_SCRIPTING_SERIALDEVICE_ENABLED=0',
         'HAL_LOGGING_ENABLED=0',
@@ -69,7 +74,6 @@ def build(bld):
         'OSD_ENABLED=0',
         'AP_BARO_ENABLED=0',
         'AP_EXTERNAL_AHRS_ENABLED=0',
-        'AP_AHRS_DCM_ENABLED=0',
         'HAL_WITH_FRSKY_TELEM_BIDIRECTIONAL=0',
     ]
 

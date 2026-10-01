@@ -2,6 +2,8 @@
 
 #include "VSP1.h"
 #include "VSP2.h"
+#include "ThrusterBow.h"
+#include "ThrusterStern.h"
 
 namespace Vektor2 {
 
@@ -23,6 +25,24 @@ static void vsp2_adapter(const uint16_t* inputs,
     Components::vsp2_loop(inputs, outputs, params);
 }
 
+static void thruster_bow_adapter(const uint16_t* inputs,
+                                 uint16_t* outputs,
+                                 const void* parameter_store)
+{
+    const auto& store = *static_cast<const ThrusterBowParameterStore*>(parameter_store);
+    const ThrusterBowParams params = store.values();
+    thruster_bow_loop(inputs, outputs, &params);
+}
+
+static void thruster_stern_adapter(const uint16_t* inputs,
+                                   uint16_t* outputs,
+                                   const void* parameter_store)
+{
+    const auto& store = *static_cast<const ThrusterSternParameterStore*>(parameter_store);
+    const ThrusterSternParams params = store.values();
+    thruster_stern_loop(inputs, outputs, &params);
+}
+
 static const ComponentDefinition component_definitions[] = {
     {
         ComponentId::VSP1,
@@ -40,6 +60,22 @@ static const ComponentDefinition component_definitions[] = {
         3,
         vsp2_adapter,
     },
+    {
+        ComponentId::ThrusterBow,
+        "ThrusterBow",
+        "THRBOW",
+        1,
+        1,
+        thruster_bow_adapter,
+    },
+    {
+        ComponentId::ThrusterStern,
+        "ThrusterStern",
+        "THRSTN",
+        1,
+        1,
+        thruster_stern_adapter,
+    },
 };
 
 static_assert(sizeof(component_definitions) / sizeof(component_definitions[0]) ==
@@ -51,6 +87,8 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // prefixes, producing VSP1_LIM / VSP1_THR_ANG and matching VSP2_*.
     AP_SUBGROUPINFO(vsp1_params, "VSP1_", 1, Logic, VSP1ParameterStore),
     AP_SUBGROUPINFO(vsp2_params, "VSP2_", 2, Logic, VSP2ParameterStore),
+    AP_SUBGROUPINFO(thruster_bow_params, "THRBOW_", 5, Logic, ThrusterBowParameterStore),
+    AP_SUBGROUPINFO(thruster_stern_params, "THRSTN_", 6, Logic, ThrusterSternParameterStore),
 
     // @Param: VSP_CONF
     // @DisplayName: VSP configuration
@@ -88,6 +126,10 @@ const void* Logic::parameter_store(ComponentId id) const
         return &vsp1_params;
     case ComponentId::VSP2:
         return &vsp2_params;
+    case ComponentId::ThrusterBow:
+        return &thruster_bow_params;
+    case ComponentId::ThrusterStern:
+        return &thruster_stern_params;
     case ComponentId::Count:
         break;
     }

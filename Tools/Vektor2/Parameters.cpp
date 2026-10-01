@@ -51,8 +51,7 @@ const AP_Param::Info App::var_info[] = {
     GOBJECTN(ahrs.EKF3, NavEKF3, "EK3_", NavEKF3),
 #endif
 
-    // Kept from day one but disabled by AP_GPS defaults until a receiver is
-    // configured. This avoids a later architectural change when GPS is added.
+    // Standard ArduPilot GPS frontend and parameter group.
     GOBJECT(gps, "GPS", AP_GPS),
 
 #if HAL_GCS_ENABLED
@@ -70,19 +69,21 @@ void App::load_parameters()
     AP_Param::setup_sketch_defaults();
     AP_Param::check_var_info();
 
-    // Vektor2 starts as an unaided IMU/EKF application. EKF3 is selected now,
-    // while all external position/velocity/height/yaw sources are deliberately
-    // disabled. GPS can later be enabled by changing EK3_SRC1_* and GPS/SERIAL
-    // parameters, without touching the application architecture.
+    // Use ArduPilot's GPS frontend and EKF3 source selection. A receiver on
+    // SERIAL3 is u-blox by default; saved settings take precedence.
     AP_Param::set_default_by_name("AHRS_EKF_TYPE", 3);
     AP_Param::set_default_by_name("SERIAL0_PROTOCOL", 2); // MAVLink2
     AP_Param::set_default_by_name("SERIAL1_PROTOCOL", 23); // RC input
+    AP_Param::set_default_by_name("SERIAL3_PROTOCOL", 5); // GPS
+    AP_Param::set_default_by_name("GPS1_TYPE", 2);        // u-blox
+    AP_Param::set_default_by_name("GPS_AUTO_CONFIG", 1);
+    AP_Param::set_default_by_name("GPS_DRV_OPTIONS", 4); // u-blox at 115200
 #if HAL_NAVEKF3_AVAILABLE
-    AP_Param::set_default_by_name("EK3_SRC1_POSXY", 0);
-    AP_Param::set_default_by_name("EK3_SRC1_VELXY", 0);
-    AP_Param::set_default_by_name("EK3_SRC1_POSZ", 0);
-    AP_Param::set_default_by_name("EK3_SRC1_VELZ", 0);
-    AP_Param::set_default_by_name("EK3_SRC1_YAW", 0);
+    AP_Param::set_default_by_name("EK3_SRC1_POSXY", 3); // GPS position
+    AP_Param::set_default_by_name("EK3_SRC1_VELXY", 3); // GPS velocity
+    AP_Param::set_default_by_name("EK3_SRC1_POSZ", 3);  // GPS height; no baro
+    AP_Param::set_default_by_name("EK3_SRC1_VELZ", 3);  // GPS vertical speed
+    AP_Param::set_default_by_name("EK3_SRC1_YAW", 1);   // compass and gyro
 #endif
 
     AP_Param::load_all();

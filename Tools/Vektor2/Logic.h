@@ -10,6 +10,8 @@ namespace Vektor2 {
 enum class ComponentId : uint8_t {
     VSP1 = 0,
     VSP2 = 1,
+    ThrusterBow = 2,
+    ThrusterStern = 3,
     Count
 };
 
@@ -51,6 +53,8 @@ public:
     // The AP_Param prefixes are provided by Logic::var_info.
     VSP1ParameterStore vsp1_params;
     VSP2ParameterStore vsp2_params;
+    ThrusterBowParameterStore thruster_bow_params;
+    ThrusterSternParameterStore thruster_stern_params;
     AP_Int16 vsp_conf;
     AP_Int16 vsp_tel_hz;
 

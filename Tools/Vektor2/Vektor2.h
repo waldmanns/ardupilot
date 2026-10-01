@@ -15,6 +15,8 @@
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include <AP_Compass/AP_Compass.h>
 #include <AP_GPS/AP_GPS.h>
+#include <AP_HAL/AP_HAL.h>
+#include <AP_HAL/utility/RingBuffer.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_SerialManager/AP_SerialManager.h>
@@ -71,6 +73,7 @@ private:
     void update_mavlink(uint32_t now_ms);
     void sync_route_parameters(uint32_t now_ms);
     void report_imu_health(uint32_t now_ms);
+    void report_gps_diagnostics(uint32_t now_ms);
     void report_rc_protocol(uint32_t now_ms);
 
     AP_Param param_loader{var_info};
@@ -78,6 +81,17 @@ private:
     uint32_t _last_heartbeat_ms = 0;
     uint32_t _last_route_sync_ms = 0;
     uint32_t _last_imu_health_ms = 0;
+    uint32_t _last_gps_diagnostic_ms = 0;
+    AP_HAL::UARTDriver* _gps_port = nullptr;
+    uint8_t _gps_monitor_storage[512]{};
+    ByteBuffer _gps_monitor{_gps_monitor_storage, sizeof(_gps_monitor_storage)};
+    uint32_t _gps_rx_bytes = 0;
+    uint32_t _gps_last_baud = 0;
+    uint8_t _gps_baud_reports = 0;
+    uint8_t _gps_previous_byte = 0;
+    bool _gps_nmea_seen = false;
+    bool _gps_ubx_seen = false;
+    bool _gps_settings_reported = false;
     uint32_t _last_compass_read_ms = 0;
     uint32_t _last_rc_protocol_report_ms = 0;
     bool _imu_health_reported = false;

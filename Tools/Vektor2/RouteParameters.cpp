@@ -9,13 +9,13 @@ namespace Vektor2 {
 const AP_Param::GroupInfo RouteSlotParameters::var_info[] = {
     // @Param: SRC
     // @DisplayName: Route source
-    // @Description: 0 disabled; 1..18 RC1..RC18; 101/102 VSP1 outputs; 103 VSP1 RPM_OUT; 111/112 VSP2 outputs; 113 VSP2 RPM_OUT.
+    // @Description: 0 disabled; 1..18 RC1..RC18; 101/102 VSP1 outputs; 103 VSP1 RPM_OUT; 111/112 VSP2 outputs; 113 VSP2 RPM_OUT; 121 ThrusterBow output; 131 ThrusterStern output.
     // @User: Standard
     AP_GROUPINFO("SRC", 1, RouteSlotParameters, source, 0),
 
     // @Param: DST
     // @DisplayName: Route destination
-    // @Description: 0 disabled; 1..32 PWM1..PWM32; 101/102 VSP1 inputs; 103 VSP1 RPM_IN; 111/112 VSP2 inputs; 113 VSP2 RPM_IN.
+    // @Description: 0 disabled; 1..32 PWM1..PWM32; 101/102 VSP1 inputs; 103 VSP1 RPM_IN; 111/112 VSP2 inputs; 113 VSP2 RPM_IN; 121 ThrusterBow input; 131 ThrusterStern input.
     // @User: Standard
     AP_GROUPINFO("DST", 2, RouteSlotParameters, destination, 0),
 
