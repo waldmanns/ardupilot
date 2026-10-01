@@ -497,3 +497,32 @@ Conceptually:
 
 Validate a clean target build for the chosen board, then verify boat heartbeat,
 RAW_IMU, ATTITUDE, optional compass data, RCIN, and safe bench PWM behavior.
+
+## Navigation parameters
+
+ArduPilot limits parameter names to 16 characters. The navigation parameter
+group uses the `VNAV_` prefix; long requested names are exposed as follows:
+
+| Requested name | Firmware name |
+| --- | --- |
+| `VNAV_HDG_DEADBAND` | `VNAV_HDG_DBAND` |
+| `VNAV_HDG_STICK_RATE` | `VNAV_HDG_STK_RT` |
+| `VNAV_DP_CAPTURE_POS` | `VNAV_DP_CAP_POS` |
+| `VNAV_DP_CAPTURE_HDG` | `VNAV_DP_CAP_HDG` |
+| `VNAV_DP_MAX_SPEED` | `VNAV_DP_MAX_SPD` |
+| `VNAV_DP_ACCEL_LIMIT` | `VNAV_DP_ACC_LIM` |
+| `VNAV_DP_POS_FILTER` | `VNAV_DP_POS_FILT` |
+| `VNAV_DP_VEL_FILTER` | `VNAV_DP_VEL_FILT` |
+| `VNAV_DP_YAW_PRIORITY` | `VNAV_DP_YAW_PRI` |
+| `VNAV_ALLOC_W_SURGE` | `VNAV_AL_W_SURGE` |
+| `VNAV_ALLOC_W_SWAY` | `VNAV_AL_W_SWAY` |
+| `VNAV_ALLOC_MAX_SURGE` | `VNAV_AL_MAX_SRG` |
+| `VNAV_ALLOC_MAX_SWAY` | `VNAV_AL_MAX_SWAY` |
+| `VNAV_ALLOC_MAX_YAW` | `VNAV_AL_MAX_YAW` |
+| `VNAV_ALLOC_SURGE_SLEW` | `VNAV_AL_SURGE_SL` |
+| `VNAV_ALLOC_SWAY_SLEW` | `VNAV_AL_SWAY_SL` |
+| `VNAV_ALLOC_YAW_SLEW` | `VNAV_AL_YAW_SL` |
+| `VNAV_MANUAL_OVERRIDE` | `VNAV_MAN_OVR` |
+| `VNAV_MANUAL_DEADBAND` | `VNAV_MAN_DBAND` |
+| `VNAV_OVERRIDE_MODE` | `VNAV_OVR_MODE` |
+| `VNAV_FAILSAFE_MODE` | `VNAV_FAIL_MODE` |

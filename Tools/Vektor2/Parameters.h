@@ -26,6 +26,7 @@ public:
         k_param_sitl,
         k_param_compass,
         k_param_pwm,
+        k_param_navigation,
     };
 };
 

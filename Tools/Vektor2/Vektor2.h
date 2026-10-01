@@ -3,6 +3,7 @@
 #include "Config.h"
 #include "GCS_MAVLink.h"
 #include "Logic.h"
+#include "NavigationParameters.h"
 #include "Parameters.h"
 #include "PwmOut.h"
 #include "RcInput.h"
@@ -56,6 +57,7 @@ public:
     Logic logic;
     Routing routing;
     RoutingParameters route_params;
+    NavigationParameters navigation;
     VspTelemetry vsp_telemetry;
 
     // ChibiOS RCOutput currently asks SRV_Channels whether output pins were
