@@ -107,6 +107,19 @@ void App::init_estimator()
     ahrs.init();
     ins.init(loop_rate_hz);
     ahrs.reset();
+#if HAL_NAVEKF3_AVAILABLE
+    _compassless_ekf = compass.get_num_enabled() == 0;
+    if (_compassless_ekf) {
+        // Older Vektor2 firmware saved source set 2 as unaided. Use this set
+        // as the compass-less fallback without rewriting saved parameters.
+        AP_Param::set_by_name("EK3_SRC2_POSXY", 3);
+        AP_Param::set_by_name("EK3_SRC2_VELXY", 3);
+        AP_Param::set_by_name("EK3_SRC2_POSZ", 0);
+        AP_Param::set_by_name("EK3_SRC2_VELZ", 3);
+        AP_Param::set_by_name("EK3_SRC2_YAW", 8);
+        ahrs.set_posvelyaw_source_set(AP_NavEKF_Source::SourceSetSelection::SECONDARY);
+    }
+#endif
 }
 
 void App::loop()
@@ -144,6 +157,17 @@ void App::loop()
 #endif
     }
 
+#if HAL_NAVEKF3_AVAILABLE
+    // Vektor2 has no arming state. Let EKF3 run its GSF yaw estimator once
+    // a compass-less vehicle is moving with a GPS fix. The GSF itself checks
+    // whether its yaw estimate is usable before aligning the main filter.
+    if (_compassless_ekf &&
+        gps.status(0) >= AP_GPS::GPS_OK_FIX_3D &&
+        gps.ground_speed() >= 1.0f) {
+        ahrs.set_takeoff_expected(true);
+    }
+#endif
+
     // We already updated INS explicitly, so tell AHRS not to do it again.
     ahrs.update(true);
 
@@ -154,6 +178,7 @@ void App::loop()
     sync_route_parameters(now_ms);
     report_imu_health(now_ms);
     report_gps_diagnostics(now_ms);
+    report_ekf_startup(now_ms);
     report_rc_protocol(now_ms);
 
     // Route uint16 microsecond signals through the two logic components and
@@ -256,6 +281,36 @@ void App::report_gps_diagnostics(uint32_t now_ms)
     gcs().send_text(MAV_SEVERITY_WARNING,
                     "GPS1 RX=%s baud=%lu; no backend", rx,
                     (unsigned long)baud);
+#else
+    (void)now_ms;
+#endif
+}
+
+void App::report_ekf_startup(uint32_t now_ms)
+{
+#if HAL_GCS_ENABLED && HAL_NAVEKF3_AVAILABLE
+    if (now_ms < 10000 || now_ms - _last_ekf_startup_ms < 15000) {
+        return;
+    }
+    nav_filter_status status{};
+    ahrs.get_filter_status(status);
+    if (status.flags.attitude) {
+        return;
+    }
+    _last_ekf_startup_ms = now_ms;
+    if (status.flags.initalized) {
+        gcs().send_text(MAV_SEVERITY_WARNING,
+                        "EKF3 attitude pending: compass=%u GPS=%u",
+                        unsigned(compass.get_num_enabled()),
+                        unsigned(gps.status(0)));
+    } else {
+        float gps_lag_sec;
+        const bool gps_lag_known = gps.get_lag(0, gps_lag_sec);
+        gcs().send_text(MAV_SEVERITY_WARNING,
+                        "EKF3 waiting: GPS lag=%u free=%lu",
+                        unsigned(gps_lag_known),
+                        (unsigned long)hal.util->available_memory());
+    }
 #else
     (void)now_ms;
 #endif

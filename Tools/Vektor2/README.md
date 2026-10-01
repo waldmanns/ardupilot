@@ -72,9 +72,14 @@ The IMU clocks the application at 100 Hz by default.
 On Revo Mini, GPS1 uses `SERIAL3` / USART3 by default. Connect both signal
 wires: GPS TX -> PB11 (FC RX), GPS RX <- PB10 (FC TX), plus power and ground.
 Vektor2 defaults to `SERIAL3_PROTOCOL=5`, `GPS1_TYPE=2` (u-blox),
-`GPS_AUTO_CONFIG=1`, and `GPS_DRV_OPTIONS=4` (115200 u-blox startup path).
+`GPS_AUTO_CONFIG=1`, `GPS_DRV_OPTIONS=4` (115200 u-blox startup path),
+and `GPS1_DELAY_MS=120`.
 Other receiver types and ports remain configurable with the standard
-parameters; reboot after changing the serial role or GPS type.
+parameters; reboot after changing the serial role or GPS type. The nonzero
+GPS delay lets EKF3 allocate its observation buffer before a receiver is
+detected, so attitude can initialize from the IMU alone. A saved zero delay
+from older firmware is treated as 120 ms at boot; another nonzero value is
+preserved.
 
 The M10 SPG 5.10 UART1 factory default is 38400 baud with NAV-PVT output
 disabled; a module may have different saved settings. The shared AP_GPS u-blox
@@ -93,21 +98,33 @@ retains the default receiver type. Check the effective `GPS1_TYPE`,
 parameter list. A previously stored `GPS1_TYPE=1` will stay AUTO until
 changed explicitly.
 
-EKF3 uses the GPS for horizontal position and velocity, height, and vertical
-velocity by default:
+EKF3 uses GPS for horizontal position and velocity and vertical velocity.
+Height is synthetic because this firmware has no barometer and does not
+require altitude:
 
 ```text
 EK3_SRC1_POSXY = 3  (GPS)
 EK3_SRC1_VELXY = 3  (GPS)
-EK3_SRC1_POSZ  = 3  (GPS; barometer support is disabled)
+EK3_SRC1_POSZ  = 0  (synthetic zero height)
 EK3_SRC1_VELZ  = 3  (GPS)
 EK3_SRC1_YAW   = 1  (compass yaw, gyro propagation)
 ```
 
-EKF3 uses its primary source set and manages GPS availability through the
-standard estimator. GPS configuration does not switch EKF source sets or
-change a saved compass yaw setting. A receiver can report a raw 3D fix before
-EKF3 has a fused position.
+With an installed compass, EKF3 keeps source set 1 and its compass yaw.
+If no compass is detected at startup, Vektor2 selects source set 2 with the
+the same GPS position and velocity sources, synthetic height, and
+`EK3_SRC2_YAW=8` (GSF).
+Source set 2 is reserved for this fallback; its active values are restored
+at boot if older firmware saved the unaided values. Both height sources are
+set to synthetic height in RAM at boot, even if older firmware saved GPS
+height. Saved parameters and compass yaw settings stay unchanged. Because
+Vektor2 has no arming state, it signals expected movement to EKF3 while a
+compass-less vehicle has a 3D GPS fix and moves at least 1 m/s. EKF3 decides
+when the GPS/IMU GSF yaw estimate is accurate enough to align yaw and fuse
+GPS position. Without a compass or GPS motion, EKF3 can report a valid
+roll/pitch attitude after tilt alignment, but absolute yaw and position
+cannot be observed. A receiver can report a raw 3D fix before EKF3 has a
+fused position.
 
 Compass calibration uses ArduPilot's standard `MAV_CMD_DO_START_MAG_CAL`,
 `MAV_CMD_DO_ACCEPT_MAG_CAL`, and `MAV_CMD_DO_CANCEL_MAG_CAL` handlers. The
@@ -123,7 +140,11 @@ seconds shows the current baud and copied UART traffic as `no RX`, `NMEA`,
 them; it never consumes parser input. `RX=NMEA` with no backend suggests a
 protocol/configuration issue or an unconnected FC TX wire. `no RX` suggests
 wiring, power, UART assignment, or baud problems. `GPS_RAW_INT` reports the
-receiver and fix independently of EKF validity.
+receiver and fix independently of EKF validity. If EKF3 remains
+uninitialized, a periodic `EKF3 waiting` message reports whether GPS timing
+is known and how much free memory remains. If EKF3 initializes but attitude
+is still invalid, `EKF3 attitude pending` reports the detected compass count
+and GPS status.
 
 ### GPS bench checks
 

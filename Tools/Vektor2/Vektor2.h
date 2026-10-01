@@ -74,6 +74,7 @@ private:
     void sync_route_parameters(uint32_t now_ms);
     void report_imu_health(uint32_t now_ms);
     void report_gps_diagnostics(uint32_t now_ms);
+    void report_ekf_startup(uint32_t now_ms);
     void report_rc_protocol(uint32_t now_ms);
 
     AP_Param param_loader{var_info};
@@ -82,6 +83,8 @@ private:
     uint32_t _last_route_sync_ms = 0;
     uint32_t _last_imu_health_ms = 0;
     uint32_t _last_gps_diagnostic_ms = 0;
+    uint32_t _last_ekf_startup_ms = 0;
+    bool _compassless_ekf = false;
     AP_HAL::UARTDriver* _gps_port = nullptr;
     uint8_t _gps_monitor_storage[512]{};
     ByteBuffer _gps_monitor{_gps_monitor_storage, sizeof(_gps_monitor_storage)};
