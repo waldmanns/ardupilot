@@ -71,9 +71,11 @@ The IMU clocks the application at 100 Hz by default.
 
 On Revo Mini, GPS1 uses `SERIAL3` / USART3 by default. Connect both signal
 wires: GPS TX -> PB11 (FC RX), GPS RX <- PB10 (FC TX), plus power and ground.
-Vektor2 defaults to `SERIAL3_PROTOCOL=5`, `GPS1_TYPE=2` (u-blox),
-`GPS_AUTO_CONFIG=1`, `GPS_DRV_OPTIONS=4` (115200 u-blox startup path),
-and `GPS1_DELAY_MS=120`.
+Vektor2 defaults to `SERIAL3_PROTOCOL=5`, `GPS1_TYPE=1` (AUTO),
+`GPS_AUTO_CONFIG=1`, `GPS_DRV_OPTIONS=0`, and `GPS1_DELAY_MS=120`.
+Receiver detection and baud selection use the same AP_GPS defaults as Rover:
+the driver probes the available baud rates and configures u-blox at 230400
+baud. `SERIAL3_BAUD` is the initial probe rate, not a fixed operating rate.
 Other receiver types and ports remain configurable with the standard
 parameters; reboot after changing the serial role or GPS type. The nonzero
 GPS delay lets EKF3 allocate its observation buffer before a receiver is
@@ -92,11 +94,11 @@ NMEA receiver. AP_GPS detects and reports a receiver independently of a
 position fix.
 
 Saved parameter values survive reflashing and override these compiled
-defaults. Vektor2 also sets the AP_GPS board default to u-blox so GPS init
-retains the default receiver type. Check the effective `GPS1_TYPE`,
-`GPS_AUTO_CONFIG`, and `GPS_DRV_OPTIONS` in the startup `STATUSTEXT` or
-parameter list. A previously stored `GPS1_TYPE=1` will stay AUTO until
-changed explicitly.
+defaults. When upgrading from the forced u-blox/115200 setup, set
+`GPS1_TYPE=1`, `GPS_AUTO_CONFIG=1`, and `GPS_DRV_OPTIONS=0`, then reboot.
+Check these effective values in the startup `STATUSTEXT` or parameter list.
+The connected port must have `SERIALx_PROTOCOL=5`; GPS1 uses the first port
+configured for GPS in serial-number order.
 
 EKF3 uses GPS for horizontal position and velocity and vertical velocity.
 Height is synthetic because this firmware has no barometer and does not

@@ -71,15 +71,13 @@ void App::load_parameters()
     AP_Param::setup_sketch_defaults();
     AP_Param::check_var_info();
 
-    // Use ArduPilot's GPS frontend and EKF3 source selection. A receiver on
-    // SERIAL3 is u-blox by default; saved settings take precedence.
+    // Use Rover's AP_GPS defaults: AUTO detection and automatic receiver
+    // configuration (230400 baud for u-blox). Saved settings take precedence.
     AP_Param::set_default_by_name("AHRS_EKF_TYPE", 3);
     AP_Param::set_default_by_name("SERIAL0_PROTOCOL", 2); // MAVLink2
     AP_Param::set_default_by_name("SERIAL1_PROTOCOL", 23); // RC input
     AP_Param::set_default_by_name("SERIAL3_PROTOCOL", 5); // GPS
-    AP_Param::set_default_by_name("GPS1_TYPE", 2);        // u-blox
     AP_Param::set_default_by_name("GPS_AUTO_CONFIG", 1);
-    AP_Param::set_default_by_name("GPS_DRV_OPTIONS", 4); // u-blox at 115200
     AP_Param::set_default_by_name("GPS1_DELAY_MS", 120); // M10 timing; allows EKF startup without GPS
 #if HAL_NAVEKF3_AVAILABLE
     AP_Param::set_default_by_name("EK3_SRC1_POSXY", 3); // GPS position
