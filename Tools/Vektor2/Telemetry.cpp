@@ -42,6 +42,7 @@ void VspTelemetry::update(uint32_t now_ms, int16_t rate_hz, const Logic& logic)
     };
     Components::vsp1_emit_telemetry(vsp1_outputs, *this);
     Components::vsp2_emit_telemetry(vsp2_outputs, *this);
+    logic.vrs.send_telemetry(*this); // no additional messages when VRS is disabled
 }
 
 void ThrusterTelemetry::update(uint32_t now_ms, int16_t rate_hz, const Logic& logic)

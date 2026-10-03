@@ -9,25 +9,28 @@ namespace Vektor2 {
 
 static void vsp1_adapter(const uint16_t* inputs,
                          uint16_t* outputs,
-                         const void* parameter_store)
+                         const void* parameter_store,
+                         RollStabilization* stabilization)
 {
     const auto& store = *static_cast<const VSP1ParameterStore*>(parameter_store);
     const Components::VSP1Params params = store.values();
-    Components::vsp1_loop(inputs, outputs, params);
+    Components::vsp1_loop(inputs, outputs, params, stabilization);
 }
 
 static void vsp2_adapter(const uint16_t* inputs,
                          uint16_t* outputs,
-                         const void* parameter_store)
+                         const void* parameter_store,
+                         RollStabilization* stabilization)
 {
     const auto& store = *static_cast<const VSP2ParameterStore*>(parameter_store);
     const Components::VSP2Params params = store.values();
-    Components::vsp2_loop(inputs, outputs, params);
+    Components::vsp2_loop(inputs, outputs, params, stabilization);
 }
 
 static void thruster_bow_adapter(const uint16_t* inputs,
                                  uint16_t* outputs,
-                                 const void* parameter_store)
+                                 const void* parameter_store,
+                                 RollStabilization*)
 {
     const auto& store = *static_cast<const ThrusterBowParameterStore*>(parameter_store);
     const ThrusterBowParams params = store.values();
@@ -36,7 +39,8 @@ static void thruster_bow_adapter(const uint16_t* inputs,
 
 static void thruster_stern_adapter(const uint16_t* inputs,
                                    uint16_t* outputs,
-                                   const void* parameter_store)
+                                   const void* parameter_store,
+                                   RollStabilization*)
 {
     const auto& store = *static_cast<const ThrusterSternParameterStore*>(parameter_store);
     const ThrusterSternParams params = store.values();
@@ -111,11 +115,18 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // @Range: 0 50
     // @User: Standard
     AP_GROUPINFO("THR_TEL_HZ", 7, Logic, thr_tel_hz, 0),
+
+    // @Group: VRS_
+    // @Path: RollStabilizationParams.cpp
+    AP_SUBGROUPINFO(vrs_params, "VRS_", 8, Logic, RollStabilizationParameters),
     AP_GROUPEND
 };
 
 void Logic::begin_cycle()
 {
+    // AHRS has already updated. Snapshot once so neither component execution
+    // order nor call count can advance the shared roll controller twice.
+    vrs.update(vrs_params, vsp1_params.roll, vsp2_params.roll);
     for (uint8_t component = 0; component < component_count; component++) {
         for (uint8_t port = 0; port < max_inputs; port++) {
             _runtime[component].inputs[port] = 0;
@@ -156,7 +167,7 @@ void Logic::run(ComponentId id)
         return;
     }
 
-    def.loop(_runtime[index].inputs, _runtime[index].outputs, params);
+    def.loop(_runtime[index].inputs, _runtime[index].outputs, params, vrs.controller());
 }
 
 bool Logic::set_input(ComponentId id, uint8_t port, uint16_t value_us)

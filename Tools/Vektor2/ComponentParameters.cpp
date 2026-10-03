@@ -36,6 +36,10 @@ const AP_Param::GroupInfo VSP1ParameterStore::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("THR_ANG", 5, VSP1ParameterStore, thr_ang, 0),
 
+    // @Group: RS_
+    // @Path: RollStabilizationParams.cpp
+    AP_SUBGROUPINFO(roll, "RS_", 6, VSP1ParameterStore, RollDriveParameters),
+
     AP_GROUPEND
 };
 
@@ -72,6 +76,10 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
     // @Range: 0 359
     // @User: Standard
     AP_GROUPINFO("THR_ANG", 5, VSP2ParameterStore, thr_ang, 0),
+
+    // @Group: RS_
+    // @Path: RollStabilizationParams.cpp
+    AP_SUBGROUPINFO(roll, "RS_", 6, VSP2ParameterStore, RollDriveParameters),
 
     AP_GROUPEND
 };

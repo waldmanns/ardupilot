@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ComponentParameters.h"
+#include "RollStabilizationBackend.h"
 
 #include <AP_Param/AP_Param.h>
 #include <stdint.h>
@@ -17,7 +18,8 @@ enum class ComponentId : uint8_t {
 
 using ComponentLoopFn = void (*)(const uint16_t* inputs,
                                  uint16_t* outputs,
-                                 const void* parameter_store);
+                                 const void* parameter_store,
+                                 RollStabilization* stabilization);
 
 struct ComponentDefinition {
     ComponentId id;
@@ -58,6 +60,8 @@ public:
     AP_Int16 vsp_conf;
     AP_Int16 vsp_tel_hz;
     AP_Int16 thr_tel_hz;
+    RollStabilizationParameters vrs_params;
+    RollStabilizationBackend vrs;
 
     uint16_t vsp_configuration() const
     {

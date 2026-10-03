@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-namespace Vektor2 { class VspTelemetry; }
+namespace Vektor2 { class VspTelemetry; class RollStabilization; }
 
 namespace Vektor2::Components {
 
@@ -18,7 +18,8 @@ struct VSP2Params {
 // Persistent storage/routing/MAVLink remain outside this file.
 void vsp2_loop(const uint16_t* inputs,
                uint16_t* outputs,
-               const VSP2Params& params);
+               const VSP2Params& params,
+               RollStabilization* stabilization = nullptr);
 
 void vsp2_emit_telemetry(const uint16_t* outputs, const VspTelemetry& telemetry);
 

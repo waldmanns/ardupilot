@@ -5,6 +5,9 @@
 # while still including common transitive support needed by AHRS/EKF3/GCS.
 
 def build(bld):
+    # Some SITL features are forced in generated ap_config.h. Override these
+    # after that header, for this minimal application and its library objects.
+    bld.env.CXXFLAGS += ['-include', bld.path.find_node('BuildConfig.h').abspath()]
     # SITL enables custom control at board configure time. Vektor2 has no
     # custom controller, and duplicate command-line defines fail under -Werror.
     bld.env.DEFINES = [d for d in bld.env.DEFINES

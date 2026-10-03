@@ -4,6 +4,7 @@
 
 #include "VSP1.h"
 #include "VSP2.h"
+#include "RollStabilizationParams.h"
 #include "ThrusterBow.h"
 #include "ThrusterStern.h"
 
@@ -43,6 +44,7 @@ public:
     AP_Int16 y_c;
     AP_Int16 dir;
     AP_Int16 thr_ang;
+    RollDriveParameters roll;
 };
 
 class VSP2ParameterStore {
@@ -67,6 +69,7 @@ public:
     AP_Int16 y_c;
     AP_Int16 dir;
     AP_Int16 thr_ang;
+    RollDriveParameters roll;
 };
 
 class ThrusterBowParameterStore {

@@ -411,6 +411,12 @@ params.y_c
 
 VSP2 is identical with its own independent parameter store.
 
+## Roll stabilization
+
+Optional additive roll bursts are applied after each VSP ring limiter.
+`VRS_ENABLE=0` leaves the original outputs and telemetry unchanged. See
+[VRS.md](VRS.md) for the controller, 16 parameters, telemetry and tests.
+
 ## Routing
 
 The runtime has 32 route slots. A source may fan out to any number of
