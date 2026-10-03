@@ -285,8 +285,8 @@ Two fixed components are present:
 ```text
 VSP1: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP1
 VSP2: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP2
-ThrusterBow: 1 input, 1 output, prefix THRBOW
-ThrusterStern: 1 input, 1 output, prefix THRSTN
+ThrusterBow: 1 input, 1 output, prefix THR_BOW
+ThrusterStern: 1 input, 1 output, prefix THR_STN
 ```
 
 All routed values are `uint16_t` microseconds.
@@ -320,10 +320,11 @@ VSP2_DIR = 0
 VSP2_THR_ANG = 0
 VSP_CONF = 0
 VSP_TEL_HZ = 5
-THRBOW_MID = 1500
-THRBOW_DST = 0
-THRSTN_MID = 1500
-THRSTN_DST = 0
+THR_BOW_MID = 1500
+THR_BOW_DST = 0
+THR_STN_MID = 1500
+THR_STN_DST = 0
+THR_TEL_HZ = 0
 ```
 
 `VSP1_THR_ANG` and `VSP2_THR_ANG` default to 0 degrees. Their values
@@ -333,6 +334,16 @@ algorithm until the loops use them.
 
 `VSP_TEL_HZ` controls each VSP named-value telemetry key in Hz. Set it to
 `0` to disable those messages. Values above 50 are limited to 50 Hz.
+
+Thruster parameters share the `THR_` prefix: `THR_BOW_*`, `THR_STN_*`,
+and `THR_TEL_HZ`. The bow and stern parameter storage IDs are unchanged,
+so existing saved values survive the prefix rename.
+
+`THR_TEL_HZ` controls both thruster named floats independently of VSP telemetry.
+It defaults to `0` (disabled), with rates above 50 limited to 50 Hz.
+After routing, `THRBOW_PWM` and `THRSTN_PWM` report the bow and stern
+component output pulse widths in microseconds, before physical-output scaling.
+These wire names fit MAVLink's 10-character named-value limit.
 
 Each VSP emits two MAVLink `NAMED_VALUE_FLOAT` values after the routing cycle:
 `VSP1_XA` and `VSP1_YA` for VSP1, and `VSP2_XA` and `VSP2_YA` for VSP2.

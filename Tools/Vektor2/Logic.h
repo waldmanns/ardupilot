@@ -57,6 +57,7 @@ public:
     ThrusterSternParameterStore thruster_stern_params;
     AP_Int16 vsp_conf;
     AP_Int16 vsp_tel_hz;
+    AP_Int16 thr_tel_hz;
 
     uint16_t vsp_configuration() const
     {

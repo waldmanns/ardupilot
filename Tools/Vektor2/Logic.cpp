@@ -63,7 +63,7 @@ static const ComponentDefinition component_definitions[] = {
     {
         ComponentId::ThrusterBow,
         "ThrusterBow",
-        "THRBOW",
+        "THR_BOW",
         1,
         1,
         thruster_bow_adapter,
@@ -71,7 +71,7 @@ static const ComponentDefinition component_definitions[] = {
     {
         ComponentId::ThrusterStern,
         "ThrusterStern",
-        "THRSTN",
+        "THR_STN",
         1,
         1,
         thruster_stern_adapter,
@@ -87,8 +87,8 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // prefixes, producing VSP1_LIM / VSP1_THR_ANG and matching VSP2_*.
     AP_SUBGROUPINFO(vsp1_params, "VSP1_", 1, Logic, VSP1ParameterStore),
     AP_SUBGROUPINFO(vsp2_params, "VSP2_", 2, Logic, VSP2ParameterStore),
-    AP_SUBGROUPINFO(thruster_bow_params, "THRBOW_", 5, Logic, ThrusterBowParameterStore),
-    AP_SUBGROUPINFO(thruster_stern_params, "THRSTN_", 6, Logic, ThrusterSternParameterStore),
+    AP_SUBGROUPINFO(thruster_bow_params, "THR_BOW_", 5, Logic, ThrusterBowParameterStore),
+    AP_SUBGROUPINFO(thruster_stern_params, "THR_STN_", 6, Logic, ThrusterSternParameterStore),
 
     // @Param: VSP_CONF
     // @DisplayName: VSP configuration
@@ -104,6 +104,13 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // @Range: 0 50
     // @User: Standard
     AP_GROUPINFO("VSP_TEL_HZ", 4, Logic, vsp_tel_hz, 5),
+    // @Param: THR_TEL_HZ
+    // @DisplayName: Thruster PWM telemetry rate
+    // @Description: Rate for each thruster output named float. Zero disables it.
+    // @Units: Hz
+    // @Range: 0 50
+    // @User: Standard
+    AP_GROUPINFO("THR_TEL_HZ", 7, Logic, thr_tel_hz, 0),
     AP_GROUPEND
 };
 

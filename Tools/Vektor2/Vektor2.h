@@ -59,6 +59,7 @@ public:
     RoutingParameters route_params;
     NavigationParameters navigation;
     VspTelemetry vsp_telemetry;
+    ThrusterTelemetry thruster_telemetry;
 
     // ChibiOS RCOutput currently asks SRV_Channels whether output pins were
     // reassigned as GPIO/alarm during hal.rcout->init(). This object exists

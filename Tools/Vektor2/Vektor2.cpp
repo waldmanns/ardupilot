@@ -187,6 +187,7 @@ void App::loop()
     routing.update(rcin, logic, pwm);
 
     vsp_telemetry.update(now_ms, logic.vsp_tel_hz.get(), logic);
+    thruster_telemetry.update(now_ms, logic.thr_tel_hz.get(), logic);
 
     update_mavlink(now_ms);
 }
