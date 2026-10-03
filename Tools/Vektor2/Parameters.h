@@ -27,6 +27,7 @@ public:
         k_param_compass,
         k_param_pwm,
         k_param_navigation,
+        k_param_rcin,
     };
 };
 

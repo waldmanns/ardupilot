@@ -17,7 +17,7 @@ second serial protocol.
 - AP_AHRS with EKF3 selected
 - AP_GPS receiver detection and GPS-aided EKF3 position estimation
 - AP_SerialManager
-- AP_RCProtocol + `hal.rcin`
+- AP_RCProtocol + `hal.rcin`, with standard RC_Channels MAVLink overrides
 - direct `hal.rcout` PWM
 - standard ArduPilot MAVLink/GCS parameter and telemetry infrastructure
 - a fixed 32-slot microsecond routing table
@@ -30,7 +30,7 @@ second serial protocol.
 - flight modes
 - missions
 - vehicle failsafe architecture
-- RC_Channel application logic
+- periodic RC auxiliary-switch processing
 - SRV_Channels servo-function model
 - custom MAVLink messages
 - the original Vektor serial protocol
@@ -191,7 +191,8 @@ to the protocol using the port.
 
 ## RC input
 
-`RcInput` reads the HAL RC input snapshot. On ChibiOS, the dedicated RC input
+`RcInput` uses ArduPilot’s `RC_Channels` to read the HAL receiver and apply
+standard MAVLink RC overrides. On ChibiOS, the dedicated RC input
 thread runs AP_RCProtocol and decodes the serial receiver. A serial receiver
 can be attached by setting the relevant `SERIALx_PROTOCOL` to `23` (RCIN),
 then rebooting. For the Revo Mini board definition in this tree, the mapping is:
@@ -220,7 +221,55 @@ Realtime channel values use the standard `RC_CHANNELS` message. Vektor2 sends
 `UINT16_MAX` for unused channels and reports zero channels once the local RC
 snapshot has timed out.
 
-No RC_Channel mapping, aux-switch logic or vehicle RC failsafe is used.
+Routing consumes raw channel pulse widths; RC calibration does not remap routes.
+No flight-mode switch or periodic auxiliary-switch processing is used.
+
+### Native ExpressLRS MAVLink
+
+The standard ArduPilot MAVLink handler accepts `RC_CHANNELS_OVERRIDE` and
+applies `MAV_GCS_SYSID` filtering, channel ignore/release semantics,
+`RC_OPTIONS`, and `RC_OVERRIDE_TIME`. The latter defaults to 3 seconds;
+`0` disables overrides and `-1` disables their timeout. Direct receiver
+input keeps Vektor2's 500 ms timeout. `RC_PROTO` reports `MAVLink` while an
+accepted override is active. The upstream handler currently accepts channels
+1–16. Existing routing IDs work for both serial RC and MAVLink RC input.
+
+Use [ExpressLRS native MAVLink mode](https://www.expresslrs.org/software/mavlink/)
+on the transmitter and receiver. On the connected Vektor2 UART set:
+
+```text
+SERIALx_PROTOCOL = 2
+SERIALx_BAUD = 460
+```
+
+Reboot after changing the port settings. `460` selects 460800 baud. Connect
+receiver TX to board RX, receiver RX to board TX, and common ground. For a
+receiver on Revo Mini USART1, `x` is `1`; USB MAVLink remains on `SERIAL0`.
+The default port roles are unchanged, so this setup is opt-in.
+
+The receiver's MAVLink source system ID must match `MAV_GCS_SYSID` (default
+255, or its configured range), and its target must match `MAV_SYSID` (default
+1). Start with low telemetry rates for the radio link; `VSP_TEL_HZ` and
+`THR_TEL_HZ` also consume its bandwidth. Receiver RSSI integration is not
+added by this change.
+
+Automated SITL coverage (requires `pymavlink`):
+
+```sh
+./waf configure --board sitl
+./waf --targets bin/Vektor2
+python3 Tools/Vektor2/tests/test_mavlink_rc.py
+```
+
+The test uses temporary parameter storage and a second MAVLink serial port.
+It checks parameter exchange, RC-to-PWM routing, channel ignore/release,
+source/target filtering, timeout with continuing GCS heartbeats, and disabling
+overrides using the standard RC parameters.
+
+Bench validation: confirm RC channel values and routed PWM over the link,
+read/write a parameter, then stop RC packets and verify that the override
+expires after `RC_OVERRIDE_TIME`. A connected GCS heartbeat must not keep
+RC overrides alive.
 
 ## PWM output
 

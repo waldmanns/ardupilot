@@ -36,6 +36,8 @@ const AP_Param::Info App::var_info[] = {
     // parameters only: RT1_SRC/RT1_DST ... RT32_SRC/RT32_DST.
     GOBJECT(route_params, "RT", RoutingParameters),
 
+    GOBJECT(rcin, "RC", RcInput),
+
     GOBJECT(navigation, "VNAV_", NavigationParameters),
 
     // Per-physical-output scaling and reversal: PWM1_MIN/MAX/INV etc.

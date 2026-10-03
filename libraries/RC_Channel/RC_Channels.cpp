@@ -92,9 +92,11 @@ bool RC_Channels::read_input(void)
         success |= channel(i)->update();
     }
 
+#if AP_ARMING_ENABLED
     if (success) {
         rudder_arm_disarm_check();
     }
+#endif
 
     return success;
 }

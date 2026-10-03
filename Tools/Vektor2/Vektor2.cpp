@@ -43,12 +43,6 @@ void App::setup()
     // behaviour. It applies board orientation and board-level driver options.
     board_config.init();
 
-#if AP_RCPROTOCOL_ENABLED && !AP_RC_CHANNEL_ENABLED
-    // RC_Channels normally supplies this mask. Vektor2 has no RC_Channels,
-    // so explicitly enable AP_RCProtocol's built-in decoders (bit 0 = all).
-    AP::RC().set_rc_protocols(1);
-#endif
-
     // board_config.init() owns ChibiOS RC-input initialization. It creates
     // AP::RC(), which must happen exactly once before SerialManager attaches
     // a port configured as SERIALx_PROTOCOL=23 (RCIN).
@@ -61,6 +55,7 @@ void App::setup()
     // Starts configured UARTs. MAVLink, GPS and RCIN all share this one clean
     // serial-role surface instead of Vektor owning a second protocol router.
     serial_manager.init();
+    rcin.init();
 
 #if HAL_GCS_ENABLED
     gcs().setup_console();

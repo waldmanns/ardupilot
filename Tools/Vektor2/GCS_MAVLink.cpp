@@ -11,8 +11,8 @@ extern const AP_HAL::HAL &hal;
 
 bool GCS_MAVLINK_Vektor2::try_send_message(enum ap_message id)
 {
-    // Vektor2 deliberately does not instantiate RC_Channels. Publish the
-    // application snapshot directly as the standard RC_CHANNELS message.
+    // Publish the routed RC snapshot, including standard MAVLink overrides,
+    // as the standard RC_CHANNELS message.
     if (id == MSG_RC_CHANNELS) {
         if (!check_payload_size(MAVLINK_MSG_ID_RC_CHANNELS_LEN)) {
             return false;
