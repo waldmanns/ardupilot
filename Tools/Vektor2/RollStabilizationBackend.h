@@ -10,7 +10,8 @@ class VspTelemetry;
 class RollStabilizationBackend {
 public:
     void update(const RollStabilizationParameters& params,
-                const RollDriveParameters& first, const RollDriveParameters& second);
+                const RollDriveParameters& first, const RollDriveParameters& second,
+                bool permitted = true);
     RollStabilization* controller() { return _controller.enabled() ? &_controller : nullptr; }
     void send_telemetry(const VspTelemetry& telemetry) const;
 

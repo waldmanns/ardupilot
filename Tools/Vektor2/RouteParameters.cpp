@@ -15,7 +15,7 @@ const AP_Param::GroupInfo RouteSlotParameters::var_info[] = {
 
     // @Param: DST
     // @DisplayName: Route destination
-    // @Description: 0 disabled; 1..32 PWM1..PWM32; 101/102 VSP1 inputs; 103 VSP1 RPM_IN; 111/112 VSP2 inputs; 113 VSP2 RPM_IN; 121 ThrusterBow input; 131 ThrusterStern input.
+    // @Description: 0 disabled; 1..32 PWM1..PWM32; 101/102 VSP1 inputs; 103 VSP1 RPM_IN; 111/112 VSP2 inputs; 113 VSP2 RPM_IN; 121 ThrusterBow input; 131 ThrusterStern input; 201..210 VFN1..VFN10 inputs.
     // @User: Standard
     AP_GROUPINFO("DST", 2, RouteSlotParameters, destination, 0),
 
@@ -72,7 +72,7 @@ static bool decode_source(int16_t code, SourceEndpoint& endpoint)
         return true;
     }
 
-    if (code >= 101) {
+    if (code >= 101 && code < 101 + Logic::component_count * 10) {
         const int16_t compact = code - 101;
         const uint8_t component = uint8_t(compact / 10);
         const uint8_t port = uint8_t(compact % 10);
@@ -93,7 +93,12 @@ static bool decode_destination(int16_t code, ConsumerEndpoint& endpoint)
         return true;
     }
 
-    if (code >= 101) {
+    if (code >= 201 && code < 201 + Functions::count) {
+        endpoint = ConsumerEndpoint::function(uint8_t(code - 201));
+        return true;
+    }
+
+    if (code >= 101 && code < 101 + Logic::component_count * 10) {
         const int16_t compact = code - 101;
         const uint8_t component = uint8_t(compact / 10);
         const uint8_t port = uint8_t(compact % 10);
@@ -134,6 +139,7 @@ bool RoutingParameters::sync(Routing& routing, PwmOut& pwm, bool force)
     routing.clear_all(&pwm);
 
     bool all_valid = true;
+    uint16_t function_errors = 0;
     for (uint8_t i = 0; i < max_routes; i++) {
         _last_source[i] = current_source[i];
         _last_destination[i] = current_destination[i];
@@ -146,24 +152,32 @@ bool RoutingParameters::sync(Routing& routing, PwmOut& pwm, bool force)
         if (!decode_source(current_source[i], route.source) ||
             !decode_destination(current_destination[i], route.consumer)) {
             all_valid = false;
+            if (current_destination[i] >= 201 && current_destination[i] < 201 + Functions::count) {
+                function_errors |= 1U << (current_destination[i] - 201);
+            }
             continue;
         }
 
         // Standard parameter routes are direct microsecond routes. The Route
         // type keeps mapping fields available for future local/programmatic
         // uses, but the baseline MAVLink configuration does not expose them.
-        route.input_min_us = 1000;
-        route.input_max_us = 2000;
-        route.output_min_us = 1000;
-        route.output_max_us = 2000;
+        const bool function = route.consumer.kind == ConsumerKind::FunctionInput;
+        route.input_min_us = function ? Functions::minimum_us : 1000;
+        route.input_max_us = function ? Functions::maximum_us : 2000;
+        route.output_min_us = route.input_min_us;
+        route.output_max_us = route.input_max_us;
         route.reversed = false;
         route.enabled = true;
 
         if (!routing.set_route(i, route)) {
             all_valid = false;
+            if (function) {
+                function_errors |= 1U << route.consumer.port;
+            }
         }
     }
 
+    routing.set_function_errors(function_errors);
     _have_snapshot = true;
     _last_apply_valid = all_valid;
     return all_valid;

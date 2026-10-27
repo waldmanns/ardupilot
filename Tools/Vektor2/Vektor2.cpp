@@ -7,6 +7,7 @@
      - AP_SerialManager
      - AP_RCProtocol / HAL RC input
      - HAL RC output
+     - board-gated CAN manager / DroneCAN sensor and PWM output backends
      - AP_GPS, active on a configured GPS serial port
      - standard MAVLink/GCS parameter and telemetry transport
 
@@ -16,7 +17,7 @@
      - vehicle modes
      - mission architecture
      - vehicle failsafe state machine
-     - RC_Channel / SRV_Channels
+     - vehicle servo-function mixer
  */
 
 #include "Vektor2.h"
@@ -62,6 +63,12 @@ void App::setup()
     gcs().setup_uarts();
 #endif
 
+#if HAL_CANMANAGER_ENABLED
+    // Start standard CAN protocol drivers before the sensor frontends probe
+    // for DroneCAN devices. CAN manager owns interfaces and driver threads.
+    can_mgr.init();
+#endif
+
     // AP_GPS discovers the configured GPS serial port and probes for a
     // receiver. It is safe to initialize when no GPS is connected.
     gps.init();
@@ -71,13 +78,21 @@ void App::setup()
     }
     compass.init();
 
-    scheduler.init(nullptr, 0, 0);
+    // Only log maintenance uses the scheduler. Sensor/control/PWM timing stays
+    // in this IMU-clocked loop. The logger's startup writer needs a real task
+    // budget; a scheduler with no tasks would leave log metadata unfinished.
+    static const AP_Scheduler::Task tasks[] = {
+        SCHED_TASK_CLASS(App, this, logging_task, LOOP_RATE, 1000, 100),
+    };
+    scheduler.init(tasks, ARRAY_SIZE(tasks), 0);
     init_estimator();
     pwm.init();
 
     // Build the runtime route table from the standard MAVLink/AP_Param-backed
     // RTn_SRC/RTn_DST configuration before the first loop iteration.
     _route_config_valid = route_params.sync(routing, pwm, true);
+    init_logging();
+    storage.init();
 
 #if HAL_GCS_ENABLED
     gcs().send_text(MAV_SEVERITY_INFO,
@@ -180,11 +195,18 @@ void App::loop()
     // on to final PWM consumers. Sources may fan out; each consumer has only
     // one producer. Component dependency order is compiled when routes change.
     routing.update(rcin, logic, pwm);
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    pwm.push_can();
+#endif
 
+    heading_telemetry.update(now_ms, logic);
+    function_telemetry.update(now_ms, logic);
     vsp_telemetry.update(now_ms, logic.vsp_tel_hz.get(), logic);
     thruster_telemetry.update(now_ms, logic.thr_tel_hz.get(), logic);
 
     update_mavlink(now_ms);
+    scheduler.tick();
+    scheduler.run(1500);
 }
 
 
@@ -343,6 +365,7 @@ void App::update_mavlink(uint32_t now_ms)
     // by the standard GCS scheduler. Ground stations can use stream requests
     // or MAV_CMD_SET_MESSAGE_INTERVAL without fighting an application timer.
     gcs().update_send();
+    _gcs.update_storage_information(now_ms);
 #else
     (void)now_ms;
 #endif

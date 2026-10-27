@@ -80,17 +80,17 @@ def run(binary):
                 def vrs_name(name):
                     return name.startswith(('RS_', 'V1_RS_', 'V2_RS_'))
 
-                # All sixteen parameters must be accessible under their intended
+                # All seventeen parameters must be accessible under their intended
                 # public names, with the feature and both gains off by default.
-                expected = {'VRS_ENABLE': 0, 'VRS_P': 0, 'VRS_D': 0,
+                expected = {'VRS_ENABLE': 0, 'VRS_MODE': 0, 'VRS_P': 0, 'VRS_D': 0,
                             'VRS_TRIM': 0, 'VRS_FILT_HZ': 2, 'VRS_DB': 0.02,
                             'VRS_ON_MS': 250, 'VRS_OFF_MS': 250,
-                            'VRS_SLEW': 1, 'VRS_MAN_LIM': 0.8,
-                            'VSP1_RS_ANG': 0, 'VSP1_RS_SIGN': 0, 'VSP1_RS_MAX': 0.2,
-                            'VSP2_RS_ANG': 0, 'VSP2_RS_SIGN': 0, 'VSP2_RS_MAX': 0.2}
+                            'VRS_SLEW': 2, 'VRS_MAN_LIM': 0.8,
+                            'VSP1_RS_ANG': 0, 'VSP1_RS_SIGN': 0, 'VSP1_RS_MAX': 0.4,
+                            'VSP2_RS_ANG': 0, 'VSP2_RS_SIGN': 0, 'VSP2_RS_MAX': 0.4}
                 for name, value in expected.items():
                     assert abs(parameter(name)-value) < 0.0001, name
-                print('PASS: all 16 VRS parameters/defaults through MAVLink', flush=True)
+                print('PASS: all 17 VRS parameters/defaults through MAVLink', flush=True)
 
                 routes = [(1, 101), (2, 102), (3, 103), (4, 111), (5, 112), (6, 113),
                           (101, 9), (102, 10), (103, 11), (111, 12), (112, 13), (113, 14)]
@@ -121,7 +121,7 @@ def run(binary):
 
                 for name, value in {'VSP1_RS_ANG': 90, 'VSP1_RS_SIGN': 1,
                                     'VSP2_RS_ANG': 270, 'VSP2_RS_SIGN': -1,
-                                    'VRS_P': 0.1, 'VRS_TRIM': 5, 'VRS_SLEW': 10}.items():
+                                    'VRS_P': 0.1, 'VRS_TRIM': 5, 'VRS_SLEW': 20}.items():
                     parameter(name, value)
                 parameter('VRS_ENABLE', 1)
                 wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'RS_ROLL')
@@ -142,6 +142,21 @@ def run(binary):
                          m.servo9_raw == 1520 and m.servo10_raw == 1500 and
                          m.servo12_raw == 1510 and m.servo13_raw < 1490 and m.servo14_raw == 1800)
                 print('PASS: EKF-gated bursts, both effect signs, simultaneous maneuvering and RPM', flush=True)
+
+                parameter('VRS_MODE', 1)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'RS_STATE' and m.value == 5)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'V2_RS_DUT' and m.value > 0.95)
+                drain()
+                deadline = time.monotonic() + 1.2
+                samples = 0
+                while time.monotonic() < deadline:
+                    msg = link.recv_match(type='SERVO_OUTPUT_RAW', blocking=True, timeout=0.1)
+                    if msg is not None:
+                        assert msg.servo13_raw < 1490, msg
+                        assert msg.servo11_raw == 1750 and msg.servo14_raw == 1800, msg
+                        samples += 1
+                assert samples > 5, 'Missing continuous output samples'
+                print('PASS: continuous mode has no burst gaps and preserves RPM', flush=True)
 
                 parameter('VRS_ENABLE', 0)
                 baseline = (1520, 1500, 1750, 1510, 1490, 1800)

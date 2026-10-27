@@ -20,6 +20,7 @@ second serial protocol.
 - AP_RCProtocol + `hal.rcin`, with standard RC_Channels MAVLink overrides
 - direct `hal.rcout` PWM
 - standard ArduPilot MAVLink/GCS parameter and telemetry infrastructure
+- SD/filesystem binary logging, MAVFTP and native MAVLink log transfers
 - a fixed 32-slot microsecond routing table
 - two fixed logic components: VSP1 and VSP2
 
@@ -63,9 +64,14 @@ write PWM
       |
       v
 receive/send standard MAVLink
+      |
+      v
+bounded logger maintenance and sample buffering
 ```
 
 The IMU clocks the application at 100 Hz by default.
+SD writes, capacity polling and recording-stop file closure run on background
+IO threads. Logging maintenance has one small scheduler task after control/PWM.
 
 ## GPS and EKF3
 
@@ -249,8 +255,8 @@ The default port roles are unchanged, so this setup is opt-in.
 
 The receiver's MAVLink source system ID must match `MAV_GCS_SYSID` (default
 255, or its configured range), and its target must match `MAV_SYSID` (default
-1). Start with low telemetry rates for the radio link; `VSP_TEL_HZ` and
-`THR_TEL_HZ` also consume its bandwidth. Receiver RSSI integration is not
+1). Start with low telemetry rates for the radio link; `VSP_TEL_HZ`,
+`VHDG_TEL_HZ`, and `THR_TEL_HZ` also consume its bandwidth. Receiver RSSI integration is not
 added by this change.
 
 Automated SITL coverage (requires `pymavlink`):
@@ -270,6 +276,10 @@ Bench validation: confirm RC channel values and routed PWM over the link,
 read/write a parameter, then stop RC packets and verify that the override
 expires after `RC_OVERRIDE_TIME`. A connected GCS heartbeat must not keep
 RC overrides alive.
+
+Direct RC-to-PWM routes use the router's existing `HoldLast` policy when their
+source becomes unavailable. The retained PWM does not keep RC input valid for
+controllers such as heading hold.
 
 ## PWM output
 
@@ -306,6 +316,9 @@ GPS_RAW_INT        receiver status and raw GPS position
 GLOBAL_POSITION_INT EKF3 position when available
 STATUSTEXT         status/events such as RC protocol detection
 PARAM_VALUE/SET    all configuration
+STORAGE_INFORMATION SD availability and capacity
+FILE_TRANSFER_PROTOCOL standard MAVFTP file access
+LOG_ENTRY/LOG_DATA native binary log listing/download
 ```
 
 The raw sensor and attitude streams default to 10 Hz. The extended-status
@@ -339,7 +352,10 @@ ThrusterStern: 1 input, 1 output, prefix THR_STN
 ```
 
 All routed values are `uint16_t` microseconds.
-Both thruster components currently pass their inputs through unchanged; their parameters are reserved for future control logic.
+Bow and stern now have independent master/VFN enables, neutral interlocks, manual
+conditioning and optional heading assistance. They default disabled and send their
+configured neutral when stopped. See [Thrusters.md](Thrusters.md) for configuration
+and migration from the old passthrough behavior.
 
 Each VSP builds a small stack-allocated `Limiter` from its current
 parameters on every cycle, then uses `mapCoordinates()` for the first two
@@ -369,8 +385,10 @@ VSP2_DIR = 0
 VSP2_THR_ANG = 0
 VSP_CONF = 0
 VSP_TEL_HZ = 5
+THR_BOW_ENABLE = 0
 THR_BOW_MID = 1500
 THR_BOW_DST = 0
+THR_STN_ENABLE = 0
 THR_STN_MID = 1500
 THR_STN_DST = 0
 THR_TEL_HZ = 0
@@ -388,7 +406,7 @@ Thruster parameters share the `THR_` prefix: `THR_BOW_*`, `THR_STN_*`,
 and `THR_TEL_HZ`. The bow and stern parameter storage IDs are unchanged,
 so existing saved values survive the prefix rename.
 
-`THR_TEL_HZ` controls both thruster named floats independently of VSP telemetry.
+`THR_TEL_HZ` controls thruster output, enable and state named floats independently of VSP telemetry.
 It defaults to `0` (disabled), with rates above 50 limited to 50 Hz.
 After routing, `THRBOW_PWM` and `THRSTN_PWM` report the bow and stern
 component output pulse widths in microseconds, before physical-output scaling.
@@ -415,7 +433,40 @@ VSP2 is identical with its own independent parameter store.
 
 Optional additive roll bursts are applied after each VSP ring limiter.
 `VRS_ENABLE=0` leaves the original outputs and telemetry unchanged. See
-[VRS.md](VRS.md) for the controller, 16 parameters, telemetry and tests.
+[VRS.md](VRS.md) for the controller, 17 parameters, telemetry and tests.
+
+## Heading hold
+
+`VHDG_ENABLE=1` holds a captured compass heading through paired actuator-Y
+corrections. Moving any VSP rod X/Y input outside `1500 +/- VHDG_STK_DB`
+immediately releases both corrections. After all rods remain neutral for
+`VHDG_IDLE_MS`, capture the current heading as the new target. Automatic Y
+inversion is independent for each drive; RPM passes through. The default is
+disabled with zero gains. `VHDG_TEL_HZ` independently controls heading
+measurement telemetry. State, inhibition flags and the `HDG_REASON` string use
+1 Hz below 10, or 2 Hz at 10 and above, including 1 Hz status when measurements
+are disabled at zero. See [VHDG.md](VHDG.md) for the 14 parameters, twelve named
+floats, reason strings, validity gates, VRS priority, routing constraints and tests.
+
+## Routed functions
+
+Ten `VFN` slots accept any router source through destinations 201..210.
+Each has persistent enable/type/mode and an inclusive 800..2200 us activation
+interval. Level or toggle requests gate VRS/heading on the following control
+cycle, in addition to their existing master enables. Multiple requests for
+one feature combine with OR. Slots default unused/disabled. See [VFN.md](VFN.md)
+for the parameter, routing and telemetry contract and verification commands.
+
+## SD card and recording
+
+The current Revo Mini definition supports an SPI SD card. Native binary logs
+record sensor data, routed commands, physical PWM, heading hold, roll
+stabilization and storage/input status. `LOG_DISARMED=1` starts continuous
+recording; zero stops and closes the file in the background. `VLOG_HZ` controls
+Vektor sample rate independently of telemetry. MAVFTP, native `LOG_*` transfer,
+optional remote block logging, storage information/interval requests and SD
+format commands use standard ArduPilot MAVLink services. See
+[Storage.md](Storage.md) for wiring, parameters, record groups, protocols and tests.
 
 ## Routing
 
@@ -543,6 +594,8 @@ Routing.cpp/.h             realtime route engine
 RouteParameters.cpp/.h     RT1..RT32 standard parameter binding
 Logic.cpp/.h               component registry/runtime
 ComponentParameters.*      AP_Param-backed VSP parameters
+Logging.cpp                native binary records and bounded logger maintenance
+Storage.cpp/.h             background SD status and recording-stop file closure
 VSP1.cpp/.h                VSP1 algorithm and telemetry values
 VSP2.cpp/.h                VSP2 algorithm and telemetry values
 Telemetry.cpp/.h           shared rate limit and MAVLink publisher
@@ -551,6 +604,54 @@ wscript                    ArduPilot build target
 ```
 
 ## Build integration
+
+### CAN and routed PWM
+
+CAN-capable boards include the standard `AP_CANManager` and DroneCAN drivers.
+Boards without CAN omit these libraries, the manager object, the output bridge,
+and the `CAN_*` parameters at build time. Existing GPS and compass frontends
+discover DroneCAN devices through their normal ArduPilot backends. Other sensor
+families disabled by Vektor2 remain disabled.
+
+Routing still targets PWM channels. After each routing cycle, the final
+`PWMn_MIN/MAX/INV`-adjusted values are also supplied to the standard DroneCAN
+servo backend. Channel 1 maps to actuator ID 1, and so on, up to the board's
+`NUM_SERVO_CHANNELS` limit. Local PWM output continues normally; no additional
+route or `SERVOx_FUNCTION` configuration is needed.
+
+Example for a DroneCAN PWM actuator on CAN port 1, output channel 1:
+
+1. Set `CAN_P1_DRIVER=1`, `CAN_P1_BITRATE` to the bus bitrate, and
+   `CAN_D1_PROTOCOL=1` (DroneCAN), then reboot.
+2. Set `CAN_D1_UC_SRV_BM=1` to publish channel 1 (bit 0; add bits for other
+   channels), and `CAN_D1_UC_SRV_RT` to the desired update rate.
+3. Enable bit 4 (`SendServoAsPWM`, value 16) in `CAN_D1_UC_OPTION`, preserving
+   other option bits, for exact microsecond commands. Without this option the
+   standard backend sends normalized commands instead. The receiving device
+   must support DroneCAN PWM actuator commands.
+4. Configure the usual `RTn_SRC` / `RTn_DST` PWM route. Verify the actuator ID
+   and compare received CAN commands with the local PWM pulse width at low,
+   middle, and high input, including output scaling and inversion.
+
+Unrouted, disabled, or invalid outputs are supplied as zero to the backend,
+which removes them from its servo active mask. This stops commands; it does
+not send a physical disable command. Configure and verify the actuator's
+command timeout. Test route removal and RC loss with
+`DisableRoutedOutputs`; `HoldLast` intentionally continues the last command.
+
+This bridge uses DroneCAN servo/PWM commands. DroneCAN raw ESC commands retain
+the library's soft-arming gate; Vektor2 has no arming state machine and does not
+bypass it. PiccoloCAN and KDECAN function-based motor outputs are not enabled.
+Standard MAVLink CAN forwarding and SLCAN diagnostics remain available where
+the board enables them.
+
+For a SITL build, run `python3 Tools/Vektor2/tests/test_mavlink_can.py` to
+compare local PWM telemetry with actual DroneCAN PWM commands over the standard
+SITL multicast transport. Run this test without other CAN SITL instances on
+the shared multicast bus. Physical bus timing and actuator timeout behavior
+still need a hardware bench check.
+
+### Building
 
 Place `Vektor2/` into the ArduPilot tree using the same custom-application
 integration point used by your existing Vektor target. The provided `wscript`

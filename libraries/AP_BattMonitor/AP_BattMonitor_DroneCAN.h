@@ -2,7 +2,7 @@
 
 #include "AP_BattMonitor.h"
 #include "AP_BattMonitor_Backend.h"
-#if HAL_ENABLE_DRONECAN_DRIVERS
+#if AP_BATTERY_UAVCAN_BATTERYINFO_ENABLED
 #include <AP_DroneCAN/AP_DroneCAN.h>
 
 #define AP_BATTMONITOR_UAVCAN_TIMEOUT_MICROS         5000000 // sensor becomes unhealthy if no successful readings for 5 seconds

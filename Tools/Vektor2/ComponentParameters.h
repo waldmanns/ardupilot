@@ -6,6 +6,7 @@
 #include "VSP2.h"
 #include "RollStabilizationParams.h"
 #include "ThrusterBow.h"
+#include "ThrusterControl.h"
 #include "ThrusterStern.h"
 
 namespace Vektor2 {
@@ -83,6 +84,18 @@ public:
         return { int16_t(mid.get()), int16_t(dst.get()) };
     }
 
+    ThrusterSettings control_values() const
+    {
+        ThrusterSettings s;
+        s.enable = enable.get(); s.mid = mid.get(); s.deadband = deadband.get();
+        s.maximum = maximum.get(); s.slew = slew.get();
+        s.heading_enable = heading_enable.get(); s.heading_sign = heading_sign.get();
+        s.heading_maximum = heading_maximum.get();
+        return s;
+    }
+    AP_Int8 enable, heading_enable, heading_sign;
+    AP_Int16 deadband;
+    AP_Float maximum, slew, heading_maximum;
     AP_Int16 mid;
     AP_Int16 dst;
 };
@@ -98,6 +111,18 @@ public:
         return { int16_t(mid.get()), int16_t(dst.get()) };
     }
 
+    ThrusterSettings control_values() const
+    {
+        ThrusterSettings s;
+        s.enable = enable.get(); s.mid = mid.get(); s.deadband = deadband.get();
+        s.maximum = maximum.get(); s.slew = slew.get();
+        s.heading_enable = heading_enable.get(); s.heading_sign = heading_sign.get();
+        s.heading_maximum = heading_maximum.get();
+        return s;
+    }
+    AP_Int8 enable, heading_enable, heading_sign;
+    AP_Int16 deadband;
+    AP_Float maximum, slew, heading_maximum;
     AP_Int16 mid;
     AP_Int16 dst;
 };

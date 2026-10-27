@@ -711,9 +711,35 @@ uint16_t AP_Logger_File::get_num_logs()
  */
 void AP_Logger_File::stop_logging(void)
 {
-    // best-case effort to avoid annoying the IO thread
-    const bool have_sem = write_fd_semaphore.take(hal.util->get_soft_armed()?1:20);
+    // A background stop after recording is disabled can safely drain the RAM
+    // buffer before closing. Main-thread stops retain their bounded wait;
+    // slow card IO must not move into control.
+    const bool drain = !hal.scheduler->in_main_thread() && !logging_enabled();
+    bool have_sem;
+    if (drain) {
+        write_fd_semaphore.take_blocking();
+        have_sem = true;
+    } else {
+        have_sem = write_fd_semaphore.take(hal.util->get_soft_armed()?1:20);
+    }
     if (_write_fd != -1) {
+        if (drain) {
+            while (_writebuf.available() != 0) {
+                uint32_t size;
+                const uint8_t* data = _writebuf.readptr(size);
+                size = MIN(size, uint32_t(_writebuf_chunk));
+                const int32_t written = AP::FS().write(_write_fd, data, size);
+                if (written <= 0) {
+                    _last_write_failed = true;
+                    break;
+                }
+                _writebuf.advance(written);
+                _write_offset += written;
+            }
+            if (AP::FS().fsync(_write_fd) != 0) {
+                _last_write_failed = true;
+            }
+        }
         int fd = _write_fd;
         _write_fd = -1;
         AP::FS().close(fd);

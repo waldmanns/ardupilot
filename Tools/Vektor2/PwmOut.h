@@ -19,8 +19,8 @@ public:
 };
 
 // Intentionally tiny PWM facade. No servo-function layer and no arming state
-// machine. The last values written are retained only for standard MAVLink
-// SERVO_OUTPUT_RAW telemetry.
+// machine. The last values written feed standard MAVLink SERVO_OUTPUT_RAW
+// telemetry and, on CAN-capable boards, the DroneCAN PWM output backend.
 class PwmOut {
 public:
     PwmOut() { AP_Param::setup_object_defaults(this, var_info); }
@@ -28,6 +28,10 @@ public:
     static const AP_Param::GroupInfo var_info[];
     PwmChannelParameters channels[max_pwm_channels];
     void init();
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // Publish a complete routed output cycle to the standard CAN backend.
+    void push_can();
+#endif
 
     bool write_us(uint8_t channel, uint16_t pulse_us);
     bool set_rate_hz(uint8_t channel, uint16_t rate_hz);

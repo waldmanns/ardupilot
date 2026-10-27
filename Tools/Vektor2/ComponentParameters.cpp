@@ -87,7 +87,7 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
 const AP_Param::GroupInfo ThrusterBowParameterStore::var_info[] = {
     // @Param: MID
     // @DisplayName: Bow thruster midpoint
-    // @Description: Midpoint reserved for bow thruster control logic.
+    // @Description: Neutral and stop pulse for bow thruster, 1000..2000 us before final PWM scaling.
     // @Units: us
     // @User: Standard
     AP_GROUPINFO("MID", 1, ThrusterBowParameterStore, mid, 1500),
@@ -98,13 +98,58 @@ const AP_Param::GroupInfo ThrusterBowParameterStore::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("DST", 2, ThrusterBowParameterStore, dst, 0),
 
+    // @Param: ENABLE
+    // @DisplayName: ThrusterBow ENABLE
+    // @Description: Master enable. Disabled sends MID; enabling requires a valid neutral input.
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Standard
+    AP_GROUPINFO("ENABLE", 3, ThrusterBowParameterStore, enable, 0),
+
+    // @Param: DB
+    // @DisplayName: ThrusterBow DB
+    // @Description: Manual neutral deadband around MID in microseconds.
+    // @User: Standard
+    AP_GROUPINFO("DB", 4, ThrusterBowParameterStore, deadband, 30),
+
+    // @Param: MAX
+    // @DisplayName: ThrusterBow MAX
+    // @Description: Maximum manual displacement as a fraction of symmetric travel around MID.
+    // @User: Standard
+    AP_GROUPINFO("MAX", 5, ThrusterBowParameterStore, maximum, 1),
+
+    // @Param: SLEW
+    // @DisplayName: ThrusterBow SLEW
+    // @Description: Manual slew in symmetric travel fractions per second. Also bounds automatic heading slew.
+    // @User: Standard
+    AP_GROUPINFO("SLEW", 6, ThrusterBowParameterStore, slew, 2),
+
+    // @Param: HDG_EN
+    // @DisplayName: ThrusterBow HDG_EN
+    // @Description: Participate in shared heading hold when enabled and neutral. Independent of VSPs.
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Standard
+    AP_GROUPINFO("HDG_EN", 7, ThrusterBowParameterStore, heading_enable, 0),
+
+    // @Param: HDG_SIGN
+    // @DisplayName: ThrusterBow HDG_SIGN
+    // @Description: PWM direction for positive heading demand; calibrate for this installation.
+    // @Values: -1:Negative,1:Positive
+    // @User: Standard
+    AP_GROUPINFO("HDG_SIGN", 8, ThrusterBowParameterStore, heading_sign, 1),
+
+    // @Param: HDG_MAX
+    // @DisplayName: ThrusterBow HDG_MAX
+    // @Description: Symmetric travel fraction at unit heading demand. Must not exceed MAX. VHDG_MAX further limits the shared demand.
+    // @User: Standard
+    AP_GROUPINFO("HDG_MAX", 9, ThrusterBowParameterStore, heading_maximum, 0.3),
+
     AP_GROUPEND
 };
 
 const AP_Param::GroupInfo ThrusterSternParameterStore::var_info[] = {
     // @Param: MID
     // @DisplayName: Stern thruster midpoint
-    // @Description: Midpoint reserved for stern thruster control logic.
+    // @Description: Neutral and stop pulse for stern thruster, 1000..2000 us before final PWM scaling.
     // @Units: us
     // @User: Standard
     AP_GROUPINFO("MID", 1, ThrusterSternParameterStore, mid, 1500),
@@ -114,6 +159,51 @@ const AP_Param::GroupInfo ThrusterSternParameterStore::var_info[] = {
     // @Description: Distance reserved for stern thruster control logic.
     // @User: Standard
     AP_GROUPINFO("DST", 2, ThrusterSternParameterStore, dst, 0),
+
+    // @Param: ENABLE
+    // @DisplayName: ThrusterStern ENABLE
+    // @Description: Master enable. Disabled sends MID; enabling requires a valid neutral input.
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Standard
+    AP_GROUPINFO("ENABLE", 3, ThrusterSternParameterStore, enable, 0),
+
+    // @Param: DB
+    // @DisplayName: ThrusterStern DB
+    // @Description: Manual neutral deadband around MID in microseconds.
+    // @User: Standard
+    AP_GROUPINFO("DB", 4, ThrusterSternParameterStore, deadband, 30),
+
+    // @Param: MAX
+    // @DisplayName: ThrusterStern MAX
+    // @Description: Maximum manual displacement as a fraction of symmetric travel around MID.
+    // @User: Standard
+    AP_GROUPINFO("MAX", 5, ThrusterSternParameterStore, maximum, 1),
+
+    // @Param: SLEW
+    // @DisplayName: ThrusterStern SLEW
+    // @Description: Manual slew in symmetric travel fractions per second. Also bounds automatic heading slew.
+    // @User: Standard
+    AP_GROUPINFO("SLEW", 6, ThrusterSternParameterStore, slew, 2),
+
+    // @Param: HDG_EN
+    // @DisplayName: ThrusterStern HDG_EN
+    // @Description: Participate in shared heading hold when enabled and neutral. Independent of VSPs.
+    // @Values: 0:Disabled,1:Enabled
+    // @User: Standard
+    AP_GROUPINFO("HDG_EN", 7, ThrusterSternParameterStore, heading_enable, 0),
+
+    // @Param: HDG_SIGN
+    // @DisplayName: ThrusterStern HDG_SIGN
+    // @Description: PWM direction for positive heading demand; calibrate for this installation.
+    // @Values: -1:Negative,1:Positive
+    // @User: Standard
+    AP_GROUPINFO("HDG_SIGN", 8, ThrusterSternParameterStore, heading_sign, 1),
+
+    // @Param: HDG_MAX
+    // @DisplayName: ThrusterStern HDG_MAX
+    // @Description: Symmetric travel fraction at unit heading demand. Must not exceed MAX. VHDG_MAX further limits the shared demand.
+    // @User: Standard
+    AP_GROUPINFO("HDG_MAX", 9, ThrusterSternParameterStore, heading_maximum, 0.3),
 
     AP_GROUPEND
 };

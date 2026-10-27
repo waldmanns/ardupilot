@@ -109,6 +109,7 @@ def run(binary):
 
                 override(ch1=1690)
                 wait_for('RC_CHANNELS', lambda m: m.chan1_raw == 1690)
+                wait_for('SERVO_OUTPUT_RAW', lambda m: m.servo1_raw == 1690)
                 deadline = time.monotonic() + 1.3
                 expired = False
                 while time.monotonic() < deadline:
@@ -117,8 +118,12 @@ def run(binary):
                     msg = link.recv_match(type='RC_CHANNELS', blocking=True, timeout=0.1)
                     expired |= msg is not None and msg.chancount == 0
                 assert expired, 'Heartbeat incorrectly kept RC input alive'
-                wait_for('SERVO_OUTPUT_RAW', lambda m: m.servo1_raw == 0)
-                print('PASS: override timeout and output disable while GCS remains connected')
+                # The existing router defaults to HoldLast for an unavailable
+                # source. RC validity expires independently of the retained PWM;
+                # autonomous controllers must not treat this as fresh control.
+                drain()
+                wait_for('SERVO_OUTPUT_RAW', lambda m: m.servo1_raw == 1690)
+                print('PASS: override timeout and existing HoldLast output policy while GCS remains connected')
 
                 parameter('RC_OPTIONS', 3)  # Ignore receiver and MAVLink overrides
                 drain()

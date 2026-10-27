@@ -10,11 +10,11 @@ namespace Vektor2 {
 
 void RollStabilizationBackend::update(const RollStabilizationParameters& params,
                                      const RollDriveParameters& first,
-                                     const RollDriveParameters& second)
+                                     const RollDriveParameters& second, bool permitted)
 {
     // Disabled fast path: no AHRS/gyro reads, clock reads, parameter snapshots,
     // filters, trigonometry or added telemetry. Clear state only on transition.
-    if (!params.enabled()) {
+    if (!params.enabled() || !permitted) {
         if (_controller.enabled()) {
             const RollDriveSettings unused[2] {};
             _controller.update(0, RollSettings{}, unused, RollSample{});

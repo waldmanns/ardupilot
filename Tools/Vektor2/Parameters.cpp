@@ -15,12 +15,31 @@ namespace Vektor2 {
 
 const AP_Param::Info App::var_info[] = {
     APP_SCALAR(format_version, "FORMAT_VERSION", 0),
+    // @Param: LOG_BITMASK
+    // @DisplayName: Vektor log records
+    // @Description: Selects Vektor records in standard binary logs. Use LOG_DISARMED=0 to stop recording and close the current file before formatting the card. Native library metadata and events are controlled by the standard logger.
+    // @Bitmask: 0:Attitude and IMU,1:GPS and position,2:RC and actuators,3:Heading hold,4:Roll stabilization,5:Storage and input status
+    // @User: Standard
+    APP_SCALAR(log_bitmask, "LOG_BITMASK", 63),
+    // @Param: VLOG_HZ
+    // @DisplayName: Vektor log sample rate
+    // @Description: Rate for Vektor sensor, command and controller records. Independent of MAVLink telemetry rates. Zero stops Vektor samples; LOG_DISARMED controls the recording session.
+    // @Units: Hz
+    // @Range: 0 50
+    // @User: Standard
+    APP_SCALAR(log_rate_hz, "VLOG_HZ", 10),
+    GOBJECT(logger, "LOG", AP_Logger),
 #if AP_SIM_ENABLED
     GOBJECT(sitl, "SIM_", SITL::SIM),
 #endif
 
     // Board-level orientation and hardware configuration.
     GOBJECT(board_config, "BRD_", AP_BoardConfig),
+#if HAL_CANMANAGER_ENABLED
+    // @Group: CAN_
+    // @Path: ../../libraries/AP_CANManager/AP_CANManager.cpp
+    GOBJECT(can_mgr, "CAN_", AP_CANManager),
+#endif
 
     // Serial roles and baud rates. In particular:
     //   protocol 2  = MAVLink2
@@ -81,6 +100,11 @@ void App::load_parameters()
     AP_Param::set_default_by_name("SERIAL3_PROTOCOL", 5); // GPS
     AP_Param::set_default_by_name("GPS_AUTO_CONFIG", 1);
     AP_Param::set_default_by_name("GPS1_DELAY_MS", 120); // M10 timing; allows EKF startup without GPS
+    // Vektor has no arming state. Record continuously through the ordinary
+    // disarmed logger and retain normal log download/erase availability.
+    AP_Param::set_default_by_name("LOG_BACKEND_TYPE", 1); // filesystem/SD
+    AP_Param::set_default_by_name("LOG_DISARMED", 1);
+    AP_Param::set_default_by_name("LOG_FILE_MB_FREE", 16);
 #if HAL_NAVEKF3_AVAILABLE
     AP_Param::set_default_by_name("EK3_SRC1_POSXY", 3); // GPS position
     AP_Param::set_default_by_name("EK3_SRC1_VELXY", 3); // GPS velocity

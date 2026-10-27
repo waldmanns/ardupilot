@@ -10,8 +10,16 @@
 class GCS_MAVLINK_Vektor2 : public GCS_MAVLINK {
 public:
     using GCS_MAVLINK::GCS_MAVLINK;
+    void update_storage_information(uint32_t now_ms);
 
 private:
+    MAV_RESULT handle_command_int_packet(const mavlink_command_int_t &packet,
+                                         const mavlink_message_t &msg) override;
+    bool send_storage_information();
+    uint32_t _storage_revision = UINT32_MAX;
+    uint32_t _storage_last_ms = 0;
+    uint32_t _storage_period_ms = 0;
+    bool _storage_pending = false;
     bool handle_guided_request(AP_Mission::Mission_Command &cmd) override
     {
         (void)cmd;
@@ -46,6 +54,7 @@ protected:
 class GCS_Vektor2 : public GCS {
 public:
     using GCS::GCS;
+    void update_storage_information(uint32_t now_ms);
 
 protected:
     GCS_MAVLINK_Vektor2 *new_gcs_mavlink_backend(AP_HAL::UARTDriver &uart) override
@@ -53,9 +62,8 @@ protected:
         return NEW_NOTHROW GCS_MAVLINK_Vektor2(uart);
     }
 
-    // Vektor2 owns a simple IMU-clocked loop and intentionally does not run
-    // AP_Scheduler tasks. The base GCS time-budget guard would therefore
-    // suppress queued MAVLink messages, including HEARTBEAT.
+    // Control/MAVLink run directly in the IMU loop, outside the bounded logger
+    // scheduler task. Its per-task budget is not the MAVLink send budget.
     uint16_t min_loop_time_remaining_for_message_send_us() const override
     {
         return 0;

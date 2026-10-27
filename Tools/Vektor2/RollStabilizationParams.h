@@ -16,6 +16,7 @@ public:
 
 private:
     AP_Int8 enable;
+    AP_Int8 mode;
     AP_Float p;
     AP_Float d;
     AP_Float trim;

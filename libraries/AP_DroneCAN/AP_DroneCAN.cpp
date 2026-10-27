@@ -380,7 +380,9 @@ void AP_DroneCAN::init(uint8_t driver_index, bool enable_filters)
 #if AP_BARO_DRONECAN_ENABLED
     subscribed = subscribed && AP_Baro_DroneCAN::subscribe_msgs(this);
 #endif
+#if AP_BATTERY_UAVCAN_BATTERYINFO_ENABLED
     subscribed = subscribed && AP_BattMonitor_DroneCAN::subscribe_msgs(this);
+#endif
 #if AP_AIRSPEED_DRONECAN_ENABLED
     subscribed = subscribed && AP_Airspeed_DroneCAN::subscribe_msgs(this);
 #endif

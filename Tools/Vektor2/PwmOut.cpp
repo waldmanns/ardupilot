@@ -1,6 +1,10 @@
 #include "PwmOut.h"
 
 #include <AP_HAL/AP_HAL.h>
+#if HAL_ENABLE_DRONECAN_DRIVERS
+#include <AP_DroneCAN/AP_DroneCAN.h>
+#include <SRV_Channel/SRV_Channel.h>
+#endif
 
 extern const AP_HAL::HAL &hal;
 
@@ -49,6 +53,14 @@ const AP_Param::GroupInfo PwmOut::var_info[] = {
 
 void PwmOut::init()
 {
+#if HAL_ENABLE_DRONECAN_DRIVERS
+    // Channels above 16 otherwise default to GPIO in the SRV registry.
+    // The router owns all channel values; no servo-function mixer is used.
+    for (uint8_t channel = 0; channel < NUM_SERVO_CHANNELS; channel++) {
+        SRV_Channels::set_default_function(channel, SRV_Channel::k_none);
+        SRV_Channels::set_output_pwm_chan(channel, 0);
+    }
+#endif
     if (hal.rcout == nullptr) {
         return;
     }
@@ -58,6 +70,23 @@ void PwmOut::init()
     // pulse even though write() accepts and reports the requested value.
     hal.rcout->force_safety_off();
 }
+
+#if HAL_ENABLE_DRONECAN_DRIVERS
+void PwmOut::push_can()
+{
+    // Copy final, calibrated values once after routing. Zero excludes disabled
+    // channels from DroneCAN's active mask instead of retaining stale commands.
+    for (uint8_t channel = 0; channel < NUM_SERVO_CHANNELS; channel++) {
+        SRV_Channels::set_output_pwm_chan(channel, value_us(channel));
+    }
+    for (uint8_t driver = 0; driver < AP::can().get_num_drivers(); driver++) {
+        AP_DroneCAN *can = AP_DroneCAN::get_dronecan(driver);
+        if (can != nullptr) {
+            can->SRV_push_servos();
+        }
+    }
+}
+#endif
 
 bool PwmOut::set_rate_hz(uint8_t channel, uint16_t rate_hz)
 {

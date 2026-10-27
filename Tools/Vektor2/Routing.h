@@ -40,6 +40,7 @@ struct SourceEndpoint {
 enum class ConsumerKind : uint8_t {
     ComponentInput = 0,
     PwmOutput = 1,
+    FunctionInput = 2,
 };
 
 struct ConsumerEndpoint {
@@ -62,6 +63,11 @@ struct ConsumerEndpoint {
     static ConsumerEndpoint pwm(uint8_t channel)
     {
         return ConsumerEndpoint(ConsumerKind::PwmOutput, 0, channel);
+    }
+
+    static ConsumerEndpoint function(uint8_t slot)
+    {
+        return ConsumerEndpoint(ConsumerKind::FunctionInput, 0, slot);
     }
 };
 
@@ -105,6 +111,10 @@ public:
 
     void update(const RcInput& rc, Logic& logic, PwmOut& pwm);
 
+    // Invalid/duplicate parameter routes must inhibit the entire function
+    // consumer, not leave the first accepted producer active.
+    void set_function_errors(uint16_t mask) { _function_error_mask = mask; }
+
 private:
     static uint16_t map_us(uint16_t value,
                            uint16_t in_min,
@@ -121,19 +131,32 @@ private:
     bool sample_source(const SourceEndpoint& source,
                        const RcInput& rc,
                        const Logic& logic,
-                       uint16_t& value_us) const;
+                       uint16_t& value_us, bool* source_valid = nullptr) const;
+    void fill_inputs(ComponentId component, const RcInput& rc, Logic& logic) const;
 
     void disable_mask(uint32_t mask, PwmOut& pwm) const;
+    void prepare_functions(Logic& logic, const Route* (&routes)[Functions::count]);
+    void sample_functions(const RcInput& rc, Logic& logic,
+                          const Route* const (&routes)[Functions::count]) const;
 
     Route _routes[capacity] {};
     RcLossPolicy _rc_loss_policy = RcLossPolicy::HoldLast;
     uint32_t _driven_output_mask = 0;
+    uint32_t _revision = 0;
+    bool _heading_routes_valid = true;
+    uint16_t _function_error_mask = 0;
+    Route _function_routes[Functions::count] {};
+    uint32_t _function_revisions[Functions::count] {};
 
     ComponentId _execution_order[Logic::component_count] {
         ComponentId::VSP1,
         ComponentId::VSP2,
         ComponentId::ThrusterBow,
         ComponentId::ThrusterStern,
+    };
+    ComponentId _paired_execution_order[Logic::component_count] {
+        ComponentId::VSP1, ComponentId::VSP2,
+        ComponentId::ThrusterBow, ComponentId::ThrusterStern,
     };
 };
 

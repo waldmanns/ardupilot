@@ -8,8 +8,11 @@ namespace Vektor2 {
 // This file deliberately depends on neither AHRS nor AP_Param. The controller
 // consumes one timestamped sensor/configuration snapshot per routing cycle;
 // the same code can therefore be exercised on the host without flight hardware.
+enum class RollMode : int8_t { Burst, Continuous };
+
 struct RollSettings {
     bool enabled = false;
+    RollMode mode = RollMode::Burst;
     float p = 0.0f;             // normalized ring displacement / degree
     float d = 0.0f;             // normalized ring displacement / (degree/s)
     float trim_deg = 0.0f;
@@ -17,14 +20,14 @@ struct RollSettings {
     float deadband = 0.02f;     // demand threshold; release at half this value
     uint16_t on_ms = 250;
     uint16_t off_ms = 250;
-    float slew = 1.0f;          // ring radii / second, applied only to correction
+    float slew = 2.0f;          // ring radii / second, applied only to correction
     float maneuver_limit = 0.8f;
 };
 
 struct RollDriveSettings {
     int16_t angle_deg = 0;      // POST-limiter axes: +X=0, +Y=90 degrees
     int8_t sign = 0;            // roll moment from this ray: -1, +1, or 0=unused
-    float maximum = 0.2f;       // maximum added displacement / ring radius
+    float maximum = 0.4f;       // maximum added displacement / ring radius
 };
 
 struct RollSample {
@@ -36,7 +39,7 @@ struct RollSample {
 
 class RollStabilization {
 public:
-    enum class State : uint8_t { Disabled, Waiting, Ready, Burst, Recovery };
+    enum class State : uint8_t { Disabled, Waiting, Ready, Burst, Recovery, Continuous };
     enum Inhibit : uint16_t {
         Attitude = 1U << 0,
         Configuration = 1U << 1,
@@ -48,6 +51,7 @@ public:
         Travel = 1U << 7,
         Baseline = 1U << 8,
         NoDrive = 1U << 9,
+        Heading = 1U << 10,
     };
     struct DriveStatus {
         float command = 0.0f;   // projection of the quantized applied correction
@@ -65,7 +69,7 @@ public:
     // The baseline is the EXISTING mapCoordinates() result. No correction means
     // returning that integer pair verbatim, including on every disabled call.
     Coordinates apply(uint8_t drive, Coordinates baseline, Limiter limits,
-                      bool inputs_valid);
+                      bool inputs_valid, int8_t protected_y = 0);
 
     bool enabled() const { return _settings.enabled; }
     State state() const { return _state; }

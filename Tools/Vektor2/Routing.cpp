@@ -65,6 +65,12 @@ bool Routing::validate_endpoint_pair(const Route& route) const
         }
         break;
     }
+
+    case ConsumerKind::FunctionInput:
+        if (route.consumer.port >= Functions::count) {
+            return false;
+        }
+        break;
     }
 
     return true;
@@ -127,6 +133,59 @@ bool Routing::rebuild_execution_order()
     for (uint8_t i = 0; i < Logic::component_count; i++) {
         _execution_order[i] = order[i];
     }
+
+    // Also compile an order with the VSP pair collapsed to one node. A path
+    // from either VSP into the other makes paired control impossible: preserve
+    // ordinary routing, but inhibit heading hold rather than apply it twice.
+    static_assert(uint8_t(ComponentId::VSP1) == 0 && uint8_t(ComponentId::VSP2) == 1,
+                  "Paired routing requires the first two components to be VSPs");
+    constexpr uint8_t groups = Logic::component_count - 1;
+    bool group_edge[groups][groups] {};
+    uint8_t group_indegree[groups] {};
+    bool group_emitted[groups] {};
+    _heading_routes_valid = true;
+    for (uint8_t from = 0; from < Logic::component_count; from++) {
+        for (uint8_t to = 0; to < Logic::component_count; to++) {
+            if (!edge[from][to]) {
+                continue;
+            }
+            const uint8_t a = from < 2 ? 0 : from - 1;
+            const uint8_t b = to < 2 ? 0 : to - 1;
+            if (a == b) {
+                _heading_routes_valid = false;
+            } else if (!group_edge[a][b]) {
+                group_edge[a][b] = true;
+                group_indegree[b]++;
+            }
+        }
+    }
+    uint8_t paired_count = 0;
+    for (uint8_t step = 0; step < groups && _heading_routes_valid; step++) {
+        int8_t next = -1;
+        for (uint8_t n = 0; n < groups; n++) {
+            if (!group_emitted[n] && group_indegree[n] == 0) {
+                next = int8_t(n);
+                break;
+            }
+        }
+        if (next < 0) {
+            _heading_routes_valid = false;
+            break;
+        }
+        group_emitted[next] = true;
+        if (next == 0) {
+            _paired_execution_order[paired_count++] = ComponentId::VSP1;
+            _paired_execution_order[paired_count++] = ComponentId::VSP2;
+        } else {
+            _paired_execution_order[paired_count++] = ComponentId(next + 1);
+        }
+        for (uint8_t n = 0; n < groups; n++) {
+            if (group_edge[next][n]) {
+                group_indegree[n]--;
+            }
+        }
+    }
+    _revision++;
     return true;
 }
 
@@ -175,6 +234,7 @@ void Routing::clear_route(uint8_t index, PwmOut* pwm)
 
 void Routing::clear_all(PwmOut* pwm)
 {
+    _function_error_mask = 0;
     if (pwm != nullptr) {
         disable_mask(_driven_output_mask, *pwm);
         _driven_output_mask = 0;
@@ -250,14 +310,20 @@ uint16_t Routing::map_us(uint16_t value,
 bool Routing::sample_source(const SourceEndpoint& source,
                             const RcInput& rc,
                             const Logic& logic,
-                            uint16_t& value_us) const
+                            uint16_t& value_us, bool* source_valid) const
 {
+    if (source_valid != nullptr) {
+        *source_valid = false;
+    }
     switch (source.kind) {
     case SourceKind::RcInput:
         if (!rc.valid() || source.port >= rc.channel_count()) {
             return false;
         }
         value_us = rc.channel_us(source.port);
+        if (source_valid != nullptr) {
+            *source_valid = true;
+        }
         return value_us != 0;
 
     case SourceKind::ComponentOutput: {
@@ -266,6 +332,9 @@ bool Routing::sample_source(const SourceEndpoint& source,
             return false;
         }
         value_us = logic.output(id, source.port);
+        if (source_valid != nullptr) {
+            *source_valid = logic.output_valid(id);
+        }
         return value_us != 0;
     }
     }
@@ -282,39 +351,100 @@ void Routing::disable_mask(uint32_t mask, PwmOut& pwm) const
     }
 }
 
+void Routing::fill_inputs(ComponentId component, const RcInput& rc, Logic& logic) const
+{
+    for (uint8_t i = 0; i < capacity; i++) {
+        const Route& route = _routes[i];
+        if (!route.enabled ||
+            route.consumer.kind != ConsumerKind::ComponentInput ||
+            route.consumer.instance != uint8_t(component)) {
+            continue;
+        }
+        uint16_t source_us = 0;
+        bool producer_valid = false;
+        if (!sample_source(route.source, rc, logic, source_us, &producer_valid)) {
+            continue;
+        }
+        const uint16_t routed_us = map_us(source_us,
+                                          route.input_min_us,
+                                          route.input_max_us,
+                                          route.output_min_us,
+                                          route.output_max_us,
+                                          route.reversed);
+        const bool source_valid = source_us >= VSP_PWM_MIN && source_us <= VSP_PWM_MAX && producer_valid;
+        logic.set_input(component, route.consumer.port, routed_us, source_valid);
+    }
+}
+
 void Routing::update(const RcInput& rc, Logic& logic, PwmOut& pwm)
 {
-    logic.begin_cycle();
-
-    // Fill and execute components in dependency order. This allows chains such
-    // as RC -> VSP1 -> VSP2 -> PWM while rejecting cycles at route-set time.
-    for (uint8_t order_index = 0; order_index < Logic::component_count; order_index++) {
-        const ComponentId component = _execution_order[order_index];
-
-        for (uint8_t i = 0; i < capacity; i++) {
-            const Route& route = _routes[i];
-            if (!route.enabled ||
-                route.consumer.kind != ConsumerKind::ComponentInput ||
-                route.consumer.instance != uint8_t(component)) {
-                continue;
-            }
-
-            uint16_t source_us = 0;
-            if (!sample_source(route.source, rc, logic, source_us)) {
-                continue;
-            }
-
-            const uint16_t routed_us = map_us(source_us,
-                                              route.input_min_us,
-                                              route.input_max_us,
-                                              route.output_min_us,
-                                              route.output_max_us,
-                                              route.reversed);
-            logic.set_input(component, route.consumer.port, routed_us);
+    const Route* function_routes[Functions::count] {};
+    prepare_functions(logic, function_routes);
+    uint8_t thruster_routes = 0;
+    bool thruster_dependencies = false;
+    for (const auto& route : _routes) {
+        if (!route.enabled || route.consumer.kind != ConsumerKind::ComponentInput) {
+            continue;
         }
-
-        logic.run(component);
+        if (route.consumer.instance >= uint8_t(ComponentId::ThrusterBow)) {
+            thruster_routes |= 1U << (route.consumer.instance - uint8_t(ComponentId::ThrusterBow));
+        }
+        thruster_dependencies |= route.source.kind == SourceKind::ComponentOutput &&
+            (route.source.instance >= uint8_t(ComponentId::ThrusterBow) ||
+             route.consumer.instance >= uint8_t(ComponentId::ThrusterBow));
     }
+    logic.set_thruster_routes(thruster_routes, _revision);
+    logic.begin_cycle();
+    // Independent thruster assistance needs one coherent input snapshot. Do
+    // not add a feedback path through component chaining; ordinary manual
+    // routing remains available, but heading is inhibited for that topology.
+    const bool independent = logic.heading_enabled() &&
+        (thruster_routes != 0 || !logic.vhdg_params.values().vsp_enabled);
+    const bool use_vsps = logic.vhdg_params.values().vsp_enabled != 0;
+    if (independent && !thruster_dependencies && (!use_vsps || _heading_routes_valid)) {
+        for (uint8_t n = 0; n < Logic::component_count; n++) {
+            fill_inputs(ComponentId(n), rc, logic);
+        }
+        logic.run_heading_group(rc.valid(), _revision);
+        if (!use_vsps) {
+            // VSPs retain their own routing/VRS and cannot inhibit thruster yaw.
+            for (const auto component : _execution_order) {
+                if (uint8_t(component) < uint8_t(ComponentId::ThrusterBow)) {
+                    fill_inputs(component, rc, logic);
+                    logic.run(component);
+                }
+            }
+        }
+    } else if (independent) {
+        logic.update_heading_bypass(rc.valid(), false, _revision);
+        for (const auto component : _execution_order) {
+            fill_inputs(component, rc, logic);
+            logic.run(component);
+        }
+    } else {
+        const bool paired = logic.heading_enabled() && _heading_routes_valid;
+        if (!paired) {
+            logic.update_heading_bypass(rc.valid(), _heading_routes_valid, _revision);
+        }
+        for (uint8_t order_index = 0; order_index < Logic::component_count; order_index++) {
+            const ComponentId component = paired ? _paired_execution_order[order_index] :
+                                                  _execution_order[order_index];
+            if (paired && component == ComponentId::VSP1) {
+                fill_inputs(ComponentId::VSP1, rc, logic);
+                fill_inputs(ComponentId::VSP2, rc, logic);
+                logic.run_vsp_pair(rc.valid(), _revision);
+                order_index++; // the paired order always places VSP2 immediately next
+                continue;
+            }
+
+            fill_inputs(component, rc, logic);
+            logic.run(component);
+        }
+    }
+
+    // All producers have run exactly once. Requests from these samples take
+    // effect at the next begin_cycle(), including feedback from VSP outputs.
+    sample_functions(rc, logic, function_routes);
 
     uint32_t next_output_mask = 0;
 
@@ -351,6 +481,57 @@ void Routing::update(const RcInput& rc, Logic& logic, PwmOut& pwm)
     const uint32_t stale_output_mask = _driven_output_mask & ~next_output_mask;
     disable_mask(stale_output_mask, pwm);
     _driven_output_mask = next_output_mask;
+}
+
+static bool same_route(const Route& a, const Route& b)
+{
+    return a.enabled == b.enabled && a.source.kind == b.source.kind &&
+           a.source.instance == b.source.instance && a.source.port == b.source.port &&
+           a.input_min_us == b.input_min_us && a.input_max_us == b.input_max_us &&
+           a.output_min_us == b.output_min_us && a.output_max_us == b.output_max_us &&
+           a.reversed == b.reversed;
+}
+
+void Routing::prepare_functions(Logic& logic, const Route* (&routes)[Functions::count])
+{
+    for (const auto& route : _routes) {
+        if (route.enabled && route.consumer.kind == ConsumerKind::FunctionInput) {
+            routes[route.consumer.port] = &route;
+        }
+    }
+    FunctionSettings settings[Functions::count];
+    FunctionBinding bindings[Functions::count];
+    logic.vfn_params.values(settings);
+    for (uint8_t n = 0; n < Functions::count; n++) {
+        const Route current = routes[n] == nullptr ? Route{} : *routes[n];
+        if (!same_route(current, _function_routes[n])) {
+            _function_routes[n] = current;
+            _function_revisions[n]++;
+        }
+        bindings[n].revision = _function_revisions[n];
+        bindings[n].routed = routes[n] != nullptr;
+        bindings[n].error = (_function_error_mask & (1U << n)) != 0;
+    }
+    logic.vfn.prepare(AP_HAL::millis(), settings, bindings);
+}
+
+void Routing::sample_functions(const RcInput& rc, Logic& logic,
+                              const Route* const (&routes)[Functions::count]) const
+{
+    FunctionInput inputs[Functions::count];
+    for (uint8_t n = 0; n < Functions::count; n++) {
+        if (routes[n] == nullptr) {
+            continue;
+        }
+        const Route& route = *routes[n];
+        uint16_t source_us = 0;
+        bool producer_valid = false;
+        inputs[n].valid = sample_source(route.source, rc, logic, source_us, &producer_valid) &&
+            producer_valid && source_us >= Functions::minimum_us && source_us <= Functions::maximum_us;
+        inputs[n].pulse_us = map_us(source_us, route.input_min_us, route.input_max_us,
+                                    route.output_min_us, route.output_max_us, route.reversed);
+    }
+    logic.vfn.sample(inputs);
 }
 
 } // namespace Vektor2

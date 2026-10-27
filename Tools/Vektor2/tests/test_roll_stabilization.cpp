@@ -181,7 +181,7 @@ static void hysteresis_and_reversal()
     puts("PASS: demand hysteresis, reversal during a burst, and nonfinite attitude");
 }
 
-static void geometry()
+static void geometry(RollMode mode)
 {
     unsigned checked = 0;
     // Property sweep includes every allowed integer angle, asymmetric centres,
@@ -195,6 +195,7 @@ static void geometry()
                         continue;
                     }
                     Fixture f;
+                    f.settings.mode = mode;
                     f.drives[0].angle_deg = angle;
                     f.sample.rate_dps = -100; // saturate demand
                     f.limits = setupLimiter(100, center, center);
@@ -218,6 +219,7 @@ static void geometry()
         }
     }
     Fixture bad;
+    bad.settings.mode = mode;
     bad.ready();
     const Coordinates outside {1600, 1501};
     assert(same(bad.controller.apply(0, outside, bad.limits, true), outside));
@@ -303,12 +305,105 @@ static float decay(bool enabled)
     return energy;
 }
 
+static void continuous_mode()
+{
+    Fixture f;
+    f.settings.mode = RollMode::Continuous;
+    f.settings.p = 0.1f;
+    f.settings.d = 0;
+    f.settings.slew = 1;
+    f.sample.roll_deg = -5;
+    f.tick(0);
+    assert(same(f.apply(), f.neutral));
+    // No startup recovery, and no periodic gaps beyond the burst deadline.
+    for (uint32_t t = 10; t <= 1200; t += 10) {
+        f.tick(t);
+        assert(f.apply().x_coordinate > 1500);
+        assert(f.controller.state() == RollStabilization::State::Continuous);
+        assert(!(f.controller.inhibited() & RollStabilization::Recovery));
+    }
+    assert(f.controller.status(0).bursts == 0);
+    assert(f.controller.status(0).duty > 0.9f);
+    f.sample.roll_deg = 0;
+    f.tick(1210);
+    assert(f.apply().x_coordinate == 1549); // ordinary loss of demand slews down
+    // A tiny wrong-sign demand cancels even that deadband tail.
+    f.sample.roll_deg = 0.01f;
+    f.tick(1220);
+    assert(same(f.apply(), f.neutral));
+    f.sample.roll_deg = 5;
+    f.tick(1230);
+    assert(same(f.apply(), f.neutral));
+    assert(f.apply(1).x_coordinate == 1499); // other drive ramps from zero
+    f.tick(1240);
+    assert(same(f.controller.apply(1, f.neutral, f.limits, false), f.neutral));
+    f.tick(1250);
+    assert(f.apply(1).x_coordinate == 1499); // no stale amplitude after input loss
+    f.sample.attitude_valid = false;
+    f.tick(1260);
+    assert(same(f.apply(1), f.neutral));
+    f.sample.attitude_valid = true;
+    f.tick(1270);
+    assert(same(f.apply(1), f.neutral)); // clean reacquisition
+    f.tick(1280);
+    assert(f.apply(1).x_coordinate == 1499);
+    f.settings.mode = RollMode::Burst;
+    f.tick(1290);
+    assert(same(f.apply(1), f.neutral));
+    assert(f.controller.state() == RollStabilization::State::Recovery);
+    f.settings.mode = RollMode::Continuous;
+    f.tick(1300);
+    assert(same(f.apply(1), f.neutral));
+    f.tick(1310);
+    assert(f.apply(1).x_coordinate == 1499);
+    f.settings.enabled = false;
+    f.tick(1320);
+    assert(same(f.apply(1), f.neutral));
+    f.settings.enabled = true;
+    f.settings.mode = static_cast<RollMode>(2);
+    f.tick(1330);
+    assert(f.controller.inhibited() & RollStabilization::Configuration);
+    Fixture limits;
+    limits.settings.mode = RollMode::Continuous;
+    limits.drives[0].angle_deg = 90;
+    limits.ready();
+    assert(limits.apply().y_coordinate > 1500);
+    limits.tick(110);
+    assert(same(limits.controller.apply(0, limits.neutral, limits.limits, true, -1), limits.neutral));
+    assert(limits.controller.inhibited() & RollStabilization::Heading);
+    limits.tick(120);
+    Coordinates edge {1600, 1500};
+    assert(same(limits.controller.apply(0, edge, limits.limits, true), edge));
+    limits.tick(230); // a loop gap still hard-stops continuous correction
+    assert(same(limits.apply(), limits.neutral));
+    assert(limits.controller.inhibited() & RollStabilization::Timing);
+
+    Fixture tail;
+    tail.settings.mode = RollMode::Continuous;
+    tail.settings.p = 0.1f;
+    tail.settings.d = 0;
+    tail.settings.slew = 1;
+    tail.sample.roll_deg = -5;
+    tail.ready();
+    assert(tail.apply().x_coordinate == 1510);
+    tail.sample.roll_deg = 0;
+    for (uint32_t t = 110; t <= 220; t += 10) {
+        tail.tick(t);
+        tail.apply();
+    }
+    assert(tail.controller.state() == RollStabilization::State::Ready);
+    assert(tail.controller.status(0).command == 0);
+    printf("PASS: continuous delivery, ramp-down, reversal, loss, mode edits and disable\n");
+}
+
 int main()
 {
+    continuous_mode();
     disabled_equivalence();
     signs_timing_and_input();
     hysteresis_and_reversal();
-    geometry();
+    geometry(RollMode::Burst);
+    geometry(RollMode::Continuous);
     live_maneuver_and_configuration();
     const float uncontrolled = decay(false);
     const float controlled = decay(true);

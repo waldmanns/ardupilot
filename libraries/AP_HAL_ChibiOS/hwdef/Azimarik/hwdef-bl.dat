@@ -1,0 +1,28 @@
+# AZIMARIK ArduPilot bootloader hardware definition, bring-up draft.
+# Matches 128-KiB application offset in hwdef.dat.
+MCU STM32H7xx STM32H743xx
+APJ_BOARD_ID 9999
+OSCILLATOR_HZ 8000000
+FLASH_SIZE_KB 2048
+FLASH_RESERVE_START_KB 0
+FLASH_BOOTLOADER_LOAD_KB 128
+STM32_ST_USE_TIMER 12
+define CH_CFG_ST_RESOLUTION 16
+
+# Flash/bootload over USB-C and USART2 TELEM1 on J2.
+SERIAL_ORDER OTG1 USART2
+PA11 OTG_FS_DM OTG1
+PA12 OTG_FS_DP OTG1
+PD5 USART2_TX USART2
+PD6 USART2_RX USART2
+PA13 JTMS-SWDIO SWD
+PA14 JTCK-SWCLK SWD
+
+# Hold attached SPI devices deselected while bootloader runs.
+PA4 SDCARD_CS CS
+PA8 BMI088_A_CS CS
+PD13 BMI088_G_CS CS
+
+# Green LED as simple bootloader diagnostic, active high.
+PC5 LED_BOOTLOADER OUTPUT LOW
+define HAL_LED_ON 1

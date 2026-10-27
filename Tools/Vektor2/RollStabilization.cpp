@@ -47,7 +47,7 @@ Coordinates displaced(Coordinates base, float amplitude, float x, float y, float
 
 bool RollStabilization::valid(const RollSettings& s, const RollDriveSettings (&drives)[2])
 {
-    if (!in_range(s.p, 0, 10) || !in_range(s.d, 0, 10) ||
+    if ((s.mode != RollMode::Burst && s.mode != RollMode::Continuous) || !in_range(s.p, 0, 10) || !in_range(s.d, 0, 10) ||
         !in_range(s.trim_deg, -45, 45) || !in_range(s.filter_hz, 0.1f, 20) ||
         !in_range(s.deadband, 0, 0.5f) || !in_range(s.slew, 0.01f, 100) ||
         !in_range(s.maneuver_limit, 0.01f, 1) ||
@@ -69,7 +69,7 @@ bool RollStabilization::changed(const RollSettings& s, const RollDriveSettings (
 {
     // Compare fields, not struct padding. Live edits must not rotate an ongoing
     // burst or apply a newly changed gain to stale filter/slew state.
-    if (s.enabled != _settings.enabled || different(s.p, _settings.p) || different(s.d, _settings.d) ||
+    if (s.enabled != _settings.enabled || s.mode != _settings.mode || different(s.p, _settings.p) || different(s.d, _settings.d) ||
         different(s.trim_deg, _settings.trim_deg) || different(s.filter_hz, _settings.filter_hz) ||
         different(s.deadband, _settings.deadband) || s.on_ms != _settings.on_ms ||
         s.off_ms != _settings.off_ms || different(s.slew, _settings.slew) ||
@@ -90,6 +90,9 @@ void RollStabilization::stop()
     if (_state == State::Burst) {
         _recovery_ms = _now_ms;
         _state = State::Recovery;
+    }
+    if (_state == State::Continuous) {
+        _state = State::Ready;
     }
     _amplitude = 0;
     _burst_drive = -1;
@@ -188,7 +191,8 @@ void RollStabilization::update(uint32_t now_ms, const RollSettings& settings,
         _rate = sample.rate_dps;
         _filter_ready = true;
         _recovery_ms = now_ms;
-        _state = State::Recovery;
+        _state = settings.mode == RollMode::Continuous ? State::Ready : State::Recovery;
+        _dt = 0; // reacquisition never applies a correction on its first sample
     } else {
         const float tau = 1.0f / (2.0f * pi * settings.filter_hz);
         _rate += (_dt / (tau + _dt)) * (sample.rate_dps - _rate);
@@ -213,6 +217,17 @@ void RollStabilization::update(uint32_t now_ms, const RollSettings& settings,
         _inhibited |= Deadband;
     }
 
+    if (_state == State::Continuous) {
+        // Allow a smooth tail only while demand has not reversed. Even a
+        // sub-deadband reversal must immediately remove the old correction.
+        if (!_demand_active && _burst_drive >= 0 &&
+            drives[_burst_drive].sign * _demand >= 0) {
+            _selected = _burst_drive;
+        } else if (_selected != _burst_drive) {
+            stop();
+        }
+    }
+
     // A pulse is not latched to the old sign or intensity. Stop at reversal,
     // loss of demand or the hard on-time bound. The shared timer prevents the
     // other VSP from bypassing mandatory maneuver-only time on the next tick.
@@ -230,7 +245,7 @@ void RollStabilization::update(uint32_t now_ms, const RollSettings& settings,
 }
 
 Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter limits,
-                                    bool inputs_valid)
+                                    bool inputs_valid, int8_t protected_y)
 {
     // This check precedes EVERY calculation and output modification. VRS off
     // preserves even legacy edge cases rather than silently "fixing" them.
@@ -268,6 +283,12 @@ Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter li
     const float angle = _drives[drive].angle_deg * (pi / 180.0f);
     const float ux = cosf(angle);
     const float uy = sinf(angle);
+    if (_selected == int8_t(drive) && protected_y * uy < -1.0e-6f) {
+        diag.limited |= Heading;
+        _inhibited |= Heading;
+        stop();
+        return base;
+    }
     const float radius = float(limits.radius);
     const float mx = (base.x_coordinate - limits.x_offset) / radius;
     const float my = (base.y_coordinate - limits.y_offset) / radius;
@@ -288,7 +309,7 @@ Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter li
     }
     diag.headroom = fmaxf(0, headroom);
     if (_selected != int8_t(drive) || _dt <= 0 ||
-        (_state != State::Ready && _state != State::Burst)) {
+        (_state != State::Ready && _state != State::Burst && _state != State::Continuous)) {
         return base;
     }
 
@@ -297,7 +318,7 @@ Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter li
     // geometric headroom (an opposing correction may have ample headroom).
     const float priority = bounded(1 - sqrtf(norm2) / _settings.maneuver_limit, 0, 1);
     const float authority = _drives[drive].maximum * priority;
-    const float requested = fminf(fabsf(_demand), authority);
+    const float requested = _demand_active ? fminf(fabsf(_demand), authority) : 0;
     if (priority < 1) {
         diag.limited |= Maneuver;
     }
@@ -306,16 +327,18 @@ Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter li
     }
     _inhibited |= diag.limited;
     const float target = fminf(requested, headroom);
-    if (target <= 0) {
+    if (target <= 0 && (_state != State::Continuous || headroom <= 0 || authority <= 0)) {
         stop();
         return base;
     }
     if (_state == State::Ready) {
-        _state = State::Burst;
+        _state = _settings.mode == RollMode::Continuous ? State::Continuous : State::Burst;
         _burst_ms = _now_ms;
         _burst_drive = int8_t(drive);
         _amplitude = 0;
-        diag.bursts++;
+        if (_state == State::Burst) {
+            diag.bursts++;
+        }
     }
 
     const float step = _settings.slew * _dt;
@@ -324,6 +347,10 @@ Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter li
     // slow ramp-down when the pilot suddenly moves the rod or needs priority.
     _amplitude = fminf(_amplitude, fminf(headroom, authority));
 
+    if (_amplitude <= 0) {
+        stop();
+        return base;
+    }
     Coordinates result = displaced(base, _amplitude, ux, uy, radius);
     if (!inside(result, limits)) {
         // Rounding both coordinates can cross the ring even though the float

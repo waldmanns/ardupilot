@@ -10,15 +10,18 @@
 #include "RouteParameters.h"
 #include "Routing.h"
 #include "Telemetry.h"
+#include "Storage.h"
 
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Baro/AP_Baro.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
+#include <AP_CANManager/AP_CANManager.h>
 #include <AP_Compass/AP_Compass.h>
 #include <AP_GPS/AP_GPS.h>
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/utility/RingBuffer.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
+#include <AP_Logger/AP_Logger.h>
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <SRV_Channel/SRV_Channel.h>
@@ -41,6 +44,9 @@ public:
     // not a vehicle base class. Future routing code can consume these without
     // creating another global framework.
     AP_BoardConfig board_config;
+#if HAL_CANMANAGER_ENABLED
+    AP_CANManager can_mgr;
+#endif
     AP_Int16 format_version;
     Compass compass;
     AP_SerialManager serial_manager;
@@ -60,10 +66,17 @@ public:
     NavigationParameters navigation;
     VspTelemetry vsp_telemetry;
     ThrusterTelemetry thruster_telemetry;
+    HeadingTelemetry heading_telemetry;
+    FunctionTelemetry function_telemetry;
+    AP_Logger logger;
+    AP_Int32 log_bitmask;
+    AP_Int16 log_rate_hz;
+    Storage storage;
 
     // ChibiOS RCOutput currently asks SRV_Channels whether output pins were
     // reassigned as GPIO/alarm during hal.rcout->init(). This object exists
-    // only to satisfy that HAL registry contract. Vektor2 does not call
+    // to satisfy that HAL registry contract and provide final channel PWM to
+    // DroneCAN on CAN-capable boards. Vektor2 does not call
     // SRV_Channels::init(), register SERVO parameters, or use servo functions.
     SRV_Channels _rcout_registry;
 #if HAL_GCS_ENABLED
@@ -79,6 +92,9 @@ private:
     void report_gps_diagnostics(uint32_t now_ms);
     void report_ekf_startup(uint32_t now_ms);
     void report_rc_protocol(uint32_t now_ms);
+    void init_logging();
+    void logging_task();
+    uint32_t _last_log_ms = 0;
 
     AP_Param param_loader{var_info};
 

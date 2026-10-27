@@ -183,7 +183,11 @@ void AP_Logger::end_log_transfer()
 {
     transfer_activity = TransferActivity::IDLE;
     _log_sending_link = nullptr;
-    backends[0]->end_log_transfer();
+    // A GCS may send LOG_REQUEST_END even when LOG_BACKEND_TYPE=0 or no
+    // requested backend is compiled in. There is no transfer to close then.
+    if (_next_backend != 0) {
+        backends[0]->end_log_transfer();
+    }
 }
 
 /**

@@ -32,7 +32,7 @@ static constexpr uint8_t max_pwm_channels = 32;
 static constexpr uint16_t default_pwm_rate_hz = 50;
 
 // Fixed-capacity signal routing table. Routes can connect RC inputs and logic
-// component outputs to component inputs or PWM outputs. This is route capacity,
+// component outputs to component inputs, function inputs or PWM outputs. This is route capacity,
 // not a claim that every board exposes 32 physical PWM channels.
 static constexpr uint8_t max_routes = 32;
 static constexpr uint16_t rc_input_timeout_ms = 500;

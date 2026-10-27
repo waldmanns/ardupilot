@@ -5,7 +5,7 @@ namespace Vektor2 {
 const AP_Param::GroupInfo RollStabilizationParameters::var_info[] = {
     // @Param: ENABLE
     // @DisplayName: VSP roll stabilization enable
-    // @Description: Enables additive fixed-vector roll bursts after each VSP ring limiter. Zero bypasses all VRS output changes and VRS telemetry. This application has no arming state. Configure drive angles/effect signs and tune gains before enabling.
+    // @Description: Enables additive fixed-vector roll correction after each VSP ring limiter. Zero bypasses all VRS output changes and VRS telemetry. This application has no arming state. Configure drive angles/effect signs and tune gains before enabling.
     // @Values: 0:Disabled,1:Enabled
     // @User: Standard
     AP_GROUPINFO("ENABLE", 1, RollStabilizationParameters, enable, 0),
@@ -49,7 +49,7 @@ const AP_Param::GroupInfo RollStabilizationParameters::var_info[] = {
 
     // @Param: ON_MS
     // @DisplayName: Maximum roll burst duration
-    // @Description: Maximum correction window including amplitude ramps. Maneuvering remains active throughout. Demand loss or reversal ends the window early. No catch-up bursts are queued.
+    // @Description: Burst mode only. Maximum correction window including amplitude ramps. Maneuvering remains active throughout. Demand loss or reversal ends the window early. No catch-up bursts are queued.
     // @Units: ms
     // @Range: 20 10000
     // @User: Standard
@@ -57,7 +57,7 @@ const AP_Param::GroupInfo RollStabilizationParameters::var_info[] = {
 
     // @Param: OFF_MS
     // @DisplayName: Minimum interval without roll correction
-    // @Description: Shared maneuver-only interval after every burst, including sign reversals. Also applies after enabling, configuration edits and recovery from invalid sensor/control input.
+    // @Description: Burst mode only. Shared maneuver-only interval after every burst, including sign reversals. Also applies after enabling, configuration edits and recovery from invalid sensor/control input.
     // @Units: ms
     // @Range: 20 10000
     // @User: Standard
@@ -68,7 +68,7 @@ const AP_Param::GroupInfo RollStabilizationParameters::var_info[] = {
     // @Description: Maximum normal change of added displacement in ring radii per second. Travel/authority limits, disable, loss of input, reversal and burst deadlines override ramp-down immediately.
     // @Range: 0.01 100
     // @User: Advanced
-    AP_GROUPINFO("SLEW", 9, RollStabilizationParameters, slew, 1),
+    AP_GROUPINFO("SLEW", 9, RollStabilizationParameters, slew, 2),
 
     // @Param: MAN_LIM
     // @DisplayName: Maneuvering priority threshold
@@ -76,6 +76,12 @@ const AP_Param::GroupInfo RollStabilizationParameters::var_info[] = {
     // @Range: 0.01 1
     // @User: Standard
     AP_GROUPINFO("MAN_LIM", 10, RollStabilizationParameters, maneuver_limit, 0.8),
+    // @Param: MODE
+    // @DisplayName: Roll correction delivery mode
+    // @Description: Burst uses ON_MS/OFF_MS windows. Continuous tracks demand without burst/recovery timers, slews normal changes and removes wrong-sign corrections immediately. Live mode changes reset delivery and filter state.
+    // @Values: 0:Burst,1:Continuous
+    // @User: Standard
+    AP_GROUPINFO("MODE", 11, RollStabilizationParameters, mode, 0),
     AP_GROUPEND
 };
 
@@ -100,7 +106,7 @@ const AP_Param::GroupInfo RollDriveParameters::var_info[] = {
     // @Description: Maximum correction displacement divided by this drive's existing ring radius. Maneuvering priority and available travel can reduce it further. This is rod displacement, not measured thrust. Integer PWM quantizes coordinates to microseconds.
     // @Range: 0 1
     // @User: Standard
-    AP_GROUPINFO("MAX", 3, RollDriveParameters, maximum, 0.2),
+    AP_GROUPINFO("MAX", 3, RollDriveParameters, maximum, 0.4),
     AP_GROUPEND
 };
 
@@ -108,6 +114,7 @@ RollSettings RollStabilizationParameters::values() const
 {
     RollSettings result;
     result.enabled = enabled();
+    result.mode = static_cast<RollMode>(mode.get());
     result.p = p.get();
     result.d = d.get();
     result.trim_deg = trim.get();

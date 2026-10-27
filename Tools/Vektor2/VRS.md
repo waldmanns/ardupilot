@@ -1,6 +1,6 @@
 # Additive VSP roll stabilization
 
-VRS adds short, fixed-direction control-rod corrections to the maneuvering
+VRS adds burst or continuous fixed-direction control-rod corrections to the maneuvering
 command **after** each VSP's existing `mapCoordinates()` ring limiter and angle
 correction. Maneuvering continues during a burst. RPM passes through unchanged.
 
@@ -9,6 +9,9 @@ X/Y/RPM outputs, original named-float telemetry only, and no VRS AHRS reads or
 filter/geometry processing. Disabling during a burst removes the correction on
 the next routing cycle, with no ramp-down tail. Existing parameter storage IDs
 and routing behavior are unchanged.
+
+When a [VFN function](VFN.md) selects VRS, its aggregated runtime request
+also gates VRS_ENABLE. With no such assignment, master-enable behavior is unchanged.
 
 ## Direction and roll effect
 
@@ -87,9 +90,27 @@ amplitude changes obey SLEW; disable, invalid input, lost attitude, sign reversa
 the pulse deadline and reduced physical/priority limits override ramp-down
 immediately. Small corrections below PWM resolution may produce no rod movement.
 
+## Delivery modes
+
+`VRS_MODE=0` retains Burst mode (the default). `VRS_MODE=1` selects Continuous:
+correction tracks demand without ON_MS/OFF_MS windows. Those parameters retain
+range validation but do not time continuous delivery. Normal demand reductions,
+including entry into the deadband, ramp down using SLEW. A sign reversal removes
+the old correction immediately; the other drive ramps from zero. Disable, invalid
+input, heading priority and travel/authority constraints override ramp-down.
+Enabling, mode changes and sensor recovery start with a zero-correction sample.
+The burst counter counts only bursts; duty still reports actual command activity.
+
+New defaults double maximum correction from 0.2 to 0.4 ring radius and slew from
+1 to 2 radii/second. With a 25 us ring, the neutral maximum is now approximately
+10 us rather than 5 us, before downstream scaling. Explicitly saved values are
+not overwritten. VRS_ENABLE, P, D and drive effect signs remain zero until
+configured; these authority defaults are not a vessel tune. Ring geometry, RPM
+passthrough and maneuver-priority settings are unchanged.
+
 ## Parameters
 
-There are 16 new parameters. Defaults are commissioning values, not a vessel tune.
+There are 17 VRS parameters. Defaults are commissioning values, not a vessel tune.
 The feature, both gains and both drive effect signs start disabled/zero.
 
 | Parameter | Default | Meaning |
@@ -100,18 +121,19 @@ The feature, both gains and both drive effect signs start disabled/zero.
 | `VRS_TRIM` | 0 | Target roll angle in degrees |
 | `VRS_FILT_HZ` | 2 | Rate low-pass cutoff in Hz |
 | `VRS_DB` | 0.02 | Absolute normalized demand threshold |
+| `VRS_MODE` | 0 | 0 Burst, 1 Continuous |
 | `VRS_ON_MS` | 250 | Maximum burst window, milliseconds |
 | `VRS_OFF_MS` | 250 | Minimum shared correction-free interval, milliseconds |
-| `VRS_SLEW` | 1 | Normal correction slew, ring radii/second |
+| `VRS_SLEW` | 2 | Normal correction slew, ring radii/second |
 | `VRS_MAN_LIM` | 0.8 | Maneuvering fraction at which VRS fully yields |
 | `VSP1_RS_ANG`, `VSP2_RS_ANG` | 0 | Fixed post-limiter correction angle, 0..359 degrees |
 | `VSP1_RS_SIGN`, `VSP2_RS_SIGN` | 0 | Physical roll effect, -1/0/+1 |
-| `VSP1_RS_MAX`, `VSP2_RS_MAX` | 0.2 | Maximum added displacement as a fraction of ring radius |
+| `VSP1_RS_MAX`, `VSP2_RS_MAX` | 0.4 | Maximum added displacement as a fraction of ring radius |
 
 An invalid control parameter inhibits VRS instead of silently clamping it.
-Live changes to these parameters cancel an ongoing burst, reset the filter and
-require a new OFF_MS interval. On enabling or recovery from invalid input, VRS
-also waits OFF_MS before its first correction.
+Live changes cancel correction and reset the filter. Burst mode requires a new
+OFF_MS interval after edits, enabling or recovery from invalid input. Continuous
+mode starts from zero on the first valid sample and ramps on subsequent samples.
 
 The application has no arming state. VRS requires valid fresh EKF attitude,
 healthy/fresh INS, a valid RC/override source, and valid routed X/Y/RPM input pulse
@@ -138,7 +160,7 @@ All new values use the existing nonblocking `NAMED_VALUE_FLOAT` transport:
 | `RS_ROLL` | Roll angle used by the controller, degrees |
 | `RS_RATE` | Filtered body X angular rate, degrees/second |
 | `RS_REQ` | Signed normalized PD demand |
-| `RS_STATE` | 0 disabled, 1 waiting for valid input/configuration, 2 ready, 3 burst, 4 recovery |
+| `RS_STATE` | 0 disabled, 1 waiting for valid input/configuration, 2 ready, 3 burst, 4 recovery, 5 continuous |
 | `RS_INHIB` | Combined inhibition/limiting bitmask below |
 | `V1_RS_CMD`, `V2_RS_CMD` | Applied integer correction projected on its ray, divided by ring radius |
 | `V1_RS_HRM`, `V2_RS_HRM` | Available geometric/endpoint headroom in ring radii |
@@ -159,6 +181,11 @@ Flag values are exact small integers even in a named float:
 | 128 | Ring travel, PWM endpoints or final integer rounding limit correction |
 | 256 | Invalid baseline geometry, radius or centre |
 | 512 | No configured drive can produce the requested roll effect |
+| 1024 | VRS ray would oppose an applied VHDG heading correction |
+
+When optional [heading hold](VHDG.md) applies a Y correction, it receives
+priority: VRS uses the remaining ring travel and yields if its ray would oppose
+that Y addition. Heading hold disabled/manual/waiting retains normal VRS behavior.
 
 These are commands and controller diagnostics, not measured thrust or shaft RPM.
 Roll/rate are zeroed while inputs/configuration are invalid; consult RS_INHIB.

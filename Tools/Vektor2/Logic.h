@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ComponentParameters.h"
+#include "FunctionParameters.h"
+#include "HeadingHoldBackend.h"
 #include "RollStabilizationBackend.h"
 
 #include <AP_Param/AP_Param.h>
@@ -39,11 +41,17 @@ public:
     static const AP_Param::GroupInfo var_info[];
 
     void begin_cycle();
+    void set_thruster_routes(uint8_t mask, uint32_t revision);
+    void run_heading_group(bool controls_valid, uint32_t route_revision);
+    const ThrusterControl& thruster(uint8_t n) const { return _thrusters[n]; }
     void run(ComponentId id);
+    void run_vsp_pair(bool controls_valid, uint32_t route_revision);
+    void update_heading_bypass(bool controls_valid, bool routes_valid, uint32_t route_revision);
 
-    bool set_input(ComponentId id, uint8_t port, uint16_t value_us);
+    bool set_input(ComponentId id, uint8_t port, uint16_t value_us, bool source_valid = true);
     uint16_t input(ComponentId id, uint8_t port) const;
     uint16_t output(ComponentId id, uint8_t port) const;
+    bool output_valid(ComponentId id) const;
 
     static const ComponentDefinition& definition(ComponentId id);
     static bool valid(ComponentId id)
@@ -62,6 +70,13 @@ public:
     AP_Int16 thr_tel_hz;
     RollStabilizationParameters vrs_params;
     RollStabilizationBackend vrs;
+    HeadingHoldParameters vhdg_params;
+    HeadingHoldBackend vhdg;
+    FunctionParameters vfn_params;
+    Functions vfn;
+
+    bool roll_enabled() const { return _roll_enabled; }
+    bool heading_enabled() const { return _heading_enabled; }
 
     uint16_t vsp_configuration() const
     {
@@ -72,11 +87,18 @@ private:
     struct Runtime {
         uint16_t inputs[max_inputs] {};
         uint16_t outputs[max_outputs] {};
+        bool sources_valid[max_inputs] {};
     };
 
     const void* parameter_store(ComponentId id) const;
 
     Runtime _runtime[component_count] {};
+    ThrusterControl _thrusters[2];
+    uint8_t _thruster_routes = 0;
+    uint32_t _thruster_route_revision = 0;
+    HeadingAuxiliary heading_auxiliary() const;
+    bool _roll_enabled = false;
+    bool _heading_enabled = false;
 };
 
 } // namespace Vektor2

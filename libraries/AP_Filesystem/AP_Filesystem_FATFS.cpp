@@ -837,6 +837,8 @@ void AP_Filesystem_FATFS::format_handler(void)
     GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Formatting SDCard");
     uint8_t *buf = (uint8_t *)hal.util->malloc_type(FF_MAX_SS, AP_HAL::Util::MEM_DMA_SAFE);
     if (buf == nullptr) {
+        format_status = FormatStatus::FAILURE;
+        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Format: insufficient memory");
         return;
     }
     // format first disk

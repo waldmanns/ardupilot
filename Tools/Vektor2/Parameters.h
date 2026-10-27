@@ -28,6 +28,10 @@ public:
         k_param_pwm,
         k_param_navigation,
         k_param_rcin,
+        k_param_logger,
+        k_param_log_bitmask,
+        k_param_log_rate_hz,
+        k_param_can_mgr,
     };
 };
 

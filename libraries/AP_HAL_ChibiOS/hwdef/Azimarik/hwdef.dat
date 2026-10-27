@@ -1,0 +1,151 @@
+# AZIMARIK ArduPilot/ChibiOS hardware definition
+# Derived from AZIMARIK.sch and AZIMARIK.brd (Eagle 7.2 XML).
+# BRING-UP DRAFT: NOT FLIGHT-VALIDATED. See README.txt before flashing.
+
+# STM32H743VIT6, LQFP100, 2 MiB flash, 8 MHz external resonator (U9)
+MCU STM32H7xx STM32H743xx
+OSCILLATOR_HZ 8000000
+FLASH_SIZE_KB 2048
+
+# LOCAL DEVELOPMENT PLACEHOLDER; obtain a unique ID from ArduPilot
+# Tools/AP_Bootloader/board_types.txt before distributing firmware.
+APJ_BOARD_ID 9999
+
+# One 128 KiB flash sector reserved for ArduPilot bootloader.
+FLASH_RESERVE_START_KB 128
+STM32_ST_USE_TIMER 12
+define CH_CFG_ST_RESOLUTION 16
+
+# Flight-controller USB-C (J1), and SWD test pads.
+PA11 OTG_FS_DM OTG1
+PA12 OTG_FS_DP OTG1
+PA13 JTMS-SWDIO SWD
+PA14 JTCK-SWCLK SWD
+
+# ArduPilot SERIALx mapping:
+# SERIAL0  USB-C     (OTG1)
+# SERIAL1  TELEM1    (USART2, J2-19/20)
+# SERIAL2  TELEM2    (UART4,  J2-15/16)
+# SERIAL3  TELEM3    (UART5,  J2-17/18)
+# SERIAL4  TELEM4    (UART7,  J2-04/03)
+# SERIAL5  GPS1      (USART1, X2-5/4)
+# SERIAL6  GPS2      (USART3, X4-5/4)
+SERIAL_ORDER OTG1 USART2 UART4 UART5 UART7 USART1 USART3
+
+PD5 USART2_TX USART2
+PD6 USART2_RX USART2
+PC10 UART4_TX UART4
+PC11 UART4_RX UART4
+PC12 UART5_TX UART5
+PD2 UART5_RX UART5
+PE8 UART7_TX UART7
+PE7 UART7_RX UART7
+PB14 USART1_TX USART1
+PB15 USART1_RX USART1
+PD8 USART3_TX USART3
+PD9 USART3_RX USART3
+
+define DEFAULT_SERIAL1_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL2_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL3_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL4_PROTOCOL SerialProtocol_MAVLink2
+define DEFAULT_SERIAL5_PROTOCOL SerialProtocol_GPS
+define DEFAULT_SERIAL6_PROTOCOL SerialProtocol_GPS
+
+# External GPS magnetometers are connected on I2C1 (X2/X4).
+# Internal DPS310 barometer U6 is connected on I2C2.
+I2C_ORDER I2C1 I2C2
+PB6 I2C1_SCL I2C1
+PB7 I2C1_SDA I2C1
+PB10 I2C2_SCL I2C2
+PB11 I2C2_SDA I2C2
+
+# SPI1: microSD card U12 (SPI mode, NOT SDMMC).
+PA5 SPI1_SCK SPI1
+PB4 SPI1_MISO SPI1
+PD7 SPI1_MOSI SPI1
+PA4 SDCARD_CS CS
+
+# SPI2: Bosch BMI088 accelerometer/gyroscope U8.
+PA9 SPI2_SCK SPI2
+PC1 SPI2_MOSI SPI2
+# CRITICAL: U2 physical pad 17 is PC2_C on the LQFP100 package.
+# The logical SPI2 alternate function is PC2, via the MCU's PC2/PC2_C
+# analog switch. Verify that this works on the actual silicon/board.
+PC2 SPI2_MISO SPI2
+PA8 BMI088_A_CS CS
+PD13 BMI088_G_CS CS
+PD14 BMI088_G_DRDY INPUT
+
+# SPI peripherals. Both halves of BMI088 share SCK, MOSI and MISO.
+SPIDEV sdcard SPI1 DEVID1 SDCARD_CS MODE0 400*KHZ 25*MHZ
+SPIDEV bmi088_a SPI2 DEVID1 BMI088_A_CS MODE3 10*MHZ 10*MHZ
+SPIDEV bmi088_g SPI2 DEVID2 BMI088_G_CS MODE3 10*MHZ 10*MHZ
+
+# U8 orientation cannot be established from electrical netlist alone.
+# ROTATION_NONE is a bring-up value, not an orientation calibration.
+IMU BMI088 SPI:bmi088_a SPI:bmi088_g ROTATION_NONE
+
+# U6 SDO is tied to +3.3 V, selecting DPS310 address 0x77.
+BARO DPS310 I2C:1:0x77
+
+# External compass(es) on GPS I2C connector(s), if attached.
+define AP_COMPASS_PROBING_ENABLED 1
+define HAL_I2C_INTERNAL_MASK 2
+
+# CAN1: PD0/PD1 use onboard SN65HVD232D transceiver, X1/X8.
+PD0 CAN1_RX CAN1
+PD1 CAN1_TX CAN1
+# CAN2 is raw 3.3-V logic on J2-09/10; NO onboard transceiver.
+PB12 CAN2_RX CAN2
+PB13 CAN2_TX CAN2
+
+# Eight PWM outputs to J2, in schematic connector order.
+PE9  TIM1_CH1 TIM1 PWM(1) GPIO(50)
+PE11 TIM1_CH2 TIM1 PWM(2) GPIO(51)
+PE13 TIM1_CH3 TIM1 PWM(3) GPIO(52)
+PE14 TIM1_CH4 TIM1 PWM(4) GPIO(53)
+PC6  TIM8_CH1 TIM8 PWM(5) GPIO(54)
+PC7  TIM8_CH2 TIM8 PWM(6) GPIO(55)
+PC8  TIM8_CH3 TIM8 PWM(7) GPIO(56)
+PC9  TIM8_CH4 TIM8 PWM(8) GPIO(57)
+
+# Yellow/green indicator LEDs, both active HIGH (MCU -> R -> LED -> GND).
+PC4 LED_YELLOW OUTPUT LOW GPIO(90)
+PC5 LED_GREEN OUTPUT LOW GPIO(91)
+define AP_NOTIFY_GPIO_LED_2_ENABLED 1
+define HAL_GPIO_A_LED_PIN 90
+define HAL_GPIO_B_LED_PIN 91
+define HAL_GPIO_LED_ON 1
+
+# Auxiliary solder pads, left in input mode for safe bring-up.
+PE5 AUX1 INPUT PULLDOWN GPIO(70)
+PE6 AUX2 INPUT PULLDOWN GPIO(71)
+
+# RPM 1 and 2 via 1-kohm input resistors from X3.
+# GPIOs need RPMx_PIN / RPMx_TYPE configuration by the user.
+PE2 RPM1 INPUT PULLDOWN GPIO(80)
+PE3 RPM2 INPUT PULLDOWN GPIO(81)
+
+# Power-sense header J2: raw analog inputs, NO scaling/dividers on PCB.
+# ADC1 channel 7 = PA7 (voltage); ADC1 channel 15 = PA3 (current).
+PA7 BATT_VOLTAGE_SENS ADC1 SCALE(1)
+PA3 BATT_CURRENT_SENS ADC1 SCALE(1)
+define HAL_BATT_VOLT_PIN 7
+define HAL_BATT_CURR_PIN 15
+# Don't enable automatic battery monitoring until external conditioning,
+# scale, offset, and 0..3.3 V ADC range have been verified.
+
+# H743 has 16 x 128-KiB flash sectors; last two reserved for params.
+define HAL_STORAGE_SIZE 32768
+STORAGE_FLASH_PAGE 14
+
+# FATFS logging using the SPI-attached microSD card.
+define HAL_OS_FATFS_IO 1
+
+# Prefer deterministic sensor / motor peripheral DMA assignment.
+DMA_PRIORITY SPI2* SPI1* TIM1* TIM8*
+DMA_NOSHARE SPI1* SPI2*
+
+# For .abin packaging if supported by the checked-out ArduPilot tree.
+env BUILD_ABIN True
