@@ -369,8 +369,6 @@ static void continuous_mode()
     limits.ready();
     assert(limits.apply().y_coordinate > 1500);
     limits.tick(110);
-    assert(same(limits.controller.apply(0, limits.neutral, limits.limits, true, -1), limits.neutral));
-    assert(limits.controller.inhibited() & RollStabilization::Heading);
     limits.tick(120);
     Coordinates edge {1600, 1500};
     assert(same(limits.controller.apply(0, edge, limits.limits, true), edge));

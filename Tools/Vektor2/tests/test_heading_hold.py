@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run production heading allocation and VRS interaction under host sanitizers."""
+"""Run geometry-independent heading PID and vector mapping under host sanitizers."""
 from pathlib import Path
 import os
 import subprocess
@@ -15,8 +15,7 @@ def main():
             '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
             '-fno-omit-frame-pointer', '-I', str(source),
             str(source / 'tests/test_heading_hold.cpp'),
-            str(source / 'HeadingHold.cpp'), str(source / 'RollStabilization.cpp'),
-            str(source / 'LibVSP.c'), '-o', str(binary)], check=True)
+            str(source / 'HeadingHold.cpp'), str(source / 'VspMapper.cpp'), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
 
 

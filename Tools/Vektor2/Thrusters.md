@@ -43,8 +43,8 @@ inhibits the actuator. If MID itself is invalid, the component falls back to
 
 ## Heading hold
 
-One VHDG PID supplies the shared normalized yaw command. `VHDG_VSP_EN=1` preserves
-the existing paired VSP heading behavior; set **VHDG_VSP_EN=0** for thruster-only
+One VHDG PID supplies the shared normalized yaw command. `VHDG_VSP_EN=1` includes
+the paired vector VSP heading path (both VMODE=1 required); set **VHDG_VSP_EN=0** for thruster-only
 heading. Disabled VSP participation removes VSP input, geometry and saturation
 requirements. VSP manual routing and VRS remain independent.
 
@@ -61,7 +61,7 @@ output inversion. Identical signs are not automatically correct.
 
 Automatic slew respects both VHDG_SLEW and each participating thruster's SLEW.
 The existing anti-windup uses the constrained shared command. With VSP participation,
-VSP ring headroom also constrains that command; thruster-only operation has no VSP
+both VSP vector slew limits also constrain that command; thruster-only operation has no VSP
 saturation dependency. This is fixed mixing, not measured torque allocation.
 
 A valid off-neutral manual input on either enabled thruster releases heading hold,

@@ -56,17 +56,16 @@ static void independent_heading()
     s.p = 0.1f; s.i = 0.1f; s.maximum = 1; s.slew = 100;
     HeadingSample sample;
     sample.attitude_valid = sample.compass_valid = sample.control_valid = true;
-    sample.auxiliary.available = true; sample.auxiliary.slew = 1;
-    HeadingDrive unused[2] {}; // no VSP configuration or valid VSP inputs
-    h.update(0, s, sample, unused);
+    HeadingActuation actuation;
+    actuation.available = true; actuation.slew = 1;
+    h.update(0, s, sample, actuation);
     assert(h.state() == HeadingHold::State::Waiting);
-    h.update(20, s, sample, unused);
+    h.update(20, s, sample, actuation);
     assert(h.state() == HeadingHold::State::Hold);
     sample.heading_deg = 350;
-    h.update(30, s, sample, unused);
+    h.update(30, s, sample, actuation);
     assert(h.command() > 0 && h.command() <= 0.01001f);
     assert(h.integral() == 0); // slew-limited demand cannot wind up
-    assert(h.correction_us(0) == 0 && h.correction_us(1) == 0);
     ThrusterSettings t;
     t.enable = t.heading_enable = 1; t.heading_maximum = 0.4f;
     ThrusterControl bow, stern;
@@ -80,16 +79,16 @@ static void independent_heading()
     stern.update(10, t, false, true, true, 1500);
     stern.apply_heading(0.5f, true);
     assert(stern.output() == 1500 && bow.output() == 1600);
-    sample.auxiliary.manual = true;
-    h.update(40, s, sample, unused);
+    actuation.manual = true;
+    h.update(40, s, sample, actuation);
     assert(h.state() == HeadingHold::State::Manual && h.command() == 0);
-    sample.auxiliary.manual = false;
-    h.update(50, s, sample, unused);
+    actuation.manual = false;
+    h.update(50, s, sample, actuation);
     assert(h.state() == HeadingHold::State::Waiting);
-    h.update(70, s, sample, unused);
+    h.update(70, s, sample, actuation);
     assert(h.state() == HeadingHold::State::Hold && h.target() == 350);
-    sample.auxiliary.available = false;
-    h.update(80, s, sample, unused);
+    actuation.available = false;
+    h.update(80, s, sample, actuation);
     assert(h.state() == HeadingHold::State::Inhibited && h.command() == 0);
     puts("PASS: thruster-only heading without VSPs, signs, limits, anti-windup, manual release and reacquisition");
 }

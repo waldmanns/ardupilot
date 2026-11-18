@@ -5,10 +5,21 @@
 # while still including common transitive support needed by AHRS/EKF3/GCS.
 
 def build(bld):
+    # Waf visits this script even when building another vehicle. Its global
+    # feature exclusions must not affect those vehicle builds.
+    if bld.cmd in ('antennatracker', 'blimp', 'copter', 'heli', 'plane', 'rover', 'sub'):
+        return
+
     # Bootloaders have their own feature configuration. Do not leak application
     # defines (notably HAL_LOGGING_ENABLED) into their shared build environment.
     if bld.env.BOOTLOADER:
         return
+
+    # Read board feature choices before applying application-only overrides.
+    # Include the generated definitions directly, without pulling HAL APIs
+    # into sources that set their own math configuration before HAL headers.
+    if 'AP_HAL_ChibiOS' in bld.env.AP_LIBRARIES:
+        bld.env.CXXFLAGS += ['-include', 'hwdef.h']
 
     # Some SITL features are forced in generated ap_config.h. Override these
     # after that header, for this minimal application and its library objects.
@@ -24,7 +35,6 @@ def build(bld):
     # into Vektor2 while leaving EKF3, GPS, RCProtocol and MAVLink enabled.
     bld.env.DEFINES += [
         'AP_ARMING_ENABLED=0',
-        'AP_MISSION_ENABLED=0',
         'AP_VEHICLE_ENABLED=0',
         'HAL_GCS_ENABLED=1',
         'COMPASS_LEARN_ENABLED=0',

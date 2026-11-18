@@ -76,7 +76,8 @@ const AP_Param::GroupInfo Logic::var_info[] = {
 
     // @Param: VSP_CONF
     // @DisplayName: VSP configuration
-    // @Description: VSP configuration value.
+    // @Description: Vessel layout. VSP1 is port and VSP2 starboard, side by side. AFT places the pair aft; VWT places it toward the center/front. Does not change individual rod mapping.
+    // @Values: 0:Unspecified,1:AFT,2:VWT
     // @Range: 0 10
     // @User: Standard
     AP_GROUPINFO("VSP_CONF", 3, Logic, vsp_conf, 0),
@@ -110,9 +111,14 @@ const AP_Param::GroupInfo Logic::var_info[] = {
 
 void Logic::begin_cycle()
 {
+    _vsp_authority[0] = _vsp_authority[1] = 0;
     // AHRS has already updated. Snapshot once so neither component execution
     // order nor call count can advance the shared roll controller twice.
-    _roll_enabled = vrs_params.enabled() && vfn.permits(Functions::Type::Roll);
+    // Legacy paired rod corrections cannot share ownership with vector control.
+    // Disable their shared state until both drives return to legacy ownership.
+    const bool vector_owned = vsp1_params.vmode.get() != 0 || vsp2_params.vmode.get() != 0 ||
+        _vectors[0].blocks_assistance() || _vectors[1].blocks_assistance();
+    _roll_enabled = !vector_owned && vrs_params.enabled() && vfn.permits(Functions::Type::Roll);
     _heading_enabled = vhdg_params.enabled() && vfn.permits(Functions::Type::Heading);
     vrs.update(vrs_params, vsp1_params.roll, vsp2_params.roll, _roll_enabled);
     for (uint8_t component = 0; component < component_count; component++) {
@@ -159,13 +165,34 @@ void Logic::run(ComponentId id)
         _runtime[index].outputs[0] = _thrusters[n].output();
         return;
     }
-    const ComponentDefinition& def = component_definitions[index];
-    const void* params = parameter_store(id);
-    if (params == nullptr) {
+    finish_vsp(index, prepare_vsp(index));
+}
+
+bool Logic::prepare_vsp(uint8_t drive)
+{
+    auto& runtime = _runtime[drive];
+    const auto settings = drive == 0 ? vsp1_params.vector_settings() : vsp2_params.vector_settings();
+    return _vectors[drive].prepare(AP_HAL::millis(), _thruster_route_revision, settings,
+                                  runtime.inputs[0], runtime.inputs[1],
+                                  runtime.sources_valid[0] && runtime.sources_valid[1]);
+}
+
+void Logic::finish_vsp(uint8_t drive, bool vector_owned, const VspMapper::Vector* heading)
+{
+    auto& runtime = _runtime[drive];
+    if (vector_owned) {
+        const bool assisted = _vectors[drive].apply(runtime.outputs[0], runtime.outputs[1], heading);
+        runtime.outputs[2] = runtime.inputs[2]; // RPM remains independent.
+        _vsp_authority[drive] = _vectors[drive].state() == VspVectorControl::State::Active ? Manual : NeutralGuard;
+        if (assisted) {
+            _vsp_authority[drive] |= AutoHeading;
+        }
         return;
     }
-
-    def.loop(_runtime[index].inputs, _runtime[index].outputs, params, vrs.controller());
+    const auto id = ComponentId(drive);
+    const auto& def = component_definitions[drive];
+    def.loop(runtime.inputs, runtime.outputs, parameter_store(id), vrs.controller());
+    record_vsp_authority(drive);
 }
 
 void Logic::set_thruster_routes(uint8_t mask, uint32_t revision)
@@ -179,9 +206,9 @@ void Logic::set_thruster_routes(uint8_t mask, uint32_t revision)
     _thruster_routes = mask;
 }
 
-HeadingAuxiliary Logic::heading_auxiliary() const
+HeadingActuation Logic::heading_auxiliary() const
 {
-    HeadingAuxiliary result;
+    HeadingActuation result;
     for (const auto& thruster : _thrusters) {
         result.manual |= thruster.manual_override();
         result.revision += thruster.revision();
@@ -200,9 +227,8 @@ void Logic::run_heading_group(bool controls_valid, uint32_t route_revision)
     if (vhdg_params.values().vsp_enabled) {
         run_vsp_pair(controls_valid, route_revision);
     } else {
-        const HeadingDrive unused[2] {};
-        vhdg.update(vhdg_params, unused, controls_valid, true, route_revision,
-                    _heading_enabled, heading_auxiliary());
+        vhdg.update(vhdg_params, heading_auxiliary(), controls_valid, true, route_revision,
+                    _heading_enabled);
     }
     const auto& heading = vhdg.controller();
     for (uint8_t n = 0; n < 2; n++) {
@@ -213,52 +239,62 @@ void Logic::run_heading_group(bool controls_valid, uint32_t route_revision)
 
 void Logic::run_vsp_pair(bool controls_valid, uint32_t route_revision)
 {
-    const auto first = vsp1_params.values();
-    const auto second = vsp2_params.values();
-    // Produce the original geometry ONCE, without VRS. Both routed rod
-    // snapshots are present before the shared heading decision is made.
-    auto& a = _runtime[uint8_t(ComponentId::VSP1)];
-    auto& b = _runtime[uint8_t(ComponentId::VSP2)];
-    Components::vsp1_loop(a.inputs, a.outputs, first);
-    Components::vsp2_loop(b.inputs, b.outputs, second);
-    HeadingDrive drives[2];
-    drives[0].limits = setupLimiter(first.lim, first.x_c, first.y_c);
-    drives[1].limits = setupLimiter(second.lim, second.x_c, second.y_c);
+    const bool managed[2] {prepare_vsp(0), prepare_vsp(1)};
+    const VspVectorControl::Settings settings[2] {vsp1_params.vector_settings(), vsp2_params.vector_settings()};
+    const auto auxiliary = heading_auxiliary();
+    HeadingActuation actuation;
+    actuation.available = true;
+    actuation.manual = auxiliary.manual;
+    actuation.slew = auxiliary.available ? auxiliary.slew : 100;
+    actuation.revision = auxiliary.revision;
+    const auto heading_settings = vhdg_params.values();
     for (uint8_t n = 0; n < 2; n++) {
-        const auto& runtime = _runtime[n];
-        for (uint8_t port = 0; port < 3; port++) {
-            drives[n].inputs[port] = runtime.inputs[port];
+        // The actuator's preparation stage is the sole mapping/settings validator.
+        actuation.configuration_valid &= settings[n].mode == 1 &&
+            _vectors[n].state() != VspVectorControl::State::Invalid;
+        actuation.available &= _vectors[n].heading_ready();
+        actuation.slew = fminf(actuation.slew, settings[n].slew);
+        actuation.revision += _vectors[n].revision();
+        // Both neutral definitions must agree before automatic authority begins.
+        for (uint8_t axis = 0; axis < 2; axis++) {
+            const int32_t offset = int32_t(_runtime[n].inputs[axis]) - 1500;
+            if (input_valid(ComponentId(n), axis) &&
+                (offset < -heading_settings.stick_deadband || offset > heading_settings.stick_deadband ||
+                 offset < -settings[n].deadband_us || offset > settings[n].deadband_us)) {
+                actuation.manual = true;
+            }
         }
-        drives[n].baseline = {runtime.outputs[0], runtime.outputs[1]};
-        drives[n].sources_valid = output_valid(ComponentId(n));
     }
-    vhdg.update(vhdg_params, drives, controls_valid, true, route_revision, _heading_enabled, heading_auxiliary());
+    vhdg.update(vhdg_params, actuation, controls_valid, true, route_revision, _heading_enabled);
     const auto& heading = vhdg.controller();
+    const bool holding = heading.state() == HeadingHold::State::Hold;
+    // One signed yaw effort, positive toward starboard. The mapper owns all
+    // rotor/installation/rod geometry; no rod-Y correction path remains.
+    const VspMapper::Vector commands[2] {{heading.command(), 0}, {-heading.command(), 0}};
     for (uint8_t n = 0; n < 2; n++) {
-        auto& runtime = _runtime[n];
-        const int32_t correction = heading.correction_us(n);
-        Coordinates result = drives[n].baseline;
-        result.y_coordinate += correction;
-        if (auto* roll = vrs.controller()) {
-            const bool valid_inputs = drives[n].sources_valid &&
-                runtime.inputs[0] >= VSP_PWM_MIN && runtime.inputs[0] <= VSP_PWM_MAX &&
-                runtime.inputs[1] >= VSP_PWM_MIN && runtime.inputs[1] <= VSP_PWM_MAX &&
-                runtime.inputs[2] >= VSP_PWM_MIN && runtime.inputs[2] <= VSP_PWM_MAX;
-            // VRS gets the travel left by heading hold. An opposing Y ray
-            // yields instead of undoing an applied heading correction.
-            result = roll->apply(n, result, drives[n].limits, valid_inputs,
-                                 correction > 0 ? 1 : (correction < 0 ? -1 : 0));
-        }
-        runtime.outputs[0] = uint16_t(result.x_coordinate);
-        runtime.outputs[1] = uint16_t(result.y_coordinate);
-        // RPM is still the original component passthrough.
+        finish_vsp(n, managed[n], holding ? &commands[n] : nullptr);
     }
+}
+
+void Logic::record_vsp_authority(uint8_t drive)
+{
+    if (drive >= 2) {
+        return;
+    }
+    const ComponentId id = ComponentId(drive);
+    uint8_t flags = input_valid(id, 0) && input_valid(id, 1) ? Manual : 0;
+    // VRS is additive and intermittent: report only this drive's applied,
+    // quantized correction, not the global enable/request or the other drive.
+    const auto* roll = vrs.controller();
+    if (roll != nullptr && roll->status(drive).command > 1.0e-6f) {
+        flags |= RollAssist;
+    }
+    _vsp_authority[drive] = flags;
 }
 
 void Logic::update_heading_bypass(bool controls_valid, bool routes_valid, uint32_t route_revision)
 {
-    const HeadingDrive unused[2] {};
-    vhdg.update(vhdg_params, unused, controls_valid, routes_valid, route_revision, _heading_enabled);
+    vhdg.update(vhdg_params, HeadingActuation{}, controls_valid, routes_valid, route_revision, _heading_enabled);
 }
 
 bool Logic::output_valid(ComponentId id) const
@@ -272,6 +308,12 @@ bool Logic::output_valid(ComponentId id) const
         }
     }
     return true;
+}
+
+bool Logic::input_valid(ComponentId id, uint8_t port) const
+{
+    return valid(id) && port < definition(id).input_count &&
+        _runtime[uint8_t(id)].sources_valid[port];
 }
 
 bool Logic::set_input(ComponentId id, uint8_t port, uint16_t value_us, bool source_valid)

@@ -245,7 +245,7 @@ void RollStabilization::update(uint32_t now_ms, const RollSettings& settings,
 }
 
 Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter limits,
-                                    bool inputs_valid, int8_t protected_y)
+                                    bool inputs_valid)
 {
     // This check precedes EVERY calculation and output modification. VRS off
     // preserves even legacy edge cases rather than silently "fixing" them.
@@ -283,12 +283,6 @@ Coordinates RollStabilization::apply(uint8_t drive, Coordinates base, Limiter li
     const float angle = _drives[drive].angle_deg * (pi / 180.0f);
     const float ux = cosf(angle);
     const float uy = sinf(angle);
-    if (_selected == int8_t(drive) && protected_y * uy < -1.0e-6f) {
-        diag.limited |= Heading;
-        _inhibited |= Heading;
-        stop();
-        return base;
-    }
     const float radius = float(limits.radius);
     const float mx = (base.x_coordinate - limits.x_offset) / radius;
     const float my = (base.y_coordinate - limits.y_offset) / radius;

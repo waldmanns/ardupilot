@@ -32,6 +32,7 @@ public:
         k_param_log_bitmask,
         k_param_log_rate_hz,
         k_param_can_mgr,
+        k_param_measure_points,
     };
 };
 

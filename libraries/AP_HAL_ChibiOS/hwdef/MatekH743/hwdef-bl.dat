@@ -1,63 +1,28 @@
-# hw definition file for processing by chibios_pins.py
-# for Matek H743-WING bootloader
-
-# MCU class and specific type
+# Vektor Core EVO -- conservative USB ArduPilot bootloader
+# Hardware authority: vektor-core-evo(20261031-140802).kicad_sch
 MCU STM32H7xx STM32H743xx
-
-# board ID. See Tools/AP_Bootloader/board_types.txt
-APJ_BOARD_ID AP_HW_MATEKH743
-
-# crystal frequency, setup to use external oscillator
+# Local testing ID only; must match application and receive allocation.
+APJ_BOARD_ID 7198
 OSCILLATOR_HZ 8000000
-
 FLASH_SIZE_KB 2048
-
-# bootloader starts at zero offset
 FLASH_RESERVE_START_KB 0
-
-# the location where the bootloader will put the firmware
-# the H743 has 128k sectors
 FLASH_BOOTLOADER_LOAD_KB 128
 
-
-# order of UARTs (and USB). Allow bootloading on USB and telem1
-SERIAL_ORDER OTG1 
-
-
-
-# PA10 IO-debug-console
+# USB FS only for predictable first programming and recovery.
+SERIAL_ORDER OTG1
 PA11 OTG_FS_DM OTG1
 PA12 OTG_FS_DP OTG1
-
 PA13 JTMS-SWDIO SWD
 PA14 JTCK-SWCLK SWD
 
-# make sure Vsw is on during bootloader
+# Keep two BMI088 chip-selects and SPI-card chip-select deselected.
+PE4 BMI088_A_CS CS
+PC13 BMI088_G_CS CS
+PA15 SDCARD_CS CS
 
+# MCU LED: active-high.
+PA10 LED_BOOTLOADER OUTPUT LOW
+define HAL_LED_ON 1
 
-PE3 LED_BOOTLOADER OUTPUT LOW
-define HAL_LED_ON 0
-
-
-# Add CS pins to ensure they are high in bootloader
-PD13  BMI088_G_CS     CS
-PA8  BMI088_A_CS     CS
-PA4 SDCARD1_CS CS
-
-# support flashing from SD card:
-
-# FATFS support:
-define CH_CFG_USE_MEMCORE 1
-define CH_CFG_USE_HEAP 1
-define CH_CFG_USE_SEMAPHORES 0
-define CH_CFG_USE_MUTEXES 1
-define CH_CFG_USE_DYNAMIC 1
-define CH_CFG_USE_WAITEXIT 1
-define CH_CFG_USE_REGISTRY 1
-
-
-
-# enable FAT filesystem support (needs a microSD defined via SDMMC)
-
-
-define AP_BOOTLOADER_FLASH_FROM_SD_ENABLED 1
+# No bootloader SD flashing: the socket is SPI3, not SDMMC.
+# U5 NAND is intentionally not accessed; its CS is not MCU-connected.

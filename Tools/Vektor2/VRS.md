@@ -97,7 +97,8 @@ correction tracks demand without ON_MS/OFF_MS windows. Those parameters retain
 range validation but do not time continuous delivery. Normal demand reductions,
 including entry into the deadband, ramp down using SLEW. A sign reversal removes
 the old correction immediately; the other drive ramps from zero. Disable, invalid
-input, heading priority and travel/authority constraints override ramp-down.
+input and travel/authority constraints override ramp-down. VRS is inhibited
+while either VSP uses vector mode; heading no longer adds rod-Y corrections.
 Enabling, mode changes and sensor recovery start with a zero-correction sample.
 The burst counter counts only bursts; duty still reports actual command activity.
 

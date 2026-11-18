@@ -1,149 +1,168 @@
-# hw definition file for processing by chibios_pins.py
-# for Matek H743-WING
+# Vektor Core EVO -- ArduPilot ChibiOS board definition, bring-up revision
+# Hardware authority: vektor-core-evo(20261031-140802).kicad_sch
+# STM32H743VITx / LQFP100. Do NOT use MatekH743 board ID or firmware.
 
-# MCU class and specific type
+# Disable optional QuickTune
+define AP_QUICKTUNE_ENABLED 0
+
+# Disable optional button support
+define HAL_BUTTON_ENABLED 0
+
+define AP_MISSION_ENABLED 1
+
 MCU STM32H7xx STM32H743xx
+# LOCAL DEVELOPMENT ONLY; get this number formally allocated before release.
+APJ_BOARD_ID 7198
 
-# board ID. See Tools/AP_Bootloader/board_types.txt
-APJ_BOARD_ID AP_HW_MATEKH743
-
-# crystal frequency, setup to use external oscillator
+# Y1 CSTNE8M00G55A000R0: 8 MHz resonator on PH0/PH1.
 OSCILLATOR_HZ 8000000
-
 FLASH_SIZE_KB 2048
-
-# bootloader takes first sector
 FLASH_RESERVE_START_KB 128
 
-
-# ChibiOS system timer
 STM32_ST_USE_TIMER 12
 define CH_CFG_ST_RESOLUTION 16
 
-# USB
+# Internal flash parameters; sector size is 128 KiB for this STM32H743.
+define HAL_STORAGE_SIZE 32768
+STORAGE_FLASH_PAGE 14
+
+# SERIAL0=USB; SERIAL1=UART7 FLEX; SERIAL2=USART1; SERIAL3=USART3 GNSS;
+# SERIAL4=UART5; SERIAL5=UART8; SERIAL6=USART2 (XIAO add-on).
+SERIAL_ORDER OTG1 UART7 USART1 USART3 UART5 UART8 USART2
+
+# USB Full Speed Type-C, SWD programming
 PA11 OTG_FS_DM OTG1
 PA12 OTG_FS_DP OTG1
-
 PA13 JTMS-SWDIO SWD
 PA14 JTCK-SWCLK SWD
 
-# SPI1 for IMU1 (MPU6000)
-PA5 SPI1_SCK SPI1
-PB4 SPI1_MISO SPI1
-PD7 SPI1_MOSI SPI1
-
-PA9 SPI2_SCK SPI2
-PC2 SPI2_MISO SPI2
-PC1 SPI2_MOSI SPI2
-
-
-
-# two I2C bus
-I2C_ORDER I2C1 I2C2 
-
-# I2C1
-PB6 I2C1_SCL I2C1
-PB7 I2C1_SDA I2C1
-
-# I2C2
-PB10 I2C2_SCL I2C2
-PB11 I2C2_SDA I2C2
-
-# ADC
-PA7 BATT_VOLTAGE_SENS ADC1 SCALE(1)
-PA3 BATT_CURRENT_SENS ADC1 SCALE(1)
-
-
-define HAL_BATT_MONITOR_DEFAULT 4
-define HAL_BATT_VOLT_PIN 31
-define HAL_BATT_CURR_PIN 25
-define HAL_BATT_VOLT_SCALE 11.0
-define HAL_BATT_CURR_SCALE 40.0
-
-
-
-# LED
-# green LED1 marked as B/E
-# blue LED0 marked as ACT
-define AP_NOTIFY_GPIO_LED_2_ENABLED 1
-PC4 LED0 OUTPUT LOW GPIO(32) # blue
-PC5 LED1 OUTPUT LOW GPIO(33) # green
-define HAL_GPIO_A_LED_PIN 32
-define HAL_GPIO_B_LED_PIN 33
-
-# order of UARTs (and USB)
-SERIAL_ORDER OTG1  USART1 USART2 OTG2
-
-# USART1 (telem2)
-PB15 USART1_RX USART1
+PE7 UART7_RX UART7
+PE8 UART7_TX UART7
 PB14 USART1_TX USART1
-
-# USART2 (GPS1)
+PB15 USART1_RX USART1
+PD8 USART3_TX USART3
+PD9 USART3_RX USART3
+PB12 UART5_RX UART5
+PB13 UART5_TX UART5
+PE0 UART8_RX UART8
+PE1 UART8_TX UART8
 PD5 USART2_TX USART2
 PD6 USART2_RX USART2
 
+# I2C1 has MMC5983MA; I2C2 has DPS310 and external GNSS/I2C connector.
+I2C_ORDER I2C1 I2C2
+PB8 I2C1_SCL I2C1
+PB9 I2C1_SDA I2C1
+PB10 I2C2_SCL I2C2
+PB11 I2C2_SDA I2C2
+define HAL_I2C_INTERNAL_MASK 1
 
+# U10 BMI088: one accelerometer and one gyro chip-select on shared SPI4.
+# U5 W25N01 NAND is NOT enabled: SPI4_CS is not mapped to any MCU pin
+# and its VCC / HOLD / WP pins appear unconnected in the schematic.
+PE2 SPI4_SCK SPI4
+PE5 SPI4_MISO SPI4
+PE6 SPI4_MOSI SPI4
+PE4 BMI088_A_CS CS
+PC13 BMI088_G_CS CS
+PE3 BMI088_INT3 INPUT
 
-# CAN bus
-PD0 CAN1_RX CAN1
-PD1 CAN1_TX CAN1
-
-# Motors
-
-
-# Beeper
-
-# microSD support
-
-# GPIOs
-
-DMA_PRIORITY S*
-
-define HAL_STORAGE_SIZE 32768
-
-# use last 2 pages for flash storage
-# H743 has 16 pages of 128k each
-STORAGE_FLASH_PAGE 14
-
-# spi devices
-# SPI devices
-SPIDEV  bmi088_a  SPI2  DEVID1  BMI088_A_CS  MODE3  10*MHZ 10*MHZ
-SPIDEV  bmi088_g  SPI2  DEVID2  BMI088_G_CS  MODE3  10*MHZ 10*MHZ
-
-
-PA4 SDCARD1_CS CS
-SPIDEV sdcard SPI1 DEVID1 SDCARD1_CS  MODE0 400*KHZ 25*MHZ
-
-DMA_NOSHARE SPI1* SPI2*
-
-
-# no built-in compass, but probe the i2c bus for all possible
-# external compass types
-define ALLOW_ARM_NO_COMPASS
-define AP_COMPASS_PROBING_ENABLED 1
-define HAL_I2C_INTERNAL_MASK 0
-define HAL_COMPASS_AUTO_ROT_DEFAULT 2
-define HAL_PROBE_EXTERNAL_I2C_COMPASS 1
-define HAL_CUSTOM_HAL_I2C_DEVICES 1
-
-
-# IMU
-IMU BMI088 SPI:bmi088_a SPI:bmi088_g ROTATION_PITCH_180
-PD13  BMI088_G_CS     CS
-PA8  BMI088_A_CS     CS
-PD14 DRDY1_BMI088_G  INPUT
+SPIDEV bmi088_a SPI4 DEVID1 BMI088_A_CS MODE3 1*MHZ 8*MHZ
+SPIDEV bmi088_g SPI4 DEVID2 BMI088_G_CS MODE3 1*MHZ 8*MHZ
+# IMU orientation cannot be derived from a schematic. BENCH-CALIBRATE.
+IMU BMI088 SPI:bmi088_a SPI:bmi088_g ROTATION_ROLL_180
 define HAL_DEFAULT_INS_FAST_SAMPLE 1
 
-# DPS310 integrated on I2C2 bus, multiple possible choices for external barometer
+# MMC5983MA (U3) CS high selects I2C. WARNING: U3 GND pins 9 and 11
+# do not appear connected in this schematic. Fix/verify before relying on it.
+COMPASS MMC5XX3 I2C:0:0x30 false ROTATION_ROLL_180_YAW_270
+define AP_COMPASS_PROBING_ENABLED 1
 
-BARO DPS310 I2C:1:0x77
+# DPS310 (U2) I2C2; SDO is tied LOW, so 7-bit I2C address is 0x76.
+BARO DPS310 I2C:1:0x76
 
-
+# microSD connector J2, wired as SPI3 (NOT SDMMC).
+PC10 SPI3_SCK SPI3
+PC11 SPI3_MISO SPI3
+PC12 SPI3_MOSI SPI3
+PA15 SDCARD_CS CS
+SPIDEV sdcard SPI3 DEVID1 SDCARD_CS MODE0 400*KHZ 25*MHZ
 define HAL_OS_FATFS_IO 1
 
-# setup for OSD
+# Two SN65HVD232 CAN transceivers.
+PD0 CAN1_RX CAN1
+PD1 CAN1_TX CAN1
+PB5 CAN2_RX CAN2
+PB6 CAN2_TX CAN2
+
+# Measured VCC, +5V and CAN rails use 56k/10k dividers, factor 6.6.
+# PC4=servo VCC rail, PC5=+5V rail, PA4=CAN_POWER.
+# These are NOT proven battery-voltage or current-sensor inputs.
+# Battery monitoring remains disabled; Vektor2 reports voltage points only.
+# +BATT divider is on PC2_C (ADC3_INP0), *NOT* ADC1 PC2.
+PC4 VCC_SENSE ADC1 SCALE(1)
+PC5 V5_SENSE ADC1 SCALE(1)
+PA4 VDD_CAN_SENS ADC1 SCALE(1)
+define HAL_BATT_MONITOR_DEFAULT 0
+
+# PC2_C is a dedicated analog pad, not GPIO PC2. Declare its ADC3_INP0
+# directly because the hwdef pin parser only accepts GPIO pin names.
+# Keep the PC2/PC2_C analog switch open to isolate the digital pad (RM0433).
+define STM32_ADC_USE_ADC3 TRUE
+define HAL_ANALOG3_PINS { 0, 0, 3.30/4096 },
+define HAL_BOARD_INIT_HOOK_CALL SYSCFG->PMCR |= SYSCFG_PMCR_PC2SO;
+
+# MAVLink measurement points: name, HAL analog pin, rail/ADC divider factor.
+# Existing SCALE(1) inputs return ADC-pad volts. Divider values verified in
+# vektor-core-evo(20261111-182425).kicad_sch:
+# VCC R8/R7=56k/10k; +5V R23/R22=56k/10k; CAN R29/R28=56k/10k;
+# +BATT R27/R26=100k/10k, factor 11.
+define HAL_VEKTOR2_MEASURE_POINTS { "MP_V_VCC", 4, 6.6f }, { "MP_V_V5", 8, 6.6f }, { "MP_V_VCAN", 18, 6.6f }, { "MP_V_BAT", 0, 11.0f }
+
+# Vektor Core EVO onboard LED
+# PA10, active HIGH
+
+PA10 LED0 OUTPUT LOW GPIO(90)
+
+define AP_NOTIFY_GPIO_LED_1_ENABLED 1
+define AP_NOTIFY_GPIO_LED_1_PIN 90
+define HAL_GPIO_LED_ON 1
+
+# PC14 BUZZER, PD3 LED_BLUE and PD4 LED_AMBER have labelled MCU nets
+# but no connected external LED/buzzer devices in this schematic.
+# Leave these pins unassigned rather than claim working outputs.
+
+# Twelve primary outputs, numbered in the physical connector's mirrored order:
+# TIM1_CH2 (1_2) is PWM1; TIM2_CH1 (2_1) is PWM12.
+PA9 TIM1_CH2 TIM1 PWM(1) GPIO(50)
+PA8 TIM1_CH1 TIM1 PWM(2) GPIO(51)
+PC9 TIM8_CH4 TIM8 PWM(3) GPIO(52)
+PC8 TIM8_CH3 TIM8 PWM(4) GPIO(53)
+PC7 TIM8_CH2 TIM8 PWM(5) GPIO(54)
+PC6 TIM8_CH1 TIM8 PWM(6) GPIO(55)
+PD15 TIM4_CH4 TIM4 PWM(7) GPIO(56)
+PD14 TIM4_CH3 TIM4 PWM(8) GPIO(57)
+PD13 TIM4_CH2 TIM4 PWM(9) GPIO(58)
+PD12 TIM4_CH1 TIM4 PWM(10) GPIO(59)
+PA1 TIM2_CH2 TIM2 PWM(11) GPIO(60)
+PA0 TIM2_CH1 TIM2 PWM(12) GPIO(61)
+
+# FLEX_PWM1 has 6 extra PWM pins and an additional UART7_RX on pin 7.
+PA2 TIM5_CH3 TIM5 PWM(13) GPIO(62)
+PA3 TIM5_CH4 TIM5 PWM(14) GPIO(63)
+PA6 TIM3_CH1 TIM3 PWM(15) GPIO(64)
+PA7 TIM3_CH2 TIM3 PWM(16) GPIO(65)
+PB0 TIM3_CH3 TIM3 PWM(17) GPIO(66)
+PB1 TIM3_CH4 TIM3 PWM(18) GPIO(67)
+
+# H7 DMAMUX; give IMU SPI and motor timers DMA priority.
+DMA_PRIORITY SPI4* SPI3* TIM*
+# I2C DMA is not required and avoiding it reduces contention at bring-up.
+NODMA I2C*
+define STM32_I2C_USE_DMA FALSE
+
+# Vektor Core EVO - no OSD hardware
 define OSD_ENABLED 0
-
-
-# build ABIN for flash-from-bootloader support:
-env BUILD_ABIN True
+define OSD_PARAM_ENABLED 0
+define HAL_WITH_OSD_BITMAP 0
+define HAL_WITH_MSP_DISPLAYPORT 0

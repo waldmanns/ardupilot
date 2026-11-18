@@ -45,6 +45,24 @@ void VspTelemetry::update(uint32_t now_ms, int16_t rate_hz, const Logic& logic)
     };
     Components::vsp1_emit_telemetry(vsp1_outputs, *this);
     Components::vsp2_emit_telemetry(vsp2_outputs, *this);
+    // Decode the final component outputs, including heading/VRS corrections.
+    // Invalid estimates are NaN, never plausible zero thrust.
+    const VspMapper::Config configs[] = {logic.vsp1_params.mapper_config(),
+                                         logic.vsp2_params.mapper_config()};
+    const uint16_t* outputs[] = {vsp1_outputs, vsp2_outputs};
+    const char* direction_keys[] = {"VSP1_TDIR", "VSP2_TDIR"};
+    const char* intensity_keys[] = {"VSP1_TMAG", "VSP2_TMAG"};
+    for (uint8_t n = 0; n < 2; n++) {
+        const auto estimate = VspMapper::estimate(configs[n], outputs[n][0], outputs[n][1]);
+        // This is rod excursion, not RPM-dependent force or control readiness.
+        // RPM may be routed directly to a motor instead of through the VSP.
+        const ComponentId id = ComponentId(n);
+        const bool valid = logic.input_valid(id, 0) && logic.input_valid(id, 1) && estimate.valid;
+        send_float(direction_keys[n], valid ? estimate.direction_deg : NAN);
+        send_float(intensity_keys[n], valid ? estimate.intensity : NAN);
+        send_float(n == 0 ? "VSP1_VST" : "VSP2_VST", uint8_t(logic.vector_state(n)));
+        send_float(n == 0 ? "VSP1_AUTH" : "VSP2_AUTH", logic.vsp_authority(n));
+    }
     logic.vrs.send_telemetry(*this); // no additional messages when VRS is disabled
 }
 

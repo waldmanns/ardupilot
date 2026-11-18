@@ -195,6 +195,39 @@ Typical protocol values used by this baseline are:
 Vektor2 does not invent a generic UART-connected state. Runtime health belongs
 to the protocol using the port.
 
+## Board status LED
+
+On boards declaring `AP_NOTIFY_GPIO_LED_1_PIN`, Vektor2 lights the status LED
+during startup, then blinks it once per second (500 ms on, 500 ms off) from
+the control loop. This indicates that the application loop is running.
+On the BMI088 Vektor Core EVO board this is the active-high PA10 LED,
+HAL GPIO 90. The LED does not depend on a GPS fix or a ground-station link.
+
+## ADC measurement points
+
+On the BMI088 Vektor Core EVO definition stored under `MatekH743`,
+`MP_TEL_HZ` controls measurement-point telemetry independently of other
+streams. The default `0` disables it. Set `1` through `50` for the requested
+rate per point in Hz; changes take effect without rebooting. Negative values
+disable it and values above 50 are limited to 50 Hz. Boards without measurement
+point declarations send no MP values.
+
+Each point is a standard MAVLink `NAMED_VALUE_FLOAT`, with the measured rail
+voltage in volts after divider correction. Values are verified against
+`vektor-core-evo(20261111-182425).kicad_sch`:
+
+| Key | Measured rail | MCU input | Divider (top/bottom) | Scale |
+| --- | --- | --- | --- | --- |
+| `MP_V_VCC` | Servo VCC | PC4 / ADC1_INP4 | R8/R7: 56k/10k | 6.6 |
+| `MP_V_V5` | +5 V | PC5 / ADC1_INP8 | R23/R22: 56k/10k | 6.6 |
+| `MP_V_VCAN` | CAN power | PA4 / ADC1_INP18 | R29/R28: 56k/10k | 6.6 |
+| `MP_V_BAT` | Battery | PC2_C / ADC3_INP0 | R27/R26: 100k/10k | 11 |
+
+All four fields in a snapshot share `time_boot_ms`. A full link retries
+unsent fields between snapshots; telemetry never blocks control/PWM. A point
+whose analog source could not be allocated reports NaN. These are voltage
+measurement points; they do not enable ArduPilot battery monitoring.
+
 ## RC input
 
 `RcInput` uses ArduPilot’s `RC_Channels` to read the HAL receiver and apply
@@ -302,6 +335,29 @@ within 500..2500 us, `MIN` must be below `MAX`, and `INV` must be 0 or 1.
 Invalid settings disable that output until corrected. `SERVO_OUTPUT_RAW`
 reports the scaled pulse width.
 
+On the BMI088 Vektor Core EVO board (`MatekH743` build target), the twelve
+main outputs follow the connector's mirrored physical order. `1_2`
+(`TIM1_CH2`) is PWM1 and `2_1` (`TIM2_CH1`) is PWM12:
+
+| PWM | MCU pin | Timer channel |
+| --- | --- | --- |
+| 1 | PA9 | TIM1_CH2 |
+| 2 | PA8 | TIM1_CH1 |
+| 3 | PC9 | TIM8_CH4 |
+| 4 | PC8 | TIM8_CH3 |
+| 5 | PC7 | TIM8_CH2 |
+| 6 | PC6 | TIM8_CH1 |
+| 7 | PD15 | TIM4_CH4 |
+| 8 | PD14 | TIM4_CH3 |
+| 9 | PD13 | TIM4_CH2 |
+| 10 | PD12 | TIM4_CH1 |
+| 11 | PA1 | TIM2_CH2 |
+| 12 | PA0 | TIM2_CH1 |
+
+The FLEX header continues with PWM13..18 on PA2, PA3, PA6, PA7, PB0 and PB1.
+For direct RC passthrough, set `RTn_SRC=n` and `RTn_DST=n` for each channel.
+Each RC source must supply valid input before its output starts.
+
 ## Standard MAVLink surface
 
 The intended desktop interface is deliberately small:
@@ -369,7 +425,9 @@ persistence, MAVLink and hardware writes stay outside the component function.
 
 ### VSP parameters
 
-Both components expose normal persistent AP_Param values. The direction and configuration values range from 0 to 10:
+Both components expose normal persistent AP_Param values. Rotation uses
+`VSPn_DIR=0` for CW and `1` for CCW, viewed from above.
+Layout uses `VSP_CONF=1` for AFT and `2` for VWT:
 
 ```text
 VSP1_LIM = 25
@@ -396,8 +454,8 @@ THR_TEL_HZ = 0
 
 `VSP1_THR_ANG` and `VSP2_THR_ANG` default to 0 degrees. Their values
 are clamped to 0..359 before being supplied as signed 16-bit values to their
-respective component loops. They do not change the current VSP output
-algorithm until the loops use them.
+respective component loops. The current loops apply them as a rod-coordinate angle correction before
+heading hold and roll stabilization.
 
 `VSP_TEL_HZ` controls each VSP named-value telemetry key in Hz. Set it to
 `0` to disable those messages. Values above 50 are limited to 50 Hz.
@@ -437,16 +495,13 @@ Optional additive roll bursts are applied after each VSP ring limiter.
 
 ## Heading hold
 
-`VHDG_ENABLE=1` holds a captured compass heading through paired actuator-Y
-corrections. Moving any VSP rod X/Y input outside `1500 +/- VHDG_STK_DB`
-immediately releases both corrections. After all rods remain neutral for
-`VHDG_IDLE_MS`, capture the current heading as the new target. Automatic Y
-inversion is independent for each drive; RPM passes through. The default is
-disabled with zero gains. `VHDG_TEL_HZ` independently controls heading
-measurement telemetry. State, inhibition flags and the `HDG_REASON` string use
-1 Hz below 10, or 2 Hz at 10 and above, including 1 Hz status when measurements
-are disabled at zero. See [VHDG.md](VHDG.md) for the 14 parameters, twelve named
-floats, reason strings, validity gates, VRS priority, routing constraints and tests.
+`VHDG_ENABLE=1` enables the shared heading controller. VSP participation requires
+both `VSP1_VMODE=1` and `VSP2_VMODE=1`: normalized yaw demand becomes opposite
+longitudinal thrust vectors, then each drive's shared mapper produces its rods.
+Pilot vector input releases both corrections immediately; neutral controls
+recapture heading after `VHDG_IDLE_MS`. RPM is independent. The old rod-Y heading
+path and Y1_INV/Y2_INV parameters are removed. See [VHDG.md](VHDG.md) for
+migration, ownership, telemetry, thruster participation and validation.
 
 ## Routed functions
 
@@ -695,3 +750,22 @@ group uses the `VNAV_` prefix; long requested names are exposed as follows:
 | `VNAV_MANUAL_DEADBAND` | `VNAV_MAN_DBAND` |
 | `VNAV_OVERRIDE_MODE` | `VNAV_OVR_MODE` |
 | `VNAV_FAILSAFE_MODE` | `VNAV_FAIL_MODE` |
+
+## Shared thrust mapper
+
+See [VspMapper.md](VspMapper.md) for the shared CW/CCW vector-to-rods API,
+installation conventions and `VSPn_TDIR` / `VSPn_TMAG` named-float estimates.
+`VSP_CONF=1` means AFT; `VSP_CONF=2` means VWT (Voith Water Tractor).
+
+## Manual vector control
+
+`VSP1_VMODE=1` and `VSP2_VMODE=1` independently enable body-frame manual thrust
+vector inputs through the shared mapper. Both default to legacy mode (0). See
+[VspVectorControl.md](VspVectorControl.md) for input semantics, neutral transitions,
+controller ownership, slew parameters and state telemetry.
+
+## VSP authority telemetry
+
+`VSP1_AUTH` / `VSP2_AUTH` report the current rod command sources as an integer
+bitmask in NAMED_VALUE_FLOAT. See [VspAuthority.md](VspAuthority.md) for manual,
+heading, VRS and neutral-guard flags and their combinations.

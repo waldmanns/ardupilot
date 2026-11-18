@@ -3,6 +3,7 @@
 #include "Config.h"
 #include "GCS_MAVLink.h"
 #include "Logic.h"
+#include "MeasurePoints.h"
 #include "NavigationParameters.h"
 #include "Parameters.h"
 #include "PwmOut.h"
@@ -68,6 +69,7 @@ public:
     ThrusterTelemetry thruster_telemetry;
     HeadingTelemetry heading_telemetry;
     FunctionTelemetry function_telemetry;
+    MeasurePoints measure_points;
     AP_Logger logger;
     AP_Int32 log_bitmask;
     AP_Int16 log_rate_hz;
@@ -86,6 +88,8 @@ public:
 private:
     void load_parameters();
     void init_estimator();
+    void init_status_led();
+    void update_status_led(uint32_t now_ms);
     void update_mavlink(uint32_t now_ms);
     void sync_route_parameters(uint32_t now_ms);
     void report_imu_health(uint32_t now_ms);
@@ -99,6 +103,8 @@ private:
     AP_Param param_loader{var_info};
 
     uint32_t _last_heartbeat_ms = 0;
+    uint32_t _last_status_led_ms = 0;
+    bool _status_led_on = false;
     uint32_t _last_route_sync_ms = 0;
     uint32_t _last_imu_health_ms = 0;
     uint32_t _last_gps_diagnostic_ms = 0;

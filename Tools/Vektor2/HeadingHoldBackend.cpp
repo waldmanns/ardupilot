@@ -7,13 +7,13 @@
 #include <AP_InertialSensor/AP_InertialSensor.h>
 
 namespace Vektor2 {
-void HeadingHoldBackend::update(const HeadingHoldParameters& params, const HeadingDrive (&drives)[2],
+void HeadingHoldBackend::update(const HeadingHoldParameters& params, const HeadingActuation& actuation,
                                 bool controls_valid, bool routes_valid, uint32_t route_revision,
-                                bool permitted, const HeadingAuxiliary& auxiliary)
+                                bool permitted)
 {
     if (!params.enabled() || !permitted) {
         if (_controller.enabled()) {
-            _controller.update(0, HeadingSettings{}, HeadingSample{}, drives);
+            _controller.update(0, HeadingSettings{}, HeadingSample{}, actuation);
         }
         return;
     }
@@ -25,7 +25,6 @@ void HeadingHoldBackend::update(const HeadingHoldParameters& params, const Headi
     float yaw_reset_angle;
     const uint32_t yaw_reset_ms = ahrs.getLastYawResetAngle(yaw_reset_angle);
     HeadingSample sample;
-    sample.auxiliary = auxiliary;
     sample.heading_deg = ahrs.get_yaw_deg();
     sample.rate_dps = degrees(ahrs.get_yaw_rate_earth());
     sample.compass_valid = compass.available() && compass.get_num_enabled() > 0 &&
@@ -44,7 +43,7 @@ void HeadingHoldBackend::update(const HeadingHoldParameters& params, const Headi
     sample.routes_changed = route_revision != _route_revision;
     _yaw_reset_ms = yaw_reset_ms;
     _route_revision = route_revision;
-    _controller.update(now_ms, params.values(), sample, drives);
+    _controller.update(now_ms, params.values(), sample, actuation);
 }
 
 void HeadingHoldBackend::send_telemetry(const HeadingTelemetry& telemetry) const
@@ -61,8 +60,7 @@ void HeadingHoldBackend::send_telemetry(const HeadingTelemetry& telemetry) const
     telemetry.send_float("HDG_I", _controller.integral());
     telemetry.send_float("HDG_WAIT", _controller.wait_ms() * 0.001f);
     telemetry.send_float("HDG_SCALE", _controller.travel_scale());
-    telemetry.send_float("V1_HDG_US", float(_controller.correction_us(0)));
-    telemetry.send_float("V2_HDG_US", float(_controller.correction_us(1)));
+    telemetry.send_float("HDG_CMD", _controller.command());
 }
 
 } // namespace Vektor2

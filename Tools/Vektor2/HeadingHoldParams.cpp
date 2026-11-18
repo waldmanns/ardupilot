@@ -10,8 +10,8 @@ const AP_Param::GroupInfo HeadingHoldParameters::var_info[] = {
     AP_GROUPINFO("ENABLE", 1, HeadingHoldParameters, enable, 0),
 
     // @Param: STK_DB
-    // @DisplayName: Heading hold rod deadzone
-    // @Description: Half-width of the inclusive neutral interval around 1500 us on both VSP X and Y inputs. Movement outside any one interval immediately releases both heading corrections. RPM is excluded.
+    // @DisplayName: Heading hold vector neutral interval
+    // @Description: Half-width of the inclusive neutral interval around 1500 us on both VSP forward and sideways inputs. Movement outside any one interval immediately releases both heading corrections. RPM is excluded.
     // @Units: us
     // @Range: 0 250
     // @User: Standard
@@ -19,7 +19,7 @@ const AP_Param::GroupInfo HeadingHoldParameters::var_info[] = {
 
     // @Param: IDLE_MS
     // @DisplayName: Heading hold neutral wait
-    // @Description: Selected VSP rods and enabled thruster controls must remain neutral, with valid heading sensors, for this interval. Current heading is captured at its end, including after sensor or input recovery.
+    // @Description: Selected VSP vector inputs and enabled thruster controls must remain neutral, with valid heading sensors, for this interval. Current heading is captured at its end, including after sensor or input recovery.
     // @Units: ms
     // @Range: 0 10000
     // @User: Standard
@@ -27,28 +27,28 @@ const AP_Param::GroupInfo HeadingHoldParameters::var_info[] = {
 
     // @Param: P
     // @DisplayName: Heading hold proportional gain
-    // @Description: Added displacement in ring radii per degree of heading error beyond HDG_DB.
+    // @Description: Normalized yaw demand per degree of heading error beyond HDG_DB.
     // @Range: 0 10
     // @User: Standard
     AP_GROUPINFO("P", 4, HeadingHoldParameters, p, 0),
 
     // @Param: I
     // @DisplayName: Heading hold integral gain
-    // @Description: Added displacement in ring radii per degree-second of heading error beyond HDG_DB. Limited by IMAX with anti-windup for slew and actuator limits.
+    // @Description: Normalized yaw demand per degree-second of heading error beyond HDG_DB. Limited by IMAX with anti-windup for slew and actuator limits.
     // @Range: 0 10
     // @User: Standard
     AP_GROUPINFO("I", 5, HeadingHoldParameters, i, 0),
 
     // @Param: D
     // @DisplayName: Heading hold rate damping
-    // @Description: Added displacement in ring radii per degree/second of filtered earth-frame yaw rate. Damping remains active inside HDG_DB.
+    // @Description: Normalized yaw demand per degree/second of filtered earth-frame yaw rate. Damping remains active inside HDG_DB.
     // @Range: 0 10
     // @User: Standard
     AP_GROUPINFO("D", 6, HeadingHoldParameters, d, 0),
 
     // @Param: IMAX
     // @DisplayName: Heading hold integral limit
-    // @Description: Maximum magnitude of the integral contribution as a fraction of ring radius.
+    // @Description: Maximum magnitude of the normalized yaw integral contribution.
     // @Range: 0 1
     // @User: Standard
     AP_GROUPINFO("IMAX", 7, HeadingHoldParameters, imax, 0.1),
@@ -63,14 +63,14 @@ const AP_Param::GroupInfo HeadingHoldParameters::var_info[] = {
 
     // @Param: MAX
     // @DisplayName: Heading hold correction limit
-    // @Description: Maximum automatic correction as a fraction of each VSP ring radius. Both drives share the normalized demand and yield together to the smaller available Y travel.
+    // @Description: Maximum normalized yaw effort. VSP1 commands forward and VSP2 backward for positive effort, through their vector mappers.
     // @Range: 0 1
     // @User: Standard
     AP_GROUPINFO("MAX", 9, HeadingHoldParameters, maximum, 0.2),
 
     // @Param: SLEW
     // @DisplayName: Heading hold correction slew
-    // @Description: Normal correction change limit in ring radii per second. Manual override, disable, invalidity and reduced physical travel remove or reduce correction immediately.
+    // @Description: Normalized yaw effort change limit per second, further bounded by both VSP VSLEW values and participating thruster limits. Manual override, disable and invalidity release automatic effort immediately.
     // @Range: 0.01 100
     // @User: Standard
     AP_GROUPINFO("SLEW", 10, HeadingHoldParameters, slew, 0.5),
@@ -83,19 +83,7 @@ const AP_Param::GroupInfo HeadingHoldParameters::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("FILT_HZ", 11, HeadingHoldParameters, filter_hz, 2),
 
-    // @Param: Y1_INV
-    // @DisplayName: Invert VSP1 automatic heading Y
-    // @Description: Reverses only the automatic VSP1 heading correction in post-mapping actuator coordinates. Does not reverse manual input or physical PWM output.
-    // @Values: 0:Normal,1:Inverted
-    // @User: Standard
-    AP_GROUPINFO("Y1_INV", 12, HeadingHoldParameters, invert1, 0),
-
-    // @Param: Y2_INV
-    // @DisplayName: Invert VSP2 automatic heading Y
-    // @Description: Reverses only the automatic VSP2 heading correction in post-mapping actuator coordinates. Does not reverse manual input or physical PWM output.
-    // @Values: 0:Normal,1:Inverted
-    // @User: Standard
-    AP_GROUPINFO("Y2_INV", 13, HeadingHoldParameters, invert2, 0),
+    // Storage IDs 12 and 13 retired with legacy rod-Y inversion. Do not reuse.
 
     // @Param: TEL_HZ
     // @DisplayName: Heading hold telemetry rate
@@ -106,7 +94,7 @@ const AP_Param::GroupInfo HeadingHoldParameters::var_info[] = {
     AP_GROUPINFO("TEL_HZ", 14, HeadingHoldParameters, tel_hz, 5),
     // @Param: VSP_EN
     // @DisplayName: VSP heading participation
-    // @Description: Enables the existing paired VSP heading corrections and input requirements. Set zero for independent thruster-only heading hold; bow/stern participation uses each thruster HDG_EN.
+    // @Description: Enables paired vector VSP heading. Both drives must have VMODE=1 and valid neutral X/Y controls; RPM input is not required. Set zero for independent thruster-only heading hold; bow/stern participation uses each thruster HDG_EN.
     // @Values: 0:Disabled,1:Enabled
     // @User: Standard
     AP_GROUPINFO("VSP_EN", 15, HeadingHoldParameters, vsp_enable, 1),
@@ -128,8 +116,6 @@ HeadingSettings HeadingHoldParameters::values() const
     s.maximum = maximum.get();
     s.slew = slew.get();
     s.filter_hz = filter_hz.get();
-    s.invert[0] = invert1.get();
-    s.invert[1] = invert2.get();
     return s;
 }
 } // namespace Vektor2

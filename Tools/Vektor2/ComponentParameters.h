@@ -3,6 +3,8 @@
 #include <AP_Param/AP_Param.h>
 
 #include "VSP1.h"
+#include "VspMapper.h"
+#include "VspVectorControl.h"
 #include "VSP2.h"
 #include "RollStabilizationParams.h"
 #include "ThrusterBow.h"
@@ -40,6 +42,21 @@ public:
         };
     }
 
+    VspMapper::Config mapper_config() const
+    {
+        return {VspMapper::Rotation(dir.get()), map_angle.get(),
+                x_c.get(), y_c.get(), lim.get()};
+    }
+
+    VspVectorControl::Settings vector_settings() const
+    {
+        return {vmode.get(), vector_deadband.get(), vector_slew.get(), mapper_config()};
+    }
+
+    AP_Int8 vmode;
+    AP_Int16 vector_deadband;
+    AP_Float vector_slew;
+    AP_Float map_angle;
     AP_Int16 lim;
     AP_Int16 x_c;
     AP_Int16 y_c;
@@ -65,6 +82,21 @@ public:
         };
     }
 
+    VspMapper::Config mapper_config() const
+    {
+        return {VspMapper::Rotation(dir.get()), map_angle.get(),
+                x_c.get(), y_c.get(), lim.get()};
+    }
+
+    VspVectorControl::Settings vector_settings() const
+    {
+        return {vmode.get(), vector_deadband.get(), vector_slew.get(), mapper_config()};
+    }
+
+    AP_Int8 vmode;
+    AP_Int16 vector_deadband;
+    AP_Float vector_slew;
+    AP_Float map_angle;
     AP_Int16 lim;
     AP_Int16 x_c;
     AP_Int16 y_c;

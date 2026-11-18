@@ -25,8 +25,6 @@ private:
     AP_Float maximum;
     AP_Float slew;
     AP_Float filter_hz;
-    AP_Int8 invert1;
-    AP_Int8 invert2;
     AP_Int16 tel_hz;
 };
 } // namespace Vektor2

@@ -19,7 +19,7 @@ from pymavlink import mavutil
 
 
 NAMES = {'HDG_NOW', 'HDG_TGT', 'HDG_ERR', 'HDG_RATE', 'HDG_REQ', 'HDG_I',
-         'HDG_STATE', 'HDG_INHIB', 'HDG_WAIT', 'HDG_SCALE', 'V1_HDG_US', 'V2_HDG_US'}
+         'HDG_STATE', 'HDG_INHIB', 'HDG_WAIT', 'HDG_SCALE', 'HDG_CMD'}
 STATUS_NAMES = {'HDG_STATE', 'HDG_INHIB', 'HDG_REASON'}
 
 
@@ -122,7 +122,7 @@ def run(binary):
                 expected = {'VHDG_ENABLE': 0, 'VHDG_VSP_EN': 1, 'VHDG_STK_DB': 30, 'VHDG_IDLE_MS': 1500,
                             'VHDG_P': 0, 'VHDG_I': 0, 'VHDG_D': 0, 'VHDG_IMAX': 0.1,
                             'VHDG_HDG_DB': 1, 'VHDG_MAX': 0.2, 'VHDG_SLEW': 0.5,
-                            'VHDG_FILT_HZ': 2, 'VHDG_Y1_INV': 0, 'VHDG_Y2_INV': 0,
+                            'VHDG_FILT_HZ': 2,
                             'VHDG_TEL_HZ': 5}
                 for name, value in expected.items():
                     assert len(name) <= 16 and abs(parameter(name) - value) < 0.0001, name
@@ -144,7 +144,9 @@ def run(binary):
                           m.servo12_raw, m.servo13_raw, m.servo14_raw) ==
                          (1501, 1500, 1700, 1501, 1500, 1800))
                 quiet(0.4)
-                print('PASS: all 15 parameters/defaults, disabled baseline and telemetry silence', flush=True)
+                print('PASS: heading defaults, legacy manual baseline and disabled telemetry silence', flush=True)
+                parameter('VSP1_VMODE', 1)
+                parameter('VSP2_VMODE', 1)
 
                 for name, value in {'VHDG_IDLE_MS': 1200, 'VHDG_P': 0.05,
                                     'VHDG_HDG_DB': 0, 'VHDG_SLEW': 10,
@@ -153,51 +155,61 @@ def run(binary):
                 parameter('VHDG_ENABLE', 1)
                 state(4, timeout=45)  # real EKF compass-yaw alignment, no GPS
                 assert math.isfinite(named('HDG_TGT'))
+                named('VSP1_AUTH', lambda v: v == 3)
+                named('VSP2_AUTH', lambda v: v == 3)
                 channels[6:8] = [1750, 1600]  # external yaw disturbance
                 override()
                 named('HDG_ERR', lambda v: abs(v) > 5)
                 wait_for('SERVO_OUTPUT_RAW', lambda m:
-                         m.servo10_raw < 1490 and m.servo13_raw < 1490 and
-                         m.servo9_raw == 1501 and m.servo12_raw == 1501 and
+                         m.servo9_raw < 1490 and m.servo12_raw > 1510 and
+                         m.servo10_raw == 1500 and m.servo13_raw == 1500 and
                          m.servo11_raw == 1700 and m.servo14_raw == 1800)
                 channels[6:8] = [1500, 1500]
                 override()
                 assert NAMES | STATUS_NAMES <= seen, seen
-                print('PASS: compass/EKF-gated feedback, all telemetry keys, paired Y, unchanged X/RPM', flush=True)
+                print('PASS: compass/EKF-gated feedback, all telemetry keys, opposed body vectors, unchanged lateral/RPM', flush=True)
 
-                parameter('VHDG_Y2_INV', 1)
+                # Physical mapping changes must recapture and retain body-frame yaw sign.
+                parameter('VSP2_DIR', 1)  # CCW flips physical rod, not body thrust
                 state(4)
                 channels[6:8] = [1750, 1600]
                 override()
                 wait_for('SERVO_OUTPUT_RAW', lambda m:
-                         m.servo10_raw < 1490 and m.servo13_raw > 1510)
+                         m.servo9_raw < 1490 and m.servo12_raw < 1490 and
+                         m.servo10_raw == 1500 and m.servo13_raw == 1500)
                 channels[6:8] = [1500, 1500]
                 override()
-                named('V1_HDG_US', lambda v: v <= -19)
-                # Exercise the actual paired Logic/VRS composition, not just
-                # each feature independently. Positive roll demand first asks
-                # for an opposing +Y ray, then for an aiding -Y ray.
-                for name, value in {'VSP1_RS_ANG': 90, 'VSP1_RS_SIGN': 1,
-                                    'VSP2_RS_ANG': 270, 'VSP2_RS_SIGN': -1,
-                                    'VRS_P': 0.1, 'VRS_TRIM': 5, 'VRS_SLEW': 10,
-                                    'VRS_ENABLE': 1}.items():
-                    parameter(name, value)
-                wait_for('NAMED_VALUE_FLOAT', lambda m:
-                         m.name == 'RS_INHIB' and int(m.value) & 1024)
-                parameter('VSP1_RS_ANG', 270)
+                parameter('VSP1_MAP_ANG', 90)
+                state(4)
+                channels[6:8] = [1750, 1600]
+                override()
                 wait_for('SERVO_OUTPUT_RAW', lambda m:
-                         m.servo9_raw == 1501 and m.servo10_raw < 1480 and
-                         m.servo11_raw == 1700 and m.servo13_raw > 1500 and
-                         m.servo14_raw == 1800)
+                         m.servo9_raw == 1500 and m.servo10_raw > 1510 and m.servo12_raw < 1490)
+                channels[6:8] = [1500, 1500]
+                override()
+                parameter('VSP1_MAP_ANG', 0)
+                parameter('VSP2_DIR', 0)
+                state(4)
+                parameter('VRS_ENABLE', 1)
+                named('VSP1_AUTH', lambda v: v == 3)
+                named('VSP2_AUTH', lambda v: v == 3)
                 parameter('VRS_ENABLE', 0)
-                print('PASS: simultaneous VHDG/VRS, opposing-ray priority and aiding roll bursts', flush=True)
+                # Mixed/manual rod modes must not silently run old heading code.
+                parameter('VSP2_VMODE', 0)
+                named('HDG_INHIB', lambda v: int(v) & 8)
+                named('VSP1_AUTH', lambda v: v == 1)
+                parameter('VSP2_VMODE', 1)
+                state(4)
+                print('PASS: DIR/mount transforms, vector-only heading, mixed-mode inhibition and authority', flush=True)
                 for axis in (0, 1, 3, 4):
                     previous = channels[axis]
                     channels[axis] = 1600
                     override()
                     state(2)
                     reason('Manual override')
-                    assert named('V1_HDG_US') == 0 and named('V2_HDG_US') == 0
+                    named('VSP1_AUTH', lambda v: v == 1)
+                    named('VSP2_AUTH', lambda v: v == 1)
+                    assert named('HDG_CMD') == 0
                     assert math.isnan(named('HDG_TGT'))
                     channels[axis] = previous
                     override()
@@ -205,22 +217,27 @@ def run(binary):
                     named('HDG_WAIT', lambda v: 0 < v <= 1.2)
                     state(4)
                     assert abs(named('HDG_ERR')) < 1
-                print('PASS: independent inversion, either rod overrides both axes, neutral wait and recapture', flush=True)
+                print('PASS: either vector input releases both heading commands, neutral wait and recapture', flush=True)
 
                 for n in (1, 2, 3):
                     parameter(f'SIM_MAG{n}_FAIL', 1)
                 named('HDG_INHIB', lambda v: int(v) & 1)
                 reason('Compass invalid')
-                assert named('V1_HDG_US') == 0 and named('V2_HDG_US') == 0
+                assert named('HDG_CMD') == 0
                 for n in (1, 2, 3):
                     parameter(f'SIM_MAG{n}_FAIL', 0)
                 state(4, timeout=20)
                 saved = channels[5]
-                channels[5] = 0  # release only VSP2 RPM: other controls remain valid
+                channels[5] = 0  # RPM is independent of vector heading readiness
+                override()
+                state(4)
+                named('VSP2_AUTH', lambda v: v == 3)
+                channels[5] = saved
+                channels[4] = 0  # actual vector input loss must release heading
                 override()
                 named('HDG_INHIB', lambda v: int(v) & 4)
                 reason('Control input lost')
-                channels[5] = saved
+                channels[4] = 1500
                 override()
                 state(4)
                 print('PASS: real compass failure/recovery and individual missing-input inhibition', flush=True)
@@ -241,10 +258,10 @@ def run(binary):
                 parameter('RT1_SRC', 1)
                 parameter('RT15_DST', 0)
                 state(4)
-                parameter('VHDG_Y1_INV', 2)
+                parameter('VSP1_MAP_ANG', -1)
                 named('HDG_INHIB', lambda v: int(v) & 8)
-                reason('Config/ring invalid')
-                parameter('VHDG_Y1_INV', 0)
+                reason('Configuration invalid')
+                parameter('VSP1_MAP_ANG', 0)
                 state(4)
                 print('PASS: direct/indirect cross-feed inhibition, upstream dependency order, invalid settings', flush=True)
 

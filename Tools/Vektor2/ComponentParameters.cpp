@@ -23,8 +23,8 @@ const AP_Param::GroupInfo VSP1ParameterStore::var_info[] = {
 
     // @Param: DIR
     // @DisplayName: VSP1 direction
-    // @Description: VSP1 direction value.
-    // @Range: 0 10
+    // @Description: Rotor rotation viewed from above. Used by the thrust mapper; physical positive X moves right and positive Y up.
+    // @Values: 0:CW,1:CCW
     // @User: Standard
     AP_GROUPINFO("DIR", 4, VSP1ParameterStore, dir, 0),
 
@@ -39,6 +39,37 @@ const AP_Param::GroupInfo VSP1ParameterStore::var_info[] = {
     // @Group: RS_
     // @Path: RollStabilizationParams.cpp
     AP_SUBGROUPINFO(roll, "RS_", 6, VSP1ParameterStore, RollDriveParameters),
+
+    // Storage ID 7 is reserved (removed experimental MAP_ROT).
+    // @Param: MAP_ANG
+    // @DisplayName: VSP1 installation angle
+    // @Description: Local forward axis clockwise from vessel bow. Used once by the mapper, independently of the legacy THR_ANG rod transform.
+    // @Units: deg
+    // @Range: 0 359.99
+    // @User: Standard
+    AP_GROUPINFO("MAP_ANG", 8, VSP1ParameterStore, map_angle, 0),
+
+    // @Param: VMODE
+    // @DisplayName: VSP1 input control mode
+    // @Description: Vector mode interprets IN1 as forward and IN2 as starboard demand. Mode changes require centered inputs. VSP heading requires both drives in vector mode. VRS remains inhibited while either drive uses vector mode.
+    // @Values: 0:Legacy rods,1:Manual thrust vector
+    // @User: Standard
+    AP_GROUPINFO("VMODE", 9, VSP1ParameterStore, vmode, 0),
+
+    // @Param: VDB
+    // @DisplayName: VSP1 vector input deadband
+    // @Description: Half width of the neutral interval around 1500 us. Used for vector commands and neutral-before-movement transitions.
+    // @Units: us
+    // @Range: 0 250
+    // @User: Standard
+    AP_GROUPINFO("VDB", 10, VSP1ParameterStore, vector_deadband, 30),
+
+    // @Param: VSLEW
+    // @DisplayName: VSP1 vector slew rate
+    // @Description: Maximum normalized vector change per second. Neutral and invalid input stop immediately.
+    // @Range: 0.01 100
+    // @User: Standard
+    AP_GROUPINFO("VSLEW", 11, VSP1ParameterStore, vector_slew, 2),
 
     AP_GROUPEND
 };
@@ -64,8 +95,8 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
 
     // @Param: DIR
     // @DisplayName: VSP2 direction
-    // @Description: VSP2 direction value.
-    // @Range: 0 10
+    // @Description: Rotor rotation viewed from above. Used by the thrust mapper; physical positive X moves right and positive Y up.
+    // @Values: 0:CW,1:CCW
     // @User: Standard
     AP_GROUPINFO("DIR", 4, VSP2ParameterStore, dir, 0),
 
@@ -80,6 +111,37 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
     // @Group: RS_
     // @Path: RollStabilizationParams.cpp
     AP_SUBGROUPINFO(roll, "RS_", 6, VSP2ParameterStore, RollDriveParameters),
+
+    // Storage ID 7 is reserved (removed experimental MAP_ROT).
+    // @Param: MAP_ANG
+    // @DisplayName: VSP2 installation angle
+    // @Description: Local forward axis clockwise from vessel bow. Used once by the mapper, independently of the legacy THR_ANG rod transform.
+    // @Units: deg
+    // @Range: 0 359.99
+    // @User: Standard
+    AP_GROUPINFO("MAP_ANG", 8, VSP2ParameterStore, map_angle, 0),
+
+    // @Param: VMODE
+    // @DisplayName: VSP2 input control mode
+    // @Description: Vector mode interprets IN1 as forward and IN2 as starboard demand. Mode changes require centered inputs. VSP heading requires both drives in vector mode. VRS remains inhibited while either drive uses vector mode.
+    // @Values: 0:Legacy rods,1:Manual thrust vector
+    // @User: Standard
+    AP_GROUPINFO("VMODE", 9, VSP2ParameterStore, vmode, 0),
+
+    // @Param: VDB
+    // @DisplayName: VSP2 vector input deadband
+    // @Description: Half width of the neutral interval around 1500 us. Used for vector commands and neutral-before-movement transitions.
+    // @Units: us
+    // @Range: 0 250
+    // @User: Standard
+    AP_GROUPINFO("VDB", 10, VSP2ParameterStore, vector_deadband, 30),
+
+    // @Param: VSLEW
+    // @DisplayName: VSP2 vector slew rate
+    // @Description: Maximum normalized vector change per second. Neutral and invalid input stop immediately.
+    // @Range: 0.01 100
+    // @User: Standard
+    AP_GROUPINFO("VSLEW", 11, VSP2ParameterStore, vector_slew, 2),
 
     AP_GROUPEND
 };

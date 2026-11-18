@@ -51,7 +51,7 @@ public:
         Travel = 1U << 7,
         Baseline = 1U << 8,
         NoDrive = 1U << 9,
-        Heading = 1U << 10,
+        // Bit 10 retired with the legacy heading rod-Y overlay.
     };
     struct DriveStatus {
         float command = 0.0f;   // projection of the quantized applied correction
@@ -69,7 +69,7 @@ public:
     // The baseline is the EXISTING mapCoordinates() result. No correction means
     // returning that integer pair verbatim, including on every disabled call.
     Coordinates apply(uint8_t drive, Coordinates baseline, Limiter limits,
-                      bool inputs_valid, int8_t protected_y = 0);
+                      bool inputs_valid);
 
     bool enabled() const { return _settings.enabled; }
     State state() const { return _state; }

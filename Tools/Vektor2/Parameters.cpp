@@ -29,6 +29,9 @@ const AP_Param::Info App::var_info[] = {
     // @User: Standard
     APP_SCALAR(log_rate_hz, "VLOG_HZ", 10),
     GOBJECT(logger, "LOG", AP_Logger),
+    // @Group: MP_
+    // @Path: MeasurePoints.cpp
+    GOBJECT(measure_points, "MP_", MeasurePoints),
 #if AP_SIM_ENABLED
     GOBJECT(sitl, "SIM_", SITL::SIM),
 #endif

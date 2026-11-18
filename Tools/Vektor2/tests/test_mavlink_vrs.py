@@ -131,6 +131,8 @@ def run(binary):
                          m.servo11_raw == 1700 and m.servo12_raw == 1510 and
                          m.servo13_raw == 1490 and m.servo14_raw == 1800, timeout=45)
                 wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'V1_RS_DUT' and m.value > 0)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'VSP1_AUTH' and m.value == 5)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'VSP2_AUTH' and m.value == 1)
 
                 # The main command can move while bursts continue; +Y correction
                 # must preserve the newly requested X coordinate and RPM command.
@@ -146,6 +148,8 @@ def run(binary):
                 parameter('VRS_MODE', 1)
                 wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'RS_STATE' and m.value == 5)
                 wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'V2_RS_DUT' and m.value > 0.95)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'VSP1_AUTH' and m.value == 1)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'VSP2_AUTH' and m.value == 5)
                 drain()
                 deadline = time.monotonic() + 1.2
                 samples = 0
@@ -159,6 +163,7 @@ def run(binary):
                 print('PASS: continuous mode has no burst gaps and preserves RPM', flush=True)
 
                 parameter('VRS_ENABLE', 0)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'VSP2_AUTH' and m.value == 1)
                 baseline = (1520, 1500, 1750, 1510, 1490, 1800)
                 wait_for('SERVO_OUTPUT_RAW', lambda m: outputs(m) == baseline)
                 drain()

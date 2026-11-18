@@ -52,6 +52,7 @@ public:
     uint16_t input(ComponentId id, uint8_t port) const;
     uint16_t output(ComponentId id, uint8_t port) const;
     bool output_valid(ComponentId id) const;
+    bool input_valid(ComponentId id, uint8_t port) const;
 
     static const ComponentDefinition& definition(ComponentId id);
     static bool valid(ComponentId id)
@@ -75,8 +76,13 @@ public:
     FunctionParameters vfn_params;
     Functions vfn;
 
+    // Runtime rod ownership/contribution flags, independent of RPM ownership.
+    enum VspAuthority : uint8_t { Manual = 1, AutoHeading = 2, RollAssist = 4, NeutralGuard = 8 };
+    uint8_t vsp_authority(uint8_t drive) const { return drive < 2 ? _vsp_authority[drive] : 0; }
+
     bool roll_enabled() const { return _roll_enabled; }
     bool heading_enabled() const { return _heading_enabled; }
+    VspVectorControl::State vector_state(uint8_t drive) const { return _vectors[drive].state(); }
 
     uint16_t vsp_configuration() const
     {
@@ -94,9 +100,14 @@ private:
 
     Runtime _runtime[component_count] {};
     ThrusterControl _thrusters[2];
+    VspVectorControl _vectors[2];
+    uint8_t _vsp_authority[2] {};
+    void record_vsp_authority(uint8_t drive);
     uint8_t _thruster_routes = 0;
     uint32_t _thruster_route_revision = 0;
-    HeadingAuxiliary heading_auxiliary() const;
+    HeadingActuation heading_auxiliary() const;
+    bool prepare_vsp(uint8_t drive);
+    void finish_vsp(uint8_t drive, bool vector_owned, const VspMapper::Vector* heading = nullptr);
     bool _roll_enabled = false;
     bool _heading_enabled = false;
 };

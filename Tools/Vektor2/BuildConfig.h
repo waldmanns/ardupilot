@@ -9,3 +9,8 @@
 #define AP_OPENDRONEID_ENABLED 0
 #undef HAL_TORQEEDO_ENABLED
 #define HAL_TORQEEDO_ENABLED 0
+
+// A board may enable mission support for normal vehicle builds. Vektor2 has
+// no mission instance; apply its exclusion after hwdef.h has been included.
+#undef AP_MISSION_ENABLED
+#define AP_MISSION_ENABLED 0

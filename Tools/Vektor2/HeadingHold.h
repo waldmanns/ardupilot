@@ -1,11 +1,10 @@
 #pragma once
 
-#include "LibVSP.h"
 #include <stdint.h>
 
 namespace Vektor2 {
 
-// Pure controller: one snapshot and one paired allocation per routing cycle.
+// Pure heading controller. Actuator readiness and limits are supplied by its owner.
 struct HeadingSettings {
     bool enabled = false;
     int8_t vsp_enabled = 1;
@@ -14,18 +13,19 @@ struct HeadingSettings {
     float p = 0;
     float i = 0;
     float d = 0;
-    float imax = 0.1f;          // integral contribution, ring radii
+    float imax = 0.1f;          // integral contribution, normalized command units
     float heading_deadband = 1; // degrees; does not suppress rate damping
-    float maximum = 0.2f;       // ring radii
-    float slew = 0.5f;          // ring radii / second
+    float maximum = 0.2f;       // normalized command units
+    float slew = 0.5f;          // normalized command units / second
     float filter_hz = 2;
-    int8_t invert[2] {};
 };
 
-struct HeadingAuxiliary {
+struct HeadingActuation {
     bool available = false;
     bool manual = false;
-    float slew = 100;
+    bool configuration_valid = true;
+    float slew = 100;          // common normalized command units/second
+    float maximum = 1;
     uint32_t revision = 0;
 };
 
@@ -38,14 +38,6 @@ struct HeadingSample {
     bool routes_valid = true;
     bool yaw_reset = false;
     bool routes_changed = false;
-    HeadingAuxiliary auxiliary;
-};
-
-struct HeadingDrive {
-    uint16_t inputs[3] {};     // routed X, Y, RPM, before automatic corrections
-    Coordinates baseline {};
-    Limiter limits {};
-    bool sources_valid = false;
 };
 
 class HeadingHold {
@@ -66,7 +58,7 @@ public:
     };
 
     void update(uint32_t now_ms, const HeadingSettings& settings,
-                const HeadingSample& sample, const HeadingDrive (&drives)[2]);
+                const HeadingSample& sample, const HeadingActuation& actuation);
     bool enabled() const { return _settings.enabled; }
     State state() const { return _state; }
     uint16_t inhibited() const { return _inhibited; }
@@ -80,17 +72,15 @@ public:
     float integral() const { return _integral; }
     float travel_scale() const { return _travel_scale; }
     uint16_t wait_ms() const { return _wait_ms; }
-    int32_t correction_us(uint8_t drive) const { return _correction[drive]; }
 
 private:
     static bool valid(const HeadingSettings& settings);
-    bool changed(const HeadingSettings& settings, const HeadingDrive (&drives)[2]) const;
+    bool changed(const HeadingSettings& settings) const;
     void release();
-    float allocate(float request, float dt, const HeadingDrive (&drives)[2]);
+    float constrain(float request, float dt);
 
     HeadingSettings _settings;
-    HeadingAuxiliary _auxiliary;
-    Limiter _limits[2] {};
+    HeadingActuation _actuation;
     State _state = State::Disabled;
     uint16_t _inhibited = 0;
     uint16_t _wait_ms = 0;
@@ -105,6 +95,5 @@ private:
     float _integral = 0;
     float _command = 0;        // common signed normalized command before PWM quantization
     float _travel_scale = 1;
-    int32_t _correction[2] {};
 };
 } // namespace Vektor2

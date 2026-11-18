@@ -154,6 +154,12 @@ def run(binary, backend=3):
                 link.mav.remote_log_block_status_send(system, component,
                     mavutil.mavlink.MAV_REMOTE_LOG_DATA_BLOCK_START,
                     mavutil.mavlink.MAV_REMOTE_LOG_DATA_BLOCK_ACK)
+                # Record legacy VRS first, then vector-only heading in the same log.
+                parameter('VSP_TEL_HZ', 10)
+                wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'V1_RS_CMD' and m.value > 0, timeout=45)
+                parameter('VSP1_VMODE', 1)
+                parameter('VSP2_VMODE', 1)
+                parameter('VSP_TEL_HZ', 0)
                 wait_for('NAMED_VALUE_FLOAT', lambda m: m.name == 'HDG_STATE' and m.value == 4, timeout=45)
                 wait_for('REMOTE_LOG_DATA_BLOCK', timeout=15)
                 command(mavutil.mavlink.MAV_CMD_STORAGE_FORMAT, 1, 1,

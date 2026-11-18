@@ -73,11 +73,11 @@ void App::logging_task()
     if (logger.should_log(1U << 3)) {
         const auto& hdg = logic.vhdg.controller();
         const bool holding = hdg.state() == HeadingHold::State::Hold;
-        logger.WriteStreaming("VHDG", "TimeUS,En,State,Inhib,Hdg,Tgt,Err,Rate,Req,I,Scale,Wait,Y1,Y2",
-                              "QBBHffffffffhh", time_us, hdg.enabled(), uint8_t(hdg.state()), hdg.inhibited(),
+        logger.WriteStreaming("VHDG", "TimeUS,En,State,Inhib,Hdg,Tgt,Err,Rate,Req,I,Scale,Wait,Cmd",
+                              "QBBHfffffffff", time_us, hdg.enabled(), uint8_t(hdg.state()), hdg.inhibited(),
                               hdg.heading(), holding ? hdg.target() : NAN, holding ? hdg.error() : NAN,
                               hdg.rate(), hdg.demand(), hdg.integral(), hdg.travel_scale(),
-                              hdg.wait_ms() * 0.001f, int(hdg.correction_us(0)), int(hdg.correction_us(1)));
+                              hdg.wait_ms() * 0.001f, hdg.command());
     }
     if (logger.should_log(1U << 4)) {
         const auto* roll = logic.vrs.controller();

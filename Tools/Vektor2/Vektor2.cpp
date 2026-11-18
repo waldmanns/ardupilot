@@ -36,6 +36,36 @@ App::App() :
 {
 }
 
+void App::init_status_led()
+{
+#ifdef AP_NOTIFY_GPIO_LED_1_PIN
+    // The hwdef declares the single board LED, but Vektor2 has no vehicle
+    // notification/arming state machine. Drive a control-loop heartbeat.
+#if HAL_GPIO_LED_ON != 0
+    // Preserve open-drain configuration on active-low LED boards.
+    hal.gpio->pinMode(AP_NOTIFY_GPIO_LED_1_PIN, HAL_GPIO_OUTPUT);
+#endif
+    _status_led_on = true;
+    _last_status_led_ms = AP_HAL::millis();
+    hal.gpio->write(AP_NOTIFY_GPIO_LED_1_PIN, HAL_GPIO_LED_ON);
+#endif
+}
+
+void App::update_status_led(uint32_t now_ms)
+{
+#ifdef AP_NOTIFY_GPIO_LED_1_PIN
+    if (now_ms - _last_status_led_ms < 500) {
+        return;
+    }
+    _last_status_led_ms = now_ms;
+    _status_led_on = !_status_led_on;
+    hal.gpio->write(AP_NOTIFY_GPIO_LED_1_PIN,
+                    _status_led_on ? HAL_GPIO_LED_ON : HAL_GPIO_LED_OFF);
+#else
+    (void)now_ms;
+#endif
+}
+
 void App::setup()
 {
     load_parameters();
@@ -43,6 +73,8 @@ void App::setup()
     // BoardConfig stays because it is hardware infrastructure, not vehicle
     // behaviour. It applies board orientation and board-level driver options.
     board_config.init();
+    init_status_led();
+    measure_points.init();
 
     // board_config.init() owns ChibiOS RC-input initialization. It creates
     // AP::RC(), which must happen exactly once before SerialManager attaches
@@ -203,8 +235,10 @@ void App::loop()
     function_telemetry.update(now_ms, logic);
     vsp_telemetry.update(now_ms, logic.vsp_tel_hz.get(), logic);
     thruster_telemetry.update(now_ms, logic.thr_tel_hz.get(), logic);
+    measure_points.update(now_ms);
 
     update_mavlink(now_ms);
+    update_status_led(now_ms);
     scheduler.tick();
     scheduler.run(1500);
 }

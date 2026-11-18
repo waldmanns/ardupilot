@@ -73,7 +73,13 @@ struct Coordinates mapCoordinates(struct Coordinates input, struct Limiter limit
 
 	double theta = angle_correction * (3.14159265358979323846 / 180.0);
 
-	m = atan((ist_y - center_y) / (ist_x - center_x))*-1;
+	// A pure Y command has zero X displacement. Avoid dividing by zero
+	// (SITL traps this); retain the existing quadrant handling below.
+	if (ist_x == center_x) {
+		m = ist_y > center_y ? -1.5707963267948966 : 1.5707963267948966;
+	} else {
+		m = atan((ist_y - center_y) / (ist_x - center_x))*-1;
+	}
 
 	m = m+theta;
 

@@ -8,9 +8,9 @@ class HeadingTelemetry;
 class HeadingHoldBackend {
 public:
     // Disabled calls do no sensor/clock reads and publish no heading telemetry.
-    void update(const HeadingHoldParameters& params, const HeadingDrive (&drives)[2],
+    void update(const HeadingHoldParameters& params, const HeadingActuation& actuation,
                 bool controls_valid, bool routes_valid, uint32_t route_revision,
-                bool permitted = true, const HeadingAuxiliary& auxiliary = HeadingAuxiliary{});
+                bool permitted = true);
     const HeadingHold& controller() const { return _controller; }
     void send_telemetry(const HeadingTelemetry& telemetry) const;
 
