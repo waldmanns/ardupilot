@@ -62,7 +62,9 @@ const StorageManager::StorageArea StorageManager::layout[STORAGE_NUM_AREAS] = {
 const StorageManager::StorageArea StorageManager::layout[STORAGE_NUM_AREAS] = {
 #if !APM_BUILD_COPTER_OR_HELI
     { StorageParam,   0,     1280}, // 0x500 parameter bytes
+#if !APM_BUILD_TYPE(APM_BUILD_Vektor2)
     { StorageMission, 1280,  2506},
+#endif
     { StorageRally,   3786,   150}, // 10 rally points
     { StorageFence,   3936,   160}, // 20 fence points
 #else
@@ -75,7 +77,9 @@ const StorageManager::StorageArea StorageManager::layout[STORAGE_NUM_AREAS] = {
     { StorageParam,   4096,  1280},
     { StorageRally,   5376,   300},
     { StorageFence,   5676,   256},
+#if !APM_BUILD_TYPE(APM_BUILD_Vektor2)
     { StorageMission, 5932,  2132},
+#endif
     { StorageKeys,    8064,    64}, 
     { StorageBindInfo,8128,    56},
 #endif
@@ -91,14 +95,32 @@ const StorageManager::StorageArea StorageManager::layout[STORAGE_NUM_AREAS] = {
     { StorageParam,    8192,  1280},
     { StorageRally,    9472,   300},
     { StorageFence,    9772,   256},
+#if !APM_BUILD_TYPE(APM_BUILD_Vektor2)
     { StorageMission,  10028,  5204}, // leave 128 byte gap for expansion
+#endif
     { StorageCANDNA,   15232,  1024},
     // 128 byte gap at end of first 16k
 #endif
 #if STORAGE_NUM_AREAS >= 18
     { StorageParam,    16384, 1280},
+#if !APM_BUILD_TYPE(APM_BUILD_Vektor2)
     { StorageMission,  17664, 9842},
+#endif
     { StorageParamBak, 27506, 5262},
+#endif
+#if APM_BUILD_TYPE(APM_BUILD_Vektor2)
+    // Vektor2 has no mission storage consumer. Append its region to keep
+    // existing parameter offsets and make room for the sequencer banks.
+    { StorageParam,    1280, 2506},
+#if STORAGE_NUM_AREAS >= 10
+    { StorageParam,    5932, 2132},
+#endif
+#if STORAGE_NUM_AREAS >= 15
+    { StorageParam,    10028, 5204},
+#endif
+#if STORAGE_NUM_AREAS >= 18
+    { StorageParam,    17664, 9842},
+#endif
 #endif
 };
 #endif // STORAGE_NUM_AREAS == 1

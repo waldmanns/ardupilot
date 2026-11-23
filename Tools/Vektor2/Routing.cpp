@@ -48,6 +48,11 @@ bool Routing::validate_endpoint_pair(const Route& route) const
         }
         break;
     }
+    case SourceKind::SequencerOutput:
+        if (route.source.port >= Sequencer::lane_count) {
+            return false;
+        }
+        break;
     }
 
     switch (route.consumer.kind) {
@@ -65,6 +70,12 @@ bool Routing::validate_endpoint_pair(const Route& route) const
         }
         break;
     }
+
+    case ConsumerKind::SequencerTrigger:
+        if (route.consumer.port > Sequencer::shared_slot) {
+            return false;
+        }
+        break;
 
     case ConsumerKind::FunctionInput:
         if (route.consumer.port >= Functions::count) {
@@ -134,57 +145,6 @@ bool Routing::rebuild_execution_order()
         _execution_order[i] = order[i];
     }
 
-    // Also compile an order with the VSP pair collapsed to one node. A path
-    // from either VSP into the other makes paired control impossible: preserve
-    // ordinary routing, but inhibit heading hold rather than apply it twice.
-    static_assert(uint8_t(ComponentId::VSP1) == 0 && uint8_t(ComponentId::VSP2) == 1,
-                  "Paired routing requires the first two components to be VSPs");
-    constexpr uint8_t groups = Logic::component_count - 1;
-    bool group_edge[groups][groups] {};
-    uint8_t group_indegree[groups] {};
-    bool group_emitted[groups] {};
-    _heading_routes_valid = true;
-    for (uint8_t from = 0; from < Logic::component_count; from++) {
-        for (uint8_t to = 0; to < Logic::component_count; to++) {
-            if (!edge[from][to]) {
-                continue;
-            }
-            const uint8_t a = from < 2 ? 0 : from - 1;
-            const uint8_t b = to < 2 ? 0 : to - 1;
-            if (a == b) {
-                _heading_routes_valid = false;
-            } else if (!group_edge[a][b]) {
-                group_edge[a][b] = true;
-                group_indegree[b]++;
-            }
-        }
-    }
-    uint8_t paired_count = 0;
-    for (uint8_t step = 0; step < groups && _heading_routes_valid; step++) {
-        int8_t next = -1;
-        for (uint8_t n = 0; n < groups; n++) {
-            if (!group_emitted[n] && group_indegree[n] == 0) {
-                next = int8_t(n);
-                break;
-            }
-        }
-        if (next < 0) {
-            _heading_routes_valid = false;
-            break;
-        }
-        group_emitted[next] = true;
-        if (next == 0) {
-            _paired_execution_order[paired_count++] = ComponentId::VSP1;
-            _paired_execution_order[paired_count++] = ComponentId::VSP2;
-        } else {
-            _paired_execution_order[paired_count++] = ComponentId(next + 1);
-        }
-        for (uint8_t n = 0; n < groups; n++) {
-            if (group_edge[next][n]) {
-                group_indegree[n]--;
-            }
-        }
-    }
     _revision++;
     return true;
 }
@@ -332,11 +292,23 @@ bool Routing::sample_source(const SourceEndpoint& source,
             return false;
         }
         value_us = logic.output(id, source.port);
+        const bool valid_output = logic.output_valid(id, source.port);
         if (source_valid != nullptr) {
-            *source_valid = logic.output_valid(id);
+            *source_valid = valid_output;
         }
-        return value_us != 0;
+        return valid_output && value_us != 0;
     }
+
+    case SourceKind::SequencerOutput:
+        if (_sequencer == nullptr) {
+            return false;
+        }
+        const auto& output = _sequencer->status(source.port);
+        value_us = output.pulse;
+        if (source_valid != nullptr) {
+            *source_valid = output.valid;
+        }
+        return output.valid;
     }
 
     return false;
@@ -381,70 +353,23 @@ void Routing::update(const RcInput& rc, Logic& logic, PwmOut& pwm)
     const Route* function_routes[Functions::count] {};
     prepare_functions(logic, function_routes);
     uint8_t thruster_routes = 0;
-    bool thruster_dependencies = false;
     for (const auto& route : _routes) {
-        if (!route.enabled || route.consumer.kind != ConsumerKind::ComponentInput) {
-            continue;
-        }
-        if (route.consumer.instance >= uint8_t(ComponentId::ThrusterBow)) {
+        if (route.enabled && route.consumer.kind == ConsumerKind::ComponentInput &&
+            route.consumer.instance >= uint8_t(ComponentId::ThrusterBow)) {
             thruster_routes |= 1U << (route.consumer.instance - uint8_t(ComponentId::ThrusterBow));
         }
-        thruster_dependencies |= route.source.kind == SourceKind::ComponentOutput &&
-            (route.source.instance >= uint8_t(ComponentId::ThrusterBow) ||
-             route.consumer.instance >= uint8_t(ComponentId::ThrusterBow));
     }
     logic.set_thruster_routes(thruster_routes, _revision);
     logic.begin_cycle();
-    // Independent thruster assistance needs one coherent input snapshot. Do
-    // not add a feedback path through component chaining; ordinary manual
-    // routing remains available, but heading is inhibited for that topology.
-    const bool independent = logic.heading_enabled() &&
-        (thruster_routes != 0 || !logic.vhdg_params.values().vsp_enabled);
-    const bool use_vsps = logic.vhdg_params.values().vsp_enabled != 0;
-    if (independent && !thruster_dependencies && (!use_vsps || _heading_routes_valid)) {
-        for (uint8_t n = 0; n < Logic::component_count; n++) {
-            fill_inputs(ComponentId(n), rc, logic);
-        }
-        logic.run_heading_group(rc.valid(), _revision);
-        if (!use_vsps) {
-            // VSPs retain their own routing/VRS and cannot inhibit thruster yaw.
-            for (const auto component : _execution_order) {
-                if (uint8_t(component) < uint8_t(ComponentId::ThrusterBow)) {
-                    fill_inputs(component, rc, logic);
-                    logic.run(component);
-                }
-            }
-        }
-    } else if (independent) {
-        logic.update_heading_bypass(rc.valid(), false, _revision);
-        for (const auto component : _execution_order) {
-            fill_inputs(component, rc, logic);
-            logic.run(component);
-        }
-    } else {
-        const bool paired = logic.heading_enabled() && _heading_routes_valid;
-        if (!paired) {
-            logic.update_heading_bypass(rc.valid(), _heading_routes_valid, _revision);
-        }
-        for (uint8_t order_index = 0; order_index < Logic::component_count; order_index++) {
-            const ComponentId component = paired ? _paired_execution_order[order_index] :
-                                                  _execution_order[order_index];
-            if (paired && component == ComponentId::VSP1) {
-                fill_inputs(ComponentId::VSP1, rc, logic);
-                fill_inputs(ComponentId::VSP2, rc, logic);
-                logic.run_vsp_pair(rc.valid(), _revision);
-                order_index++; // the paired order always places VSP2 immediately next
-                continue;
-            }
-
-            fill_inputs(component, rc, logic);
-            logic.run(component);
-        }
+    for (const auto component : _execution_order) {
+        fill_inputs(component, rc, logic);
+        logic.run(component);
     }
 
     // All producers have run exactly once. Requests from these samples take
     // effect at the next begin_cycle(), including feedback from VSP outputs.
     sample_functions(rc, logic, function_routes);
+    sample_sequencer(rc, logic);
 
     uint32_t next_output_mask = 0;
 
@@ -459,8 +384,12 @@ void Routing::update(const RcInput& rc, Logic& logic, PwmOut& pwm)
         const uint32_t mask = 1UL << channel;
         uint16_t source_us = 0;
 
-        if (!sample_source(route.source, rc, logic, source_us)) {
-            if (_rc_loss_policy == RcLossPolicy::HoldLast &&
+        bool source_valid = false;
+        if (!sample_source(route.source, rc, logic, source_us, &source_valid) || !source_valid) {
+            // HoldLast is restricted to direct RC routes. Never latch stale
+            // component-derived propulsion commands on invalid input.
+            if (route.source.kind == SourceKind::RcInput &&
+                _rc_loss_policy == RcLossPolicy::HoldLast &&
                 (_driven_output_mask & mask) != 0) {
                 next_output_mask |= mask;
             }
@@ -485,11 +414,88 @@ void Routing::update(const RcInput& rc, Logic& logic, PwmOut& pwm)
 
 static bool same_route(const Route& a, const Route& b)
 {
-    return a.enabled == b.enabled && a.source.kind == b.source.kind &&
+    return a.enabled == b.enabled && a.consumer.kind == b.consumer.kind &&
+           a.consumer.instance == b.consumer.instance && a.consumer.port == b.consumer.port &&
+           a.source.kind == b.source.kind &&
            a.source.instance == b.source.instance && a.source.port == b.source.port &&
            a.input_min_us == b.input_min_us && a.input_max_us == b.input_max_us &&
            a.output_min_us == b.output_min_us && a.output_max_us == b.output_max_us &&
            a.reversed == b.reversed;
+}
+
+void Routing::sample_sequencer(const RcInput& rc, const Logic& logic) const
+{
+    if (_sequencer == nullptr) {
+        return;
+    }
+    for (uint8_t target = 0; target <= Sequencer::shared_slot; target++) {
+        _sequencer->sample(target, {});
+    }
+    for (const auto& route : _routes) {
+        const uint8_t target = route.consumer.port;
+        if (!route.enabled || route.consumer.kind != ConsumerKind::SequencerTrigger ||
+            (_sequencer_errors & (1UL << target))) {
+            continue;
+        }
+        Sequencer::Input input;
+        bool valid = false;
+        input.valid = sample_source(route.source, rc, logic, input.pulse, &valid) && valid;
+        _sequencer->sample(target, input);
+    }
+}
+
+void Routing::reconcile_sequencer(const Route (&previous)[capacity], uint32_t previous_errors)
+{
+    if (_sequencer == nullptr) {
+        return;
+    }
+    uint32_t triggers = _sequencer_errors ^ previous_errors;
+    uint32_t outputs = 0;
+    uint8_t components = 0;
+    const auto changes = [&](const Route (&old)[capacity], const Route (&current)[capacity]) {
+        for (const auto& route : old) {
+            if (!route.enabled) {
+                continue;
+            }
+            bool present = false;
+            for (const auto& candidate : current) {
+                if (same_route(route, candidate)) {
+                    present = true;
+                    break;
+                }
+            }
+            if (present) {
+                continue;
+            }
+            if (route.source.kind == SourceKind::SequencerOutput) {
+                outputs |= 1UL << route.source.port;
+            }
+            if (route.consumer.kind == ConsumerKind::SequencerTrigger) {
+                triggers |= 1UL << route.consumer.port;
+            } else if (route.consumer.kind == ConsumerKind::ComponentInput) {
+                components |= 1U << route.consumer.instance;
+            }
+        }
+    };
+    changes(previous, _routes);
+    changes(_routes, previous);
+
+    // A rewire of a component feeding a trigger changes that trigger's
+    // effective binding. Walk the existing (acyclic) component graph.
+    for (uint8_t pass = 0; pass < Logic::component_count && components != 0; pass++) {
+        for (const auto& route : _routes) {
+            if (!route.enabled || route.source.kind != SourceKind::ComponentOutput ||
+                !(components & (1U << route.source.instance))) {
+                continue;
+            }
+            if (route.consumer.kind == ConsumerKind::SequencerTrigger) {
+                triggers |= 1UL << route.consumer.port;
+            } else if (route.consumer.kind == ConsumerKind::ComponentInput) {
+                components |= 1U << route.consumer.instance;
+            }
+        }
+    }
+    _sequencer->routes_changed(triggers, outputs);
 }
 
 void Routing::prepare_functions(Logic& logic, const Route* (&routes)[Functions::count])

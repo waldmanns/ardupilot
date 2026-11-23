@@ -201,7 +201,7 @@ const AP_Param::GroupInfo ThrusterBowParameterStore::var_info[] = {
 
     // @Param: HDG_MAX
     // @DisplayName: ThrusterBow HDG_MAX
-    // @Description: Symmetric travel fraction at unit heading demand. Must not exceed MAX. VHDG_MAX further limits the shared demand.
+    // @Description: Symmetric travel fraction at unit heading demand. Must not exceed MAX. The navigation yaw allocator will limit the shared demand.
     // @User: Standard
     AP_GROUPINFO("HDG_MAX", 9, ThrusterBowParameterStore, heading_maximum, 0.3),
 
@@ -263,7 +263,7 @@ const AP_Param::GroupInfo ThrusterSternParameterStore::var_info[] = {
 
     // @Param: HDG_MAX
     // @DisplayName: ThrusterStern HDG_MAX
-    // @Description: Symmetric travel fraction at unit heading demand. Must not exceed MAX. VHDG_MAX further limits the shared demand.
+    // @Description: Symmetric travel fraction at unit heading demand. Must not exceed MAX. The navigation yaw allocator will limit the shared demand.
     // @User: Standard
     AP_GROUPINFO("HDG_MAX", 9, ThrusterSternParameterStore, heading_maximum, 0.3),
 

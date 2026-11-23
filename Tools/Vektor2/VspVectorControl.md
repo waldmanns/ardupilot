@@ -1,5 +1,7 @@
 # Manual VSP vector mode
 
+
+
 Each drive has independent `VSPn_VMODE`: 0 (default) preserves legacy rod input;
 1 selects manual thrust-vector input. Existing route IDs are unchanged.
 
@@ -43,20 +45,16 @@ represents normalized pitch demand, not measured thrust or regulated rotor RPM.
 
 ## Controller ownership
 
-VSP heading uses the same vector output path when both drives are in VMODE=1.
-At neutral, the heading controller may capture and supply opposite longitudinal
-vectors. Either manual input releases automatic ownership immediately. Legacy or
-mixed modes inhibit VSP heading; there is no rod-Y fallback. See [VHDG.md](VHDG.md).
-
-VRS remains inhibited while either drive is vector-owned or transitioning back
-to legacy. Its enable parameter is preserved. Bow/stern manual and heading
-controls remain independent, including thruster-only heading with VHDG_VSP_EN=0.
+In the navigation-base milestone, this is a **manual vector owner** only.
+Automatic yaw and DP are not connected. VRS stays inhibited while either drive
+is vector-owned or transitioning to legacy, as before. Any future navigation
+injection must be accepted through the common output-authority interface, not
+through synthetic RC inputs. See [NAVIGATION.md](NAVIGATION.md).
 
 ## Telemetry
 
 Existing XA/YA and TDIR/TMAG reflect final commanded rods.
-[VSPn_AUTH](VspAuthority.md) identifies manual ownership or a neutral guard and
-any legacy heading/VRS combinations. At VSP_TEL_HZ, each
+[VSPn_AUTH](VspAuthority.md) identifies manual ownership, VRS application, or a neutral guard. At VSP_TEL_HZ, each
 drive also publishes `VSP1_VST` / `VSP2_VST` via NAMED_VALUE_FLOAT:
 
 | Value | State |

@@ -10,10 +10,21 @@ static bool changed(const FunctionSettings& a, const FunctionSettings& b)
 
 static bool valid(const FunctionSettings& s)
 {
+    const bool nav_mode = s.type == int8_t(Functions::Type::NavMode);
+    // Do not silently map old, stored type 5/6 parameter values to NavMode.
+    // They must raise Configuration and fail to Free until explicitly changed.
     return (s.enable == 0 || s.enable == 1) && s.type >= 0 &&
-           s.type <= int8_t(Functions::Type::Stern) &&
-           (s.mode == int8_t(Functions::Mode::Level) || s.mode == int8_t(Functions::Mode::Toggle)) &&
-           s.low >= Functions::minimum_us && s.low <= s.high && s.high <= Functions::maximum_us;
+           (s.type <= int8_t(Functions::Type::Stern) || nav_mode) &&
+           (s.mode == int8_t(Functions::Mode::Level) ||
+            (!nav_mode && s.mode == int8_t(Functions::Mode::Toggle))) &&
+           s.low >= Functions::minimum_us && s.low <= s.high &&
+           s.high <= Functions::maximum_us &&
+           // NavMode must have three non-empty stable regions plus two
+           // +/-50us no-change bands around LOW and HIGH. No 2-way mode.
+           (!nav_mode ||
+            (s.low > Functions::minimum_us + Functions::nav_transition_guard_us &&
+             s.high <= Functions::maximum_us - Functions::nav_transition_guard_us &&
+             s.high - s.low > 2 * Functions::nav_transition_guard_us));
 }
 
 void Functions::prepare(uint32_t now_ms, const FunctionSettings (&settings)[count],
@@ -25,10 +36,18 @@ void Functions::prepare(uint32_t now_ms, const FunctionSettings (&settings)[coun
     for (uint8_t n = 0; n < count; n++) {
         auto& slot = _slots[n];
         const auto& binding = bindings[n];
-        if (changed(slot.settings, settings[n]) || slot.binding.revision != binding.revision ||
-            slot.binding.routed != binding.routed || slot.binding.error != binding.error ||
-            _timing_invalid) {
+        const bool slot_changed = changed(slot.settings, settings[n]) ||
+                                  slot.binding.revision != binding.revision ||
+                                  slot.binding.routed != binding.routed ||
+                                  slot.binding.error != binding.error;
+        if (slot_changed || _timing_invalid) {
             slot.status = Status{};
+            // Never carry a navigation mode through a switch/route edit or
+            // an interrupted control-loop interval.
+            if (slot.settings.type == int8_t(Type::NavMode) ||
+                settings[n].type == int8_t(Type::NavMode) || _timing_invalid) {
+                _nav_selected_mode = 0;
+            }
         }
         slot.settings = settings[n];
         slot.binding = binding;
@@ -72,7 +91,13 @@ void Functions::sample(const FunctionInput (&inputs)[count])
                                  input.pulse_us >= minimum_us && input.pulse_us <= maximum_us;
         if (input_valid) {
             status.flags |= Valid;
-            if (input.pulse_us >= settings.low && input.pulse_us <= settings.high) {
+            // NavMode is finalized in navigation_selection(), which applies
+            // the three-way guard bands and updates Requested/Matched to
+            // reflect the ACTUAL held mode, not the pulse's raw threshold.
+            // Ordinary VFN actions keep their inclusive LOW..HIGH interval.
+            const bool nav_mode = settings.type == int8_t(Type::NavMode);
+            if (!nav_mode && input.pulse_us >= settings.low &&
+                input.pulse_us <= settings.high) {
                 status.flags |= Matched;
             }
         }
@@ -109,6 +134,69 @@ bool Functions::permits(Type type) const
         }
     }
     return !assigned;
+}
+
+Functions::NavigationSelection Functions::navigation_selection(bool rc_valid)
+{
+    NavigationSelection selection;
+    int8_t next_mode = _nav_selected_mode;
+    for (const auto& slot : _slots) {
+        const auto type = slot.settings.type;
+        const bool nav_mode = type == int8_t(Type::NavMode);
+        const bool retired = type == int8_t(Type::RetiredNavHeading) ||
+                             type == int8_t(Type::RetiredNavDP);
+        if (!nav_mode && !retired) {
+            continue;
+        }
+        // Exactly one NavMode action owns one three-position RC switch.
+        // Retired type 5/6 or a second selector must fail to Free.
+        if (selection.assigned) {
+            selection.conflict = true;
+        }
+        selection.assigned = true;
+        if (retired || slot.settings.enable != 1 || slot.status.errors != 0 ||
+            (slot.status.flags & (Enabled | Routed | Valid)) !=
+            (Enabled | Routed | Valid)) {
+            selection.valid = false;
+            continue;
+        }
+        const int16_t pulse = slot.status.pulse_us;
+        const int16_t low = slot.settings.low;
+        const int16_t high = slot.settings.high;
+        // Three stable intervals, two +/-50us gaps where NO MODE CHANGE is
+        // made while the operator moves the switch. Do not treat an in-gap
+        // reading as an extra RC position or a new DP target capture.
+        if (pulse < low - nav_transition_guard_us) {
+            next_mode = 0; // switch LOW: Free
+        } else if (pulse >= low + nav_transition_guard_us &&
+                   pulse < high - nav_transition_guard_us) {
+            next_mode = 1; // switch MIDDLE: Heading Hold
+        } else if (pulse >= high + nav_transition_guard_us) {
+            next_mode = 2; // switch HIGH: Full DP
+        }
+    }
+    if (!selection.assigned || !rc_valid || !selection.valid || selection.conflict) {
+        // A guard band is NOT a failsafe. Loss of RC or invalid selection
+        // always clears the held mode immediately to Free.
+        _nav_selected_mode = 0;
+    } else {
+        _nav_selected_mode = next_mode;
+    }
+    selection.mode = _nav_selected_mode;
+
+    // The VFN status bit means the HELD request is non-Free; diagnostics
+    // must not claim Heading/DP before the pulse leaves the no-change band.
+    for (auto& slot : _slots) {
+        if (slot.settings.type != int8_t(Type::NavMode)) {
+            continue;
+        }
+        slot.status.flags &= ~(Matched | Requested);
+        if (selection.valid && !selection.conflict && rc_valid &&
+            _nav_selected_mode != 0) {
+            slot.status.flags |= Matched | Requested;
+        }
+    }
+    return selection;
 }
 
 bool Functions::configured() const

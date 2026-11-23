@@ -5,13 +5,21 @@
 #include "Logic.h"
 #include "MeasurePoints.h"
 #include "NavigationParameters.h"
+#include "NavigationDP.h"
+#include "NavigationHeading.h"
+#include "NavigationSupervisor.h"
+#include "NavigationEstimatorResets.h"
 #include "Parameters.h"
 #include "PwmOut.h"
 #include "RcInput.h"
 #include "RouteParameters.h"
 #include "Routing.h"
+#include "RpmInputs.h"
 #include "Telemetry.h"
+#include "VTelemetry.h"
+#include "VTelemetryParameters.h"
 #include "Storage.h"
+#include "SequencerBackend.h"
 
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Baro/AP_Baro.h>
@@ -67,13 +75,23 @@ public:
     NavigationParameters navigation;
     VspTelemetry vsp_telemetry;
     ThrusterTelemetry thruster_telemetry;
-    HeadingTelemetry heading_telemetry;
+    NavigationSupervisor nav_supervisor;
+    NavigationDP nav_dp;
+    NavigationHeading nav_heading;
+    NavigationTelemetry nav_telemetry;
+    DPTelemetry dp_telemetry;
     FunctionTelemetry function_telemetry;
     MeasurePoints measure_points;
+    RpmInputs rpm_inputs;
+    VTelemetryParameters vtel_params;
+    VTelemetry vtel;
+    AP_Int16 rpm_tel_hz;
+    AP_Int16 dp_tel_hz;
     AP_Logger logger;
     AP_Int32 log_bitmask;
     AP_Int16 log_rate_hz;
     Storage storage;
+    SequencerBackend sequencer;
 
     // ChibiOS RCOutput currently asks SRV_Channels whether output pins were
     // reassigned as GPIO/alarm during hal.rcout->init(). This object exists
@@ -96,6 +114,7 @@ private:
     void report_gps_diagnostics(uint32_t now_ms);
     void report_ekf_startup(uint32_t now_ms);
     void report_rc_protocol(uint32_t now_ms);
+    void update_navigation_status(uint32_t now_ms);
     void init_logging();
     void logging_task();
     uint32_t _last_log_ms = 0;
@@ -121,6 +140,15 @@ private:
     bool _gps_ubx_seen = false;
     bool _gps_settings_reported = false;
     uint32_t _last_compass_read_ms = 0;
+    uint32_t _last_navigation_ms = 0;
+    NavigationEstimatorResets _nav_ekf_resets;
+    int8_t _previous_nav_mode = 0;
+    bool _navigation_rc_was_assigned = false;
+    bool _heading_capture_pending = false;
+    bool _dp_capture_pending = false;
+    bool _previous_hdg_capture = false;
+    bool _previous_dp_hdg_capture = false;
+    bool _previous_dp_pos_capture = false;
     uint32_t _last_rc_protocol_report_ms = 0;
     bool _imu_health_reported = false;
     bool _imu_healthy = false;

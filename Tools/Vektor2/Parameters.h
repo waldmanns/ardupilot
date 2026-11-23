@@ -33,6 +33,10 @@ public:
         k_param_log_rate_hz,
         k_param_can_mgr,
         k_param_measure_points,
+        k_param_sequencer,
+        k_param_rpm_tel_hz,
+        k_param_vtel_params,
+        k_param_dp_tel_hz,
     };
 };
 

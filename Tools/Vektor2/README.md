@@ -5,9 +5,10 @@ ArduPilot hardware/sensor ecosystem, but it is **not** an ArduPilot vehicle.
 There are no flight modes, mission system, vehicle arming architecture, or
 vehicle failsafe state machine.
 
-This baseline intentionally uses **standard MAVLink only**. There is no Vektor
-MAVLink dialect, no private extension payload, no descriptor protocol, and no
-second serial protocol.
+This baseline keeps **standard ArduPilot MAVLink** for ground-control
+communications. It adds optional receiver-facing **i-BUS and HoTT** telemetry
+through VTEL. There is no custom Vektor MAVLink dialect, private extension
+payload, descriptor protocol or proprietary Vektor serial protocol.
 
 ## Included
 
@@ -22,7 +23,29 @@ second serial protocol.
 - standard ArduPilot MAVLink/GCS parameter and telemetry infrastructure
 - SD/filesystem binary logging, MAVFTP and native MAVLink log transfers
 - a fixed 32-slot microsecond routing table
-- two fixed logic components: VSP1 and VSP2
+- routed VSP and thruster components
+- a [sequencer](VSEQ.md) with onboard parameter storage and optional boot playback
+- configurable [VTEL telemetry builder](VTEL.md): typed source catalog, 65
+  numeric `VTEL_SLTn` assignments, i-BUS virtual sensors and HoTT EAM/GPS/VARIO
+  virtual modules
+
+## Custom receiver telemetry: VTEL
+
+VTEL presents the firmware's existing measurements as stable numeric source IDs.
+Each `VTEL_SLTn` parameter assigns one source ID to an i-BUS virtual sensor
+address or a fixed HoTT module field. Values default to the closest standard
+measurement available (GPS speed, course, position and altitude, AHRS attitude,
+measured RPM, ADC voltages). There is no physical-quantity restriction on
+numeric reassignments: a rod position can deliberately occupy a HoTT
+`temperature` display field. Structurally invalid assignments are ignored.
+
+The **[VTEL README](VTEL.md)** documents physical bus topology and wiring,
+i-BUS discovery and sensor addresses, HoTT polling and **EAM/GPS/VARIO module
+emulation**, exact slot/source catalogs, default mappings, and unsupported HoTT
+module types such as GAM. Configure `SERIALx_PROTOCOL=49` for i-BUS telemetry
+or `SERIALx_PROTOCOL=27` for HoTT, on a suitable receiver-connected UART.
+The backend reads a 10 Hz snapshot and handles serial polling outside the
+100 Hz control path. Hardware verification is still required.
 
 ## Deliberately absent
 
@@ -54,10 +77,10 @@ update RC input
 update AHRS / EKF3
       |
       v
-apply changed RTn_SRC / RTn_DST parameters
+apply changed RTn_SRC / RTn_DST parameters and sequencer commands
       |
       v
-run router + VSP components
+advance the sequencer and run the router and logic components
       |
       v
 write PWM
@@ -228,6 +251,27 @@ unsent fields between snapshots; telemetry never blocks control/PWM. A point
 whose analog source could not be allocated reports NaN. These are voltage
 measurement points; they do not enable ArduPilot battery monitoring.
 
+## Shaft RPM inputs
+
+On the Vektor Core EVO (`MatekH743`), PA2 and PA3 use the board's external
+pull-ups. The firmware measures the interval between falling edges, assuming
+one magnet pulse per revolution. It reports zero until it measures a full
+revolution and after pulses stop.
+
+`VRPM_TEL_HZ` defaults to `0`, which disables transmission. Set it to 1–50 Hz
+to publish MAVLink `NAMED_VALUE_FLOAT` messages at that rate per input.
+Changes take effect without rebooting.
+
+| MAVLink key | MCU pin | Value |
+| --- | --- | --- |
+| `VRPM1_RPM` | PA2 | RPM |
+| `VRPM2_RPM` | PA3 | RPM |
+| `VRPM1_IRQ` | PA2 | Magnet detected, 0 or 1 |
+| `VRPM2_IRQ` | PA3 | Magnet detected, 0 or 1 |
+
+Each `VRPMx_IRQ` value is `1` while its input is low (magnet detected) and `0`
+while it is high. The input level is sampled at the telemetry rate.
+
 ## RC input
 
 `RcInput` uses ArduPilot’s `RC_Channels` to read the HAL receiver and apply
@@ -289,7 +333,7 @@ The default port roles are unchanged, so this setup is opt-in.
 The receiver's MAVLink source system ID must match `MAV_GCS_SYSID` (default
 255, or its configured range), and its target must match `MAV_SYSID` (default
 1). Start with low telemetry rates for the radio link; `VSP_TEL_HZ`,
-`VHDG_TEL_HZ`, and `THR_TEL_HZ` also consume its bandwidth. Receiver RSSI integration is not
+`THR_TEL_HZ` also consume its bandwidth. Receiver RSSI integration is not
 added by this change.
 
 Automated SITL coverage (requires `pymavlink`):
@@ -354,7 +398,8 @@ main outputs follow the connector's mirrored physical order. `1_2`
 | 11 | PA1 | TIM2_CH2 |
 | 12 | PA0 | TIM2_CH1 |
 
-The FLEX header continues with PWM13..18 on PA2, PA3, PA6, PA7, PB0 and PB1.
+On the FLEX header, PWM13 through PWM16 are on PA6, PA7, PB0 and PB1.
+PA2 and PA3 are shaft RPM inputs.
 For direct RC passthrough, set `RTn_SRC=n` and `RTn_DST=n` for each channel.
 Each RC source must supply valid input before its output starts.
 
@@ -495,27 +540,37 @@ Optional additive roll bursts are applied after each VSP ring limiter.
 
 ## Heading hold
 
-`VHDG_ENABLE=1` enables the shared heading controller. VSP participation requires
-both `VSP1_VMODE=1` and `VSP2_VMODE=1`: normalized yaw demand becomes opposite
-longitudinal thrust vectors, then each drive's shared mapper produces its rods.
-Pilot vector input releases both corrections immediately; neutral controls
-recapture heading after `VHDG_IDLE_MS`. RPM is independent. The old rod-Y heading
-path and Y1_INV/Y2_INV parameters are removed. See [VHDG.md](VHDG.md) for
-migration, ownership, telemetry, thruster participation and validation.
+The retired `VHDG_*` heading mode and telemetry are removed in the
+navigation-base revision. `VNAV_MODE=0/1/2` now selects Free, Heading Hold, or
+Full DP as **requested modes**. M1 introduced observation-only supervision; M2 adds a host-tested geometry-aware
+propulsion allocator; M3 adds the vessel-agnostic `NavigationDP` position/velocity
+controller and shared `NavigationHeading` yaw controller with internal reason bits.
+M3.5 adds AHRS/EKF yaw, horizontal position and velocity reset handling and
+selectable VTEL DP/heading sources 257–259 (`HDG_ERR`, `DP_CMD_N/E`).
+M3.8 adds selectable VFN navigation actions 5=Heading/6=DP for 2/3-position
+RC switches, plus VTEL sources 260/261 (`DP_CALC`, `HDG_CALC`) to distinguish
+valid onboard calculations from real actuator authority.
+**Automatic propulsion is still disabled.** `DP_TEL_HZ=0..50` controls MAVLink
+DP/heading diagnostic reports. DP-specific reasons merge into the single
+`NAV_RBITS` in Full DP mode, while `NAV_STATE` continues to reflect actual
+actuator ownership. See [NAVIGATION.md](NAVIGATION.md),
+[ALLOCATION_M2.md](ALLOCATION_M2.md), and [NAVIGATION_M2_REVIEW.md](NAVIGATION_M2_REVIEW.md).
 
 ## Routed functions
 
 Ten `VFN` slots accept any router source through destinations 201..210.
 Each has persistent enable/type/mode and an inclusive 800..2200 us activation
-interval. Level or toggle requests gate VRS/heading on the following control
-cycle, in addition to their existing master enables. Multiple requests for
-one feature combine with OR. Slots default unused/disabled. See [VFN.md](VFN.md)
+interval. Level or toggle requests gate VRS and navigation heading readiness
+on the following control cycle, in addition to their master enables. Multiple requests for
+one feature combine with OR. M3.8 navigation selector types 5 and 6 work
+as exclusive level requests (Free / Heading / DP) and fail to Free on loss;
+they do not command propulsion. Slots default unused/disabled. See [VFN.md](VFN.md)
 for the parameter, routing and telemetry contract and verification commands.
 
 ## SD card and recording
 
 The current Revo Mini definition supports an SPI SD card. Native binary logs
-record sensor data, routed commands, physical PWM, heading hold, roll
+record sensor data, routed commands, physical PWM, navigation state/reason bits, roll
 stabilization and storage/input status. `LOG_DISARMED=1` starts continuous
 recording; zero stops and closes the file in the background. `VLOG_HZ` controls
 Vektor sample rate independently of telemetry. MAVFTP, native `LOG_*` transfer,
@@ -654,6 +709,10 @@ Storage.cpp/.h             background SD status and recording-stop file closure
 VSP1.cpp/.h                VSP1 algorithm and telemetry values
 VSP2.cpp/.h                VSP2 algorithm and telemetry values
 Telemetry.cpp/.h           shared rate limit and MAVLink publisher
+VTelemetryCore.cpp/.h       protocol-independent VTEL mapping and codecs
+VTelemetryParameters.*      VTEL_SLT1..VTEL_SLT65 AP_Param group
+VTelemetry.cpp/.h           i-BUS/HoTT UART workers and source snapshots
+VTEL.md                     telemetry topology, slot/module catalog and defaults
 Config.h                   small application constants
 wscript                    ArduPilot build target
 ```

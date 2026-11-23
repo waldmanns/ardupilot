@@ -14,6 +14,17 @@
 #define AP_MAVLINK_FTP_MAX_SESSIONS 5
 #endif
 
+#if defined(VEKTOR2_SEQ_FTP)
+namespace Vektor2 {
+namespace SequencerFtp {
+enum class Path : uint8_t { Ordinary, Stage, Protected };
+Path classify(const char* path);
+size_t begin(uint8_t system, uint8_t component);
+void end(bool complete);
+}
+}
+#endif
+
 class GCS_FTP {
 public:
     static void handle_file_transfer_protocol(const mavlink_message_t &msg, mavlink_channel_t chan);
@@ -95,6 +106,11 @@ private:
         void push_reply(Transaction &reply);
         bool handle_request(Transaction &request, Transaction &reply);
 
+#if defined(VEKTOR2_SEQ_FTP)
+        size_t upload_limit = 0;
+        uint32_t upload_offset = 0;
+        bool close_upload(bool terminate);
+#endif
         void close(void);
     };
     Session sessions[AP_MAVLINK_FTP_MAX_SESSIONS];

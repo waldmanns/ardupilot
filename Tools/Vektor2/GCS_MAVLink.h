@@ -1,6 +1,7 @@
 #pragma once
 
 #include <GCS_MAVLink/GCS.h>
+#include "SequencerBackend.h"
 
 #if HAL_GCS_ENABLED
 
@@ -11,8 +12,25 @@ class GCS_MAVLINK_Vektor2 : public GCS_MAVLINK {
 public:
     using GCS_MAVLINK::GCS_MAVLINK;
     void update_storage_information(uint32_t now_ms);
+    void update_sequencer(uint32_t now_ms);
 
 private:
+    void handle_message(const mavlink_message_t& msg) override;
+    void handle_sequencer_command(const mavlink_message_t& msg, uint16_t command,
+                                  uint8_t system, uint8_t component, const float (&fields)[7]);
+    void send_sequencer_ack(uint16_t command, uint8_t system, uint8_t component,
+                            Vektor2::SequencerBackend::Result result, bool pending);
+    void send_sequencer_field(uint8_t index);
+    Vektor2::SequencerBackend::Snapshot _seq_snapshot;
+    uint32_t _seq_last_ms = 0;
+    uint32_t _seq_budget_ms = 0;
+    uint32_t _seq_serial = 0;
+    uint32_t _seq_observed = 0;
+    uint32_t _seq_credit = 0;
+    uint32_t _seq_discovery = 0;
+    uint8_t _seq_field = UINT8_MAX;
+    bool _seq_requested = false;
+
     MAV_RESULT handle_command_int_packet(const mavlink_command_int_t &packet,
                                          const mavlink_message_t &msg) override;
     bool send_storage_information();
@@ -55,6 +73,7 @@ class GCS_Vektor2 : public GCS {
 public:
     using GCS::GCS;
     void update_storage_information(uint32_t now_ms);
+    void update_sequencer(uint32_t now_ms);
 
 protected:
     GCS_MAVLINK_Vektor2 *new_gcs_mavlink_backend(AP_HAL::UARTDriver &uart) override

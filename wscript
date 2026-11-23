@@ -154,6 +154,10 @@ def options(opt):
         default=None,
         help='Target board to build, choices are %s.' % ', '.join(boards_names))
 
+    g.add_option('--vektor2-seq-profile',
+                 choices=['compact', 'large'],
+                 help='Vektor2 sequencer capacity profile override.')
+
     g.add_option('--debug',
         action='store_true',
         default=False,
@@ -507,6 +511,7 @@ def configure(cfg):
 
     cfg.env.BOARD = cfg.options.board
     cfg.env.DEBUG = cfg.options.debug
+    cfg.env.VEKTOR2_SEQ_PROFILE = cfg.options.vektor2_seq_profile
     cfg.env.VS_LAUNCH = cfg.options.vs_launch
     cfg.env.DEBUG_SYMBOLS = cfg.options.debug_symbols
     cfg.env.COVERAGE = cfg.options.coverage

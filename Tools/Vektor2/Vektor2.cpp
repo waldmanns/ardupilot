@@ -119,12 +119,16 @@ void App::setup()
     scheduler.init(tasks, ARRAY_SIZE(tasks), 0);
     init_estimator();
     pwm.init();
+    rpm_inputs.init();
 
     // Build the runtime route table from the standard MAVLink/AP_Param-backed
     // RTn_SRC/RTn_DST configuration before the first loop iteration.
+    routing.attach_sequencer(sequencer.engine);
     _route_config_valid = route_params.sync(routing, pwm, true);
     init_logging();
     storage.init();
+    sequencer.init();
+    vtel.init(*this, vtel_params, serial_manager);
 
 #if HAL_GCS_ENABLED
     gcs().send_text(MAV_SEVERITY_INFO,
@@ -226,16 +230,24 @@ void App::loop()
     // Route uint16 microsecond signals through the two logic components and
     // on to final PWM consumers. Sources may fan out; each consumer has only
     // one producer. Component dependency order is compiled when routes change.
+    if (!storage.formatting()) {
+        sequencer.end_maintenance();
+    }
+    sequencer.update(now_ms);
     routing.update(rcin, logic, pwm);
 #if HAL_ENABLE_DRONECAN_DRIVERS
     pwm.push_can();
 #endif
 
-    heading_telemetry.update(now_ms, logic);
+    update_navigation_status(now_ms);
+    nav_telemetry.update(now_ms, nav_supervisor.status());
+    dp_telemetry.update(now_ms, dp_tel_hz.get(), nav_dp.output(), nav_heading.output());
     function_telemetry.update(now_ms, logic);
     vsp_telemetry.update(now_ms, logic.vsp_tel_hz.get(), logic);
     thruster_telemetry.update(now_ms, logic.thr_tel_hz.get(), logic);
     measure_points.update(now_ms);
+    rpm_inputs.update(now_ms, rpm_tel_hz.get());
+    vtel.update(*this, vtel_params, now_ms);
 
     update_mavlink(now_ms);
     update_status_led(now_ms);
@@ -243,6 +255,176 @@ void App::loop()
     scheduler.run(1500);
 }
 
+
+void App::update_navigation_status(uint32_t now_ms)
+{
+    // M3: calculate vessel-level DP / shared heading diagnostics only.
+    // Manual routing continues unchanged; no automatic output ownership.
+    // The ordinary VFN route/slot evaluator has already sampled the RC
+    // switch. Read the single NavMode action rather than creating another
+    // channel parser or hard-coding a switch number. Keep VNAV_MODE
+    // readable as the live request, but never save RC changes to flash.
+    const auto rc_selection = logic.vfn.navigation_selection(rcin.valid());
+    if (rc_selection.assigned) {
+        if (navigation.mode.get() != rc_selection.mode) {
+            navigation.mode.set(rc_selection.mode);
+        }
+    } else if (_navigation_rc_was_assigned) {
+        // Removing the last RC assignment must not leave an old automatic
+        // request latched in RAM. Manual parameter control then resumes.
+        navigation.mode.set(0);
+    }
+    _navigation_rc_was_assigned = rc_selection.assigned;
+
+    NavigationSupervisor::Input input;
+    input.requested_mode = navigation.mode.get();
+    input.enabled = navigation.enable.get() != 0;
+    input.heading_enabled = navigation.hdg_enable.get() != 0 &&
+                            logic.vfn.permits(Functions::Type::Heading);
+    input.dp_enabled = navigation.dp_enable.get() != 0;
+    input.rc_valid = rcin.valid();
+
+    nav_filter_status filter{};
+    const bool status_ok = ahrs.get_filter_status(filter) && filter.flags.initalized &&
+                           ins.healthy();
+    const float heading_deg = ahrs.get_yaw_deg();
+    input.heading_valid = status_ok && filter.flags.attitude && std::isfinite(heading_deg);
+    Location location{};
+    Vector3f velocity{};
+    // AHRS/EKF3's own body-origin position; do not use raw GPS coordinates
+    // or reapply GPS antenna lever arms here. Check the same point at capture.
+    input.position_valid = status_ok && filter.flags.horiz_pos_abs &&
+                           ahrs.get_location(location) &&
+                           NavigationDP::point_valid({location.lat, location.lng});
+    input.velocity_valid = status_ok && filter.flags.horiz_vel &&
+                           ahrs.get_velocity_NED(velocity) &&
+                           std::isfinite(velocity.x) && std::isfinite(velocity.y);
+
+    const uint32_t elapsed_ms = _last_navigation_ms == 0 ? 10U : now_ms - _last_navigation_ms;
+    input.timing_ok = elapsed_ms > 0U && elapsed_ms <= 100U;
+    _last_navigation_ms = now_ms;
+    // Reuse AHRS/EKF3 reset notifications (yaw, horizontal position and
+    // horizontal velocity). Never create an independent jump detector.
+    float yaw_reset_angle = 0;
+    Vector2f pos_reset_ne{};
+    Vector2f vel_reset_ne{};
+    const uint32_t yaw_reset_ms = ahrs.getLastYawResetAngle(yaw_reset_angle);
+    const uint32_t pos_reset_ms = ahrs.getLastPosNorthEastReset(pos_reset_ne);
+    const uint32_t vel_reset_ms = ahrs.getLastVelNorthEastReset(vel_reset_ne);
+    input.estimator_reset = _nav_ekf_resets.update(yaw_reset_ms,
+                                                    pos_reset_ms, vel_reset_ms);
+
+    const int8_t mode = input.requested_mode;
+    const bool hdg_capture = navigation.hdg_capture.get() != 0;
+    const bool dp_hdg_capture = navigation.dp_capture_hdg.get() != 0;
+    const bool dp_pos_capture = navigation.dp_capture_pos.get() != 0;
+    const bool request_hdg_capture = (hdg_capture && !_previous_hdg_capture) ||
+                                     (dp_hdg_capture && !_previous_dp_hdg_capture);
+    const bool request_pos_capture = dp_pos_capture && !_previous_dp_pos_capture;
+    _previous_hdg_capture = hdg_capture;
+    _previous_dp_hdg_capture = dp_hdg_capture;
+    _previous_dp_pos_capture = dp_pos_capture;
+
+    if (mode == 0 || mode < 0 || mode > 2) {
+        nav_heading.clear_target();
+        nav_dp.clear_target();
+        _heading_capture_pending = false;
+        _dp_capture_pending = false;
+    } else if (input.estimator_reset) {
+        // No silent re-acquisition after an estimator yaw / position / velocity
+        // reset. An explicit capture request or mode transition is required.
+        nav_heading.clear_target();
+        nav_dp.clear_target();
+        _heading_capture_pending = false;
+        _dp_capture_pending = false;
+    } else {
+        if (_previous_nav_mode == 0) {
+            _heading_capture_pending = true;
+        }
+        if (mode == 2 && _previous_nav_mode != 2) {
+            _dp_capture_pending = true;
+        }
+        if (mode != 2) {
+            // Do not publish an old geographic position target in Heading Hold.
+            nav_dp.clear_target();
+            _dp_capture_pending = false;
+        }
+        if (request_hdg_capture) {
+            nav_heading.clear_target();
+            _heading_capture_pending = true;
+        }
+        if (mode == 2 && request_pos_capture) {
+            nav_dp.clear_target();
+            _dp_capture_pending = true;
+        }
+        if (_heading_capture_pending && input.enabled && input.heading_enabled &&
+            input.rc_valid && input.heading_valid) {
+            if (nav_heading.capture(heading_deg)) {
+                _heading_capture_pending = false;
+            }
+        }
+        if (mode == 2 && _dp_capture_pending && input.enabled && input.dp_enabled &&
+            input.rc_valid && input.position_valid && input.velocity_valid) {
+            NavigationDP::Point actual{location.lat, location.lng};
+            if (nav_dp.capture(actual)) {
+                _dp_capture_pending = false;
+            }
+        }
+    }
+    _previous_nav_mode = mode;
+
+    const auto& gyro = ins.get_gyro();
+    float yaw_rate_deg_s = NAN;
+    if (input.heading_valid && input.timing_ok) {
+        NavigationHeading::earth_yaw_rate(gyro.y, gyro.z,
+                ahrs.get_roll_deg(), ahrs.get_pitch_deg(), yaw_rate_deg_s);
+    }
+    NavigationHeading::Config heading_config{};
+    heading_config.kp = navigation.hdg_kp.get();
+    heading_config.kd = navigation.hdg_kd.get();
+    heading_config.max_yaw_percent = navigation.hdg_max_yaw.get();
+    heading_config.deadband_deg = navigation.hdg_deadband.get();
+    // Keep actual estimated heading observable even with automation disabled.
+    // Controller output validity remains gated by mode, timing and target.
+    nav_heading.update(heading_deg, yaw_rate_deg_s, input.heading_valid,
+                       heading_config,
+                       input.timing_ok && !input.estimator_reset &&
+                       (mode == 1 || mode == 2) && input.enabled && input.heading_enabled);
+
+    NavigationDP::Input dp_in{};
+    dp_in.actual = {location.lat, location.lng};
+    dp_in.position_valid = input.position_valid;
+    dp_in.velocity_valid = input.velocity_valid && mode == 2 &&
+                           input.enabled && input.dp_enabled;
+    dp_in.heading_valid = nav_heading.output().valid &&
+                          input.heading_valid && input.timing_ok && !input.estimator_reset;
+    dp_in.velocity_n_ms = velocity.x;
+    dp_in.velocity_e_ms = velocity.y;
+    dp_in.heading_deg = heading_deg;
+    dp_in.estimator_reset = input.estimator_reset;
+    NavigationDP::Config dp_config{};
+    dp_config.position_kp = navigation.dp_pos_kp.get();
+    dp_config.velocity_kp = navigation.dp_vel_kp.get();
+    dp_config.max_speed_ms = navigation.dp_max_speed.get();
+    dp_config.max_accel_ms2 = navigation.dp_accel_limit.get();
+    dp_config.radius_m = navigation.dp_radius.get();
+    dp_config.velocity_filter_hz = navigation.dp_vel_filter.get();
+    nav_dp.update(dp_in, dp_config, float(elapsed_ms) * 0.001f);
+
+    // DP-specific configuration failures must not inhibit an otherwise
+    // functioning shared Heading Hold controller during DP_WAIT.
+    input.configuration_valid = rc_selection.valid && !rc_selection.conflict &&
+        (mode == 0 || NavigationHeading::config_valid(heading_config));
+    input.dp_controller_reasons = nav_dp.output().reason_bits;
+    input.heading_valid = input.heading_valid && nav_heading.output().valid;
+    input.heading_target_valid = nav_heading.target_valid();
+    input.position_target_valid = nav_dp.target_valid();
+    // No actuator ownership ACK exists yet. Never report HDG_ACTIVE/DP_ACTIVE.
+    input.output_ready = false;
+    input.yaw_owned = false;
+    input.translation_owned = false;
+    nav_supervisor.update(input);
+}
 
 void App::sync_route_parameters(uint32_t now_ms)
 {
@@ -400,6 +582,7 @@ void App::update_mavlink(uint32_t now_ms)
     // or MAV_CMD_SET_MESSAGE_INTERVAL without fighting an application timer.
     gcs().update_send();
     _gcs.update_storage_information(now_ms);
+    _gcs.update_sequencer(now_ms);
 #else
     (void)now_ms;
 #endif

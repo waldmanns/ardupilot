@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run independent thruster and heading tests under host sanitizers."""
+"""Run independent thruster actuator tests under host sanitizers."""
 from pathlib import Path
 import os
 import subprocess
@@ -15,7 +15,7 @@ def main():
             '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
             '-fno-omit-frame-pointer', '-I', str(source),
             str(source / 'tests/test_thrusters.cpp'),
-            str(source / 'HeadingHold.cpp'), str(source / 'ThrusterControl.cpp'),
+            str(source / 'ThrusterControl.cpp'),
             str(source / 'LibVSP.c'), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
 

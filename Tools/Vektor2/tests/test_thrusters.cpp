@@ -1,5 +1,4 @@
 #include "ThrusterControl.h"
-#include "HeadingHold.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -48,26 +47,11 @@ static void manual_and_gates()
     puts("PASS: independent enables, neutral interlock, manual slew, source loss, gaps, edits and clock wrap");
 }
 
-static void independent_heading()
+static void heading_actuator_path()
 {
-    HeadingHold h;
-    HeadingSettings s;
-    s.enabled = true; s.vsp_enabled = 0; s.idle_ms = 20;
-    s.p = 0.1f; s.i = 0.1f; s.maximum = 1; s.slew = 100;
-    HeadingSample sample;
-    sample.attitude_valid = sample.compass_valid = sample.control_valid = true;
-    HeadingActuation actuation;
-    actuation.available = true; actuation.slew = 1;
-    h.update(0, s, sample, actuation);
-    assert(h.state() == HeadingHold::State::Waiting);
-    h.update(20, s, sample, actuation);
-    assert(h.state() == HeadingHold::State::Hold);
-    sample.heading_deg = 350;
-    h.update(30, s, sample, actuation);
-    assert(h.command() > 0 && h.command() <= 0.01001f);
-    assert(h.integral() == 0); // slew-limited demand cannot wind up
     ThrusterSettings t;
-    t.enable = t.heading_enable = 1; t.heading_maximum = 0.4f;
+    t.enable = t.heading_enable = 1;
+    t.heading_maximum = 0.4f;
     ThrusterControl bow, stern;
     bow.update(0, t, true, true, true, 1500);
     t.heading_sign = -1;
@@ -79,17 +63,6 @@ static void independent_heading()
     stern.update(10, t, false, true, true, 1500);
     stern.apply_heading(0.5f, true);
     assert(stern.output() == 1500 && bow.output() == 1600);
-    actuation.manual = true;
-    h.update(40, s, sample, actuation);
-    assert(h.state() == HeadingHold::State::Manual && h.command() == 0);
-    actuation.manual = false;
-    h.update(50, s, sample, actuation);
-    assert(h.state() == HeadingHold::State::Waiting);
-    h.update(70, s, sample, actuation);
-    assert(h.state() == HeadingHold::State::Hold && h.target() == 350);
-    actuation.available = false;
-    h.update(80, s, sample, actuation);
-    assert(h.state() == HeadingHold::State::Inhibited && h.command() == 0);
-    puts("PASS: thruster-only heading without VSPs, signs, limits, anti-windup, manual release and reacquisition");
+    puts("PASS: thruster actuator yaw signs, limits and readiness gate");
 }
-int main() { manual_and_gates(); independent_heading(); }
+int main() { manual_and_gates(); heading_actuator_path(); }

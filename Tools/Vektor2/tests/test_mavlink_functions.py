@@ -2,7 +2,7 @@
 """VFN parameters, every router source, controller gates and persistence in SITL.
 
 Uses an isolated parameter store and local TCP ports 6004/6005. The simulator
-does not model VSP hydrodynamics; existing VRS/VHDG suites check their feedback.
+does not model VSP hydrodynamics.
 """
 import argparse
 import math
@@ -122,7 +122,7 @@ def run(binary):
         directory = Path(directory)
         (directory / 'defaults.parm').write_text(
             'SERIAL1_PROTOCOL 2\nSERIAL1_BAUD 460\nRC_OPTIONS 1\n'
-            'RC_OVERRIDE_TIME -1\nGPS1_TYPE 0\nVSP_TEL_HZ 0\nVHDG_TEL_HZ 0\nLOG_DISARMED 0\n')
+            'RC_OVERRIDE_TIME -1\nGPS1_TYPE 0\nVSP_TEL_HZ 0\nLOG_DISARMED 0\n')
         sitl = Sitl(binary, directory)
         try:
             sitl.start()
@@ -158,11 +158,11 @@ def run(binary):
                 sitl.slot(n, low=800, high=2200, type=1, enable=1)
             sitl.parameter('VFN_TEL_HZ', 5)
             keys = [f'VFN{n}_{suffix}' for n in range(1, 11) for suffix in ('IN', 'ST', 'ERR')]
-            keys += ['VFN_VRS', 'VFN_HDG']
+            keys += ['VFN_VRS']
             assert all(len(name) <= 10 for name in keys)
             sitl.snapshot(keys, lambda row: all(
                 row[f'VFN{n}_IN'] == expected[n-1] and row[f'VFN{n}_ST'] == 31 and row[f'VFN{n}_ERR'] == 0
-                for n in range(1, 11)) and row['VFN_VRS'] == 0 and row['VFN_HDG'] == 0)
+                for n in range(1, 11)) and row['VFN_VRS'] == 0)
             print('PASS: all ten slots, every router source, fan-out, full-range RC and coherent telemetry', flush=True)
 
             # Return to one action per feature. All other slots remain routed
@@ -251,31 +251,42 @@ def run(binary):
             sitl.named('VFN_VRS', lambda v: v == 0)
             sitl.slot(2, low=1400, high=1600)  # VSP1 X output requests the same feature
             sitl.named('VFN_VRS', lambda v: v == 1)
-            channels[2] = 0  # upstream loss leaves nonzero geometry but invalid producer
+            channels[2] = 0  # RPM loss invalidates the RPM output while the rods stay valid.
             sitl.override(channels)
+            sitl.snapshot(['VFN2_IN', 'VFN4_IN', 'VFN_VRS'], lambda row:
+                row['VFN2_IN'] == 1501 and math.isnan(row['VFN4_IN']) and row['VFN_VRS'] == 1)
+            sitl.route(2, 0, 0)  # Remove a rod input to invalidate the rod producer.
             sitl.snapshot(['VFN2_ERR', 'VFN2_IN', 'VFN_VRS'], lambda row:
                 row['VFN2_ERR'] == 8 and math.isnan(row['VFN2_IN']) and row['VFN_VRS'] == 0)
+            sitl.route(2, 2, 102)
             channels[2] = 1700
             sitl.override(channels)
             sitl.named('VFN_VRS', lambda v: v == 1)
             print('PASS: OR arbitration, duplicate/invalid routes, invalid ranges and propagated component validity', flush=True)
 
-            # VSP1's output controls Auto heading on the same VSP pair. This is
-            # supported by next-cycle application, not rejected as a graph cycle.
-            sitl.slot(2, type=2)
-            sitl.parameter('VHDG_IDLE_MS', 300)
-            sitl.parameter('VHDG_ENABLE', 1)
-            sitl.named('VFN_HDG', lambda v: v == 1)
-            sitl.named('HDG_STATE', lambda v: v == 4, timeout=45)
-            sitl.parameter('VHDG_ENABLE', 0)
-            sitl.named('VFN_HDG', lambda v: v == 0)
-            sitl.parameter('VHDG_ENABLE', 1)
-            sitl.named('HDG_STATE', lambda v: v == 4)
-            sitl.slot(2, low=1700, high=2000)
-            sitl.named('VFN_HDG', lambda v: v == 0)
-            sitl.slot(2, low=1400, high=1600)
-            sitl.named('HDG_STATE', lambda v: v == 4)
-            print('PASS: component-to-heading feedback, master enable and target reacquisition', flush=True)
+            # Route the three-position switch to the new NavMode action.
+            sitl.slot(2, enable=0)
+            sitl.route(16, 16, 202)
+            channels[15] = 1000
+            sitl.override(channels)
+            sitl.slot(2, type=7, mode=0, low=1300, high=1700, enable=1)
+            sitl.parameter('VNAV_ENABLE', 1)
+            sitl.parameter('VNAV_HDG_ENABLE', 1)
+            sitl.parameter('VNAV_DP_ENABLE', 1)
+            for pulse, mode in ((1000, 0), (1300, 0), (1500, 1), (1700, 1),
+                                (2000, 2), (1700, 2), (1500, 1), (1300, 1), (1000, 0), (2000, 2)):
+                channels[15] = pulse
+                sitl.override(channels)
+                sitl.named('VFN2_IN', lambda value: value == pulse)
+                assert sitl.parameter('VNAV_MODE') == mode, (pulse, mode)
+            sitl.named('NAV_STATE', lambda value: value == 1)  # HeadingWait
+            sitl.named('NAV_RBITS', lambda value: int(value) & (1 << 6))  # OutputNotReady
+            channels[15] = 65534  # Release the extension channel.
+            sitl.override(channels)
+            sitl.named('VFN2_ERR', lambda value: int(value) & 8)
+            assert sitl.parameter('VNAV_MODE') == 0
+            sitl.named('NAV_STATE', lambda value: value == 0)
+            print('PASS: three-position NavMode, transition guards, observation-only state and input loss', flush=True)
 
             # Save a latched-on toggle, then restart using the same EEPROM. The
             # configuration must persist while the runtime latch starts off.
@@ -294,6 +305,7 @@ def run(binary):
             sitl.start()
             for name, expected_value in persisted.items():
                 assert sitl.parameter(name) == expected_value, name
+            assert sitl.parameter('VNAV_MODE') == 0
             sitl.override(channels)
             sitl.snapshot(['VFN1_ST', 'VFN_VRS'], lambda row: row['VFN1_ST'] == 15 and row['VFN_VRS'] == 0)
             sitl.parameter('VFN_TEL_HZ', 0)

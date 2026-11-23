@@ -4,8 +4,8 @@
 
 namespace Vektor2 {
 
-// Parameter storage for future navigation controllers; no control behavior is
-// enabled by registering these values.
+// Parameters for the unified Free / Heading Hold / DP navigation system.
+// Milestone 1 supervises mode readiness only; automatic control is not wired.
 class NavigationParameters {
 public:
     NavigationParameters() { AP_Param::setup_object_defaults(this, var_info); }

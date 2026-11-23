@@ -32,6 +32,22 @@ const AP_Param::Info App::var_info[] = {
     // @Group: MP_
     // @Path: MeasurePoints.cpp
     GOBJECT(measure_points, "MP_", MeasurePoints),
+    // @Param: VRPM_TEL_HZ
+    // @DisplayName: Shaft RPM telemetry rate
+    // @Description: Rate for shaft RPM readings and magnet detection states in NAMED_VALUE_FLOAT messages. Zero disables transmission. Requires board-defined RPM inputs. Values above 50 are limited to 50 Hz.
+    // @Units: Hz
+    // @Range: 0 50
+    // @Increment: 1
+    // @User: Standard
+    APP_SCALAR(rpm_tel_hz, "VRPM_TEL_HZ", 0),
+    // @Param: DP_TEL_HZ
+    // @DisplayName: DP and shared heading diagnostic telemetry rate
+    // @Description: Rate for vessel-level DP and heading NAMED_VALUE_FLOAT values. Zero disables this stream, values above 50 are capped at 50 Hz. Independent of NAV_STATE and VTEL receiver polling.
+    // @Units: Hz
+    // @Range: 0 50
+    // @Increment: 1
+    // @User: Standard
+    APP_SCALAR(dp_tel_hz, "DP_TEL_HZ", 0),
 #if AP_SIM_ENABLED
     GOBJECT(sitl, "SIM_", SITL::SIM),
 #endif
@@ -85,6 +101,11 @@ const AP_Param::Info App::var_info[] = {
     // configuration surface.
     GOBJECT(_gcs, "MAV", GCS),
 #endif
+
+    // One stable source ID per i-BUS / HoTT field; no per-slot type parameters.
+    GOBJECT(vtel_params, "VTEL_", VTelemetryParameters),
+
+    GOBJECTN(sequencer.params, sequencer, "", SequencerParameters),
 
     AP_VAREND
 };

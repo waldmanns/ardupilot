@@ -1,5 +1,7 @@
 # Additive VSP roll stabilization
 
+
+
 VRS adds burst or continuous fixed-direction control-rod corrections to the maneuvering
 command **after** each VSP's existing `mapCoordinates()` ring limiter and angle
 correction. Maneuvering continues during a burst. RPM passes through unchanged.
@@ -182,11 +184,11 @@ Flag values are exact small integers even in a named float:
 | 128 | Ring travel, PWM endpoints or final integer rounding limit correction |
 | 256 | Invalid baseline geometry, radius or centre |
 | 512 | No configured drive can produce the requested roll effect |
-| 1024 | VRS ray would oppose an applied VHDG heading correction |
+| 1024 | Reserved; no autonomous heading correction active in this revision |
 
-When optional [heading hold](VHDG.md) applies a Y correction, it receives
-priority: VRS uses the remaining ring travel and yields if its ray would oppose
-that Y addition. Heading hold disabled/manual/waiting retains normal VRS behavior.
+The historical opposite-heading-correction condition is no longer exercised:
+no navigation yaw correction is applied in this milestone. VRS still respects
+its existing limits and manual/vector ownership gates.
 
 These are commands and controller diagnostics, not measured thrust or shaft RPM.
 Roll/rate are zeroed while inputs/configuration are invalid; consult RS_INHIB.

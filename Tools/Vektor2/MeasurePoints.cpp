@@ -43,6 +43,20 @@ void MeasurePoints::init()
 #endif
 }
 
+bool MeasurePoints::read_voltage(uint8_t point, float& volts) const
+{
+#ifdef HAL_VEKTOR2_MEASURE_POINTS
+    if (point < point_count && _sources[point] != nullptr) {
+        volts = _sources[point]->voltage_average() * points[point].multiplier;
+        return std::isfinite(volts);
+    }
+#else
+    (void)point;
+    (void)volts;
+#endif
+    return false;
+}
+
 void MeasurePoints::update(uint32_t now_ms)
 {
 #if defined(HAL_VEKTOR2_MEASURE_POINTS) && HAL_GCS_ENABLED

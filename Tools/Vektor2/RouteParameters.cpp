@@ -67,6 +67,11 @@ const AP_Param::GroupInfo RoutingParameters::var_info[] = {
 
 static bool decode_source(int16_t code, SourceEndpoint& endpoint)
 {
+    if (code >= 301 && code < 301 + Sequencer::lane_count) {
+        endpoint = {SourceKind::SequencerOutput, 0, uint8_t(code - 301)};
+        return true;
+    }
+
     if (code >= 1 && code <= RcInput::max_channels) {
         endpoint = SourceEndpoint::rc(uint8_t(code - 1));
         return true;
@@ -88,6 +93,12 @@ static bool decode_source(int16_t code, SourceEndpoint& endpoint)
 
 static bool decode_destination(int16_t code, ConsumerEndpoint& endpoint)
 {
+    if (code == 417 || (code >= 401 && code < 401 + Sequencer::lane_count)) {
+        endpoint = {ConsumerKind::SequencerTrigger, 0,
+                    code == 417 ? Sequencer::shared_slot : uint8_t(code - 401)};
+        return true;
+    }
+
     if (code >= 1 && code <= max_pwm_channels) {
         endpoint = ConsumerEndpoint::pwm(uint8_t(code - 1));
         return true;
@@ -136,10 +147,19 @@ bool RoutingParameters::sync(Routing& routing, PwmOut& pwm, bool force)
     // Configuration changes are infrequent. Rebuild the tiny table from the
     // parameter snapshot so validation remains deterministic and old PWM
     // consumers are explicitly released.
+    Route previous[max_routes];
+    for (uint8_t i = 0; i < max_routes; i++) {
+        const auto* current = routing.route(i);
+        if (current != nullptr) {
+            previous[i] = *current;
+        }
+    }
+    const uint32_t previous_errors = routing.sequencer_errors();
     routing.clear_all(&pwm);
 
     bool all_valid = true;
     uint16_t function_errors = 0;
+    uint32_t sequencer_errors = 0;
     for (uint8_t i = 0; i < max_routes; i++) {
         _last_source[i] = current_source[i];
         _last_destination[i] = current_destination[i];
@@ -149,9 +169,13 @@ bool RoutingParameters::sync(Routing& routing, PwmOut& pwm, bool force)
         }
 
         Route route;
-        if (!decode_source(current_source[i], route.source) ||
-            !decode_destination(current_destination[i], route.consumer)) {
+        const bool destination_valid = decode_destination(current_destination[i], route.consumer);
+        const bool trigger = destination_valid && route.consumer.kind == ConsumerKind::SequencerTrigger;
+        if (!decode_source(current_source[i], route.source) || !destination_valid) {
             all_valid = false;
+            if (trigger) {
+                sequencer_errors |= 1UL << route.consumer.port;
+            }
             if (current_destination[i] >= 201 && current_destination[i] < 201 + Functions::count) {
                 function_errors |= 1U << (current_destination[i] - 201);
             }
@@ -171,6 +195,9 @@ bool RoutingParameters::sync(Routing& routing, PwmOut& pwm, bool force)
 
         if (!routing.set_route(i, route)) {
             all_valid = false;
+            if (trigger) {
+                sequencer_errors |= 1UL << route.consumer.port;
+            }
             if (function) {
                 function_errors |= 1U << route.consumer.port;
             }
@@ -178,6 +205,8 @@ bool RoutingParameters::sync(Routing& routing, PwmOut& pwm, bool force)
     }
 
     routing.set_function_errors(function_errors);
+    routing.set_sequencer_errors(sequencer_errors);
+    routing.reconcile_sequencer(previous, previous_errors);
     _have_snapshot = true;
     _last_apply_valid = all_valid;
     return all_valid;

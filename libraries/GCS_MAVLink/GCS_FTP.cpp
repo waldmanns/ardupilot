@@ -285,8 +285,26 @@ void GCS_FTP::Session::list_dir(Transaction &request, Transaction &response)
 /*
   close a session
  */
+#if defined(VEKTOR2_SEQ_FTP)
+bool GCS_FTP::Session::close_upload(bool terminate)
+{
+    bool complete = terminate && upload_offset != 0 && AP::FS().fsync(fd) == 0;
+    complete = (AP::FS().close(fd) == 0) && complete;
+    fd = -1;
+    upload_limit = 0;
+    upload_offset = 0;
+    Vektor2::SequencerFtp::end(complete);
+    return complete;
+}
+#endif
+
 void GCS_FTP::Session::close(void)
 {
+#if defined(VEKTOR2_SEQ_FTP)
+    if (upload_limit != 0) {
+        close_upload(false);
+    }
+#endif
     if (fd != -1) {
         AP::FS().close(fd);
         fd = -1;
@@ -317,6 +335,13 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
         reply.opcode = FTP_OP::Ack;
         break;
     case FTP_OP::TerminateSession:
+#if defined(VEKTOR2_SEQ_FTP)
+        if (upload_limit != 0 && !close_upload(true)) {
+            close();
+            GCS_FTP::error(reply, FTP_ERROR::Fail);
+            break;
+        }
+#endif
         close();
         reply.opcode = FTP_OP::Ack;
         break;
@@ -389,9 +414,22 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
             break;
         }
 
+#if defined(VEKTOR2_SEQ_FTP)
+        if (upload_limit != 0 && (request.offset != upload_offset ||
+                                 request.size > upload_limit - upload_offset)) {
+            close();
+            GCS_FTP::error(reply, FTP_ERROR::InvalidDataSize);
+            break;
+        }
+#endif
         // seek to requested offset
         if (AP::FS().lseek(fd, request.offset, SEEK_SET) == -1) {
             GCS_FTP::error(reply, FTP_ERROR::FailErrno);
+#if defined(VEKTOR2_SEQ_FTP)
+            if (upload_limit != 0) {
+                close();
+            }
+#endif
             break;
         }
 
@@ -433,10 +471,26 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
 
         request.data[sizeof(request.data) - 1] = 0; // ensure the path is null terminated
 
-        // actually open the file
+#if defined(VEKTOR2_SEQ_FTP)
+        using Vektor2::SequencerFtp::Path;
+        const auto path = Vektor2::SequencerFtp::classify((char*)request.data);
+        if (path != Path::Ordinary) {
+            if (path != Path::Stage || request.opcode != FTP_OP::CreateFile ||
+                (upload_limit = Vektor2::SequencerFtp::begin(sysid, compid)) == 0) {
+                GCS_FTP::error(reply, FTP_ERROR::FileProtected);
+                break;
+            }
+        }
+#endif
         fd = AP::FS().open((char *)request.data,
                            (request.opcode == FTP_OP::CreateFile) ? O_WRONLY|O_CREAT|O_TRUNC : O_WRONLY);
         if (fd == -1) {
+#if defined(VEKTOR2_SEQ_FTP)
+            if (upload_limit != 0) {
+                upload_limit = 0;
+                Vektor2::SequencerFtp::end(false);
+            }
+#endif
             GCS_FTP::error(reply, FTP_ERROR::FailErrno);
             break;
         }
@@ -467,6 +521,16 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
 
         // fill the buffer
         const ssize_t write_bytes = AP::FS().write(fd, request.data, request.size);
+#if defined(VEKTOR2_SEQ_FTP)
+        if (upload_limit != 0) {
+            if (write_bytes != request.size) {
+                GCS_FTP::error(reply, FTP_ERROR::Fail);
+                close();
+                break;
+            }
+            upload_offset += write_bytes;
+        }
+#endif
         if (write_bytes == -1) {
             GCS_FTP::error(reply, FTP_ERROR::FailErrno);
             break;
@@ -486,6 +550,12 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
 
         request.data[sizeof(request.data) - 1] = 0; // ensure the path is null terminated
 
+#if defined(VEKTOR2_SEQ_FTP)
+        if (Vektor2::SequencerFtp::classify((char*)request.data) != Vektor2::SequencerFtp::Path::Ordinary) {
+            GCS_FTP::error(reply, FTP_ERROR::FileProtected);
+            break;
+        }
+#endif
         // actually make the directory
         if (AP::FS().mkdir((char *)request.data) == -1) {
             GCS_FTP::error(reply, FTP_ERROR::FailErrno);
@@ -506,6 +576,12 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
 
         request.data[sizeof(request.data) - 1] = 0; // ensure the path is null terminated
 
+#if defined(VEKTOR2_SEQ_FTP)
+        if (Vektor2::SequencerFtp::classify((char*)request.data) != Vektor2::SequencerFtp::Path::Ordinary) {
+            GCS_FTP::error(reply, FTP_ERROR::FileProtected);
+            break;
+        }
+#endif
         // remove the file/dir
         if (AP::FS().unlink((char *)request.data) == -1) {
             GCS_FTP::error(reply, FTP_ERROR::FailErrno);
@@ -637,6 +713,14 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
         }
         request.data[sizeof(request.data) - 1] = 0; // ensure the 2nd path is null terminated
         // remove the file/dir
+#if defined(VEKTOR2_SEQ_FTP)
+        using Vektor2::SequencerFtp::Path;
+        if (Vektor2::SequencerFtp::classify(filename1) != Path::Ordinary ||
+            Vektor2::SequencerFtp::classify(filename2) != Path::Ordinary) {
+            GCS_FTP::error(reply, FTP_ERROR::FileProtected);
+            break;
+        }
+#endif
         if (AP::FS().rename(filename1, filename2) != 0) {
             GCS_FTP::error(reply, FTP_ERROR::FailErrno);
             break;

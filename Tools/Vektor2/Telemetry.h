@@ -1,6 +1,9 @@
 #pragma once
 
 #include "Functions.h"
+#include "NavigationSupervisor.h"
+#include "NavigationDP.h"
+#include "NavigationHeading.h"
 #include <stdint.h>
 
 namespace Vektor2 {
@@ -33,19 +36,21 @@ public:
     void update(uint32_t now_ms, int16_t rate_hz, const Logic& logic);
 };
 
-class HeadingTelemetry : public NamedFloatTelemetry {
+class NavigationTelemetry : public NamedFloatTelemetry {
 public:
-    void update(uint32_t now_ms, const Logic& logic);
-
+    void update(uint32_t now_ms, const NavigationSupervisor::Status& status);
 private:
-    uint32_t _last_status_ms = 0;
-    bool _status_sent = false;
-    uint8_t _pending_state = 0;
-    uint8_t _pending_inhibit = 0;
-    uint8_t _pending_reason = 0;
-    uint8_t _state = 0;
-    uint16_t _inhibit = 0;
-    const char* _reason = "Disabled";
+    uint32_t _last_sent_ms = 0;
+    bool _sent = false;
+    NavigationSupervisor::Status _previous;
+};
+
+// Independent DP/heading diagnostic stream, capped by DP_TEL_HZ (0..50).
+// NAV_STATE / NAV_RBITS retain their own state-event cadence.
+class DPTelemetry : public NamedFloatTelemetry {
+public:
+    void update(uint32_t now_ms, int16_t rate_hz, const NavigationDP::Output& dp,
+                const NavigationHeading::Output& heading);
 };
 
 class FunctionTelemetry : public NamedFloatTelemetry {
@@ -58,7 +63,6 @@ private:
     Functions::Status _status[Functions::count] {};
     uint32_t _pending[8] {};
     bool _roll_enabled = false;
-    bool _heading_enabled = false;
 };
 
 } // namespace Vektor2

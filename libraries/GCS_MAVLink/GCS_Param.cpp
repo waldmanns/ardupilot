@@ -215,6 +215,11 @@ void GCS_MAVLINK::handle_param_request_list(const mavlink_message_t &msg)
     // requesting parameters is a convenient way to get extra information
     send_banner();
 
+    restart_parameter_list();
+}
+
+void GCS_MAVLINK::restart_parameter_list()
+{
     // Start sending parameters - next call to ::update will kick the first one out
     _queued_parameter = AP_Param::first(&_queued_parameter_token, &_queued_parameter_type);
     _queued_parameter_index = 0;

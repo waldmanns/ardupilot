@@ -14,12 +14,14 @@ namespace Vektor2 {
 bool NamedFloatTelemetry::ready(uint32_t now_ms, int16_t rate_hz)
 {
     if (rate_hz <= 0) {
+        reset();
         return false;
     }
 
     // Bound unexpected parameter values so telemetry cannot saturate the link.
     const uint16_t bounded_hz = rate_hz > 50 ? 50 : uint16_t(rate_hz);
-    const uint32_t period_ms = 1000U / bounded_hz;
+    // Ceiling prevents rates such as 30 Hz from being sent faster than requested.
+    const uint32_t period_ms = (1000U + bounded_hz - 1U) / bounded_hz;
     if (_sent_once && now_ms - _last_send_ms < period_ms) {
         return false;
     }
@@ -136,13 +138,12 @@ void FunctionTelemetry::update(uint32_t now_ms, const Logic& logic)
         }
         // These are the gates used for this cycle, not the pending requests.
         _roll_enabled = logic.roll_enabled();
-        _heading_enabled = logic.heading_enabled();
         for (uint8_t n = 0; n < 8; n++) {
-            _pending[n] = (channels & (1U << n)) ? UINT32_MAX : 0;
+            _pending[n] = (channels & (1U << n)) ? ((1UL << 31) - 1) : 0;
         }
     }
 #if HAL_GCS_ENABLED
-    static_assert(Functions::count * 3 + 2 == 32, "One bit per function telemetry field");
+    static_assert(Functions::count * 3 + 1 == 31, "One bit per function telemetry field");
     for (uint8_t n = 0; n < gcs().num_gcs(); n++) {
         auto* link = gcs().chan(n);
         if (link == nullptr) {
@@ -154,7 +155,7 @@ void FunctionTelemetry::update(uint32_t now_ms, const Logic& logic)
             pending = 0;
         }
         WITH_SEMAPHORE(comm_chan_lock(channel));
-        for (uint8_t field = 0; field < 32 && pending; field++) {
+        for (uint8_t field = 0; field < Functions::count * 3 + 1 && pending; field++) {
             const uint32_t bit = uint32_t(1) << field;
             if (!(pending & bit)) {
                 continue;
@@ -173,9 +174,8 @@ void FunctionTelemetry::update(uint32_t now_ms, const Logic& logic)
                 value.value = kind == 0 ? ((status.flags & Functions::Valid) ? float(status.pulse_us) : NAN) :
                               (kind == 1 ? float(status.flags) : float(status.errors));
             } else {
-                const bool roll = field == Functions::count * 3;
-                strncpy(value.name, roll ? "VFN_VRS" : "VFN_HDG", sizeof(value.name));
-                value.value = roll ? float(_roll_enabled) : float(_heading_enabled);
+                strncpy(value.name, "VFN_VRS", sizeof(value.name));
+                value.value = float(_roll_enabled);
             }
             mavlink_msg_named_value_float_send_struct(channel, &value);
             pending &= ~bit;
@@ -184,92 +184,61 @@ void FunctionTelemetry::update(uint32_t now_ms, const Logic& logic)
 #endif
 }
 
-void HeadingTelemetry::update(uint32_t now_ms, const Logic& logic)
+void DPTelemetry::update(uint32_t now_ms, int16_t rate_hz,
+                         const NavigationDP::Output& dp,
+                         const NavigationHeading::Output& heading)
 {
-    if (!logic.vhdg.controller().enabled()) {
-        _status_sent = false;
-        _pending_state = _pending_inhibit = _pending_reason = 0;
-        reset();
+    if (!ready(now_ms, rate_hz)) { return; }
+
+    // NAMED_VALUE_FLOAT uses 10-byte names and cannot encode a full E7
+    // coordinate accurately as one float. Exact target / actual E7 positions
+    // are instead available through VTEL sources 240..243; existing standard
+    // MAVLink GLOBAL_POSITION_INT reports current EKF position.
+    const float no = NAN;
+    // A MAVLink float cannot retain 1e-7 degree precision at ordinary
+    // latitude magnitudes. Split target coordinate E7 into an integer degree
+    // part and a signed E7 remainder (each exactly representable as float).
+    // Reconstruct: lat_e7 = DP_TLAT_I * 1e7 + DP_TLAT_F, likewise longitude.
+    send_float("DP_TLAT_I", dp.target_valid ? float(dp.target.lat_e7 / 10000000) : no);
+    send_float("DP_TLAT_F", dp.target_valid ? float(dp.target.lat_e7 % 10000000) : no);
+    send_float("DP_TLON_I", dp.target_valid ? float(dp.target.lon_e7 / 10000000) : no);
+    send_float("DP_TLON_F", dp.target_valid ? float(dp.target.lon_e7 % 10000000) : no);
+    send_float("DP_DIST", dp.target_valid && dp.actual_valid ? dp.distance_m : no);
+    send_float("DP_BRG", dp.target_valid && dp.actual_valid ? dp.bearing_deg : no);
+    send_float("DP_ERR_N", dp.target_valid && dp.actual_valid ? dp.error_n_m : no);
+    send_float("DP_ERR_E", dp.target_valid && dp.actual_valid ? dp.error_e_m : no);
+    send_float("DP_VN", dp.valid ? dp.velocity_n_ms : no);
+    send_float("DP_VE", dp.valid ? dp.velocity_e_ms : no);
+    send_float("DP_CMD_X", dp.valid ? dp.surge : no);
+    send_float("DP_CMD_Y", dp.valid ? dp.sway : no);
+    send_float("DP_CMD_N", dp.valid ? dp.demand_n : no);
+    send_float("DP_CMD_E", dp.valid ? dp.demand_e : no);
+    send_float("DP_CMD_MAG", dp.valid ? dp.demand_magnitude : no);
+    send_float("DP_CMD_BRG", dp.valid ? dp.demand_bearing_deg : no);
+    send_float("HDG_TGT", heading.target_valid ? heading.target_deg : no);
+    send_float("HDG_ACT", heading.actual_valid ? heading.actual_deg : no);
+    send_float("HDG_ERR", heading.target_valid && heading.actual_valid ? heading.error_deg : no);
+    send_float("HDG_CMD", heading.valid ? heading.yaw_demand : no);
+    // Explicit calculation-valid indicators for board-only DP experiments:
+    // neither signal implies propulsion ownership or an ACTIVE NAV_STATE.
+    send_float("DP_CALC", dp.valid ? 1.0f : 0.0f);
+    send_float("HDG_CALC", heading.valid ? 1.0f : 0.0f);
+}
+
+void NavigationTelemetry::update(uint32_t now_ms, const NavigationSupervisor::Status& status)
+{
+    const bool changed = !_sent || _previous.state != status.state ||
+                         _previous.reason_bits != status.reason_bits;
+    // 2 Hz periodic refresh and bounded state-change notification. Both values
+    // are sampled from one control-cycle status, never independent controllers.
+    if (_sent && now_ms - _last_sent_ms < (changed ? 100U : 500U)) {
         return;
     }
-    const int16_t rate_hz = logic.vhdg_params.telemetry_hz();
-    const uint32_t status_period_ms = rate_hz < 10 ? 1000U : 500U;
-    uint8_t channels = 0;
-#if HAL_GCS_ENABLED
-    static_assert(MAVLINK_COMM_NUM_BUFFERS <= 8, "Status channel masks are eight bits");
-    for (uint8_t n = 0; n < gcs().num_gcs(); n++) {
-        const auto* link = gcs().chan(n);
-        if (link == nullptr || !link->is_active() || link->is_private()) {
-            continue;
-        }
-#if HAL_HIGH_LATENCY2_ENABLED
-        if (link->is_high_latency_link) {
-            continue;
-        }
-#endif
-        channels |= 1U << uint8_t(link->get_chan());
-    }
-#endif
-    // Capture one coherent status snapshot at the requested slow cadence.
-    // Retry unsent fields per link between ticks instead of dropping a status
-    // permanently when its fixed phase coincides with another telemetry burst.
-    if (!_status_sent || now_ms - _last_status_ms >= status_period_ms) {
-        _last_status_ms = now_ms;
-        _status_sent = true;
-        const auto& controller = logic.vhdg.controller();
-        _state = uint8_t(controller.state());
-        _inhibit = controller.inhibited();
-        _reason = controller.inhibit_reason();
-        _pending_state = _pending_inhibit = _pending_reason = channels;
-#if HAL_LOGGING_ENABLED
-        if (AP::logger().should_log(1U << 3)) {
-            AP::logger().WriteStreaming("VHST", "TimeUS,State,Inhib,Reason", "QBHZ",
-                                       AP_HAL::micros64(), _state, _inhibit, _reason);
-        }
-#endif
-    }
-    _pending_state &= channels;
-    _pending_inhibit &= channels;
-    _pending_reason &= channels;
-#if HAL_GCS_ENABLED
-    for (uint8_t n = 0; n < gcs().num_gcs(); n++) {
-        auto* link = gcs().chan(n);
-        if (link == nullptr) {
-            continue;
-        }
-        const auto channel = link->get_chan();
-        const uint8_t mask = 1U << uint8_t(channel);
-        if (!((_pending_state | _pending_inhibit | _pending_reason) & mask)) {
-            continue;
-        }
-        WITH_SEMAPHORE(comm_chan_lock(channel));
-        mavlink_named_value_float_t value{};
-        value.time_boot_ms = _last_status_ms;
-        if ((_pending_state & mask) && HAVE_PAYLOAD_SPACE(channel, NAMED_VALUE_FLOAT)) {
-            memcpy(value.name, "HDG_STATE", 9);
-            value.value = _state;
-            mavlink_msg_named_value_float_send_struct(channel, &value);
-            _pending_state &= ~mask;
-        }
-        if ((_pending_inhibit & mask) && HAVE_PAYLOAD_SPACE(channel, NAMED_VALUE_FLOAT)) {
-            memcpy(value.name, "HDG_INHIB", 9);
-            value.value = _inhibit;
-            mavlink_msg_named_value_float_send_struct(channel, &value);
-            _pending_inhibit &= ~mask;
-        }
-        if ((_pending_reason & mask) && HAVE_PAYLOAD_SPACE(channel, NAMED_VALUE_STRING)) {
-            mavlink_named_value_string_t reason{};
-            reason.time_boot_ms = _last_status_ms;
-            memcpy(reason.name, "HDG_REASON", 10);
-            strncpy(reason.value, _reason, sizeof(reason.value) - 1);
-            mavlink_msg_named_value_string_send_struct(channel, &reason);
-            _pending_reason &= ~mask;
-        }
-    }
-#endif
-    if (ready(now_ms, rate_hz)) {
-        logic.vhdg.send_telemetry(*this);
-    }
+    _sent = true;
+    _last_sent_ms = now_ms;
+    _previous = status;
+    send_float("NAV_STATE", float(uint8_t(status.state)));
+    send_float("NAV_RBITS", float(status.reason_bits));
 }
 
 } // namespace Vektor2

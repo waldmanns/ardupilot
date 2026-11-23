@@ -100,9 +100,6 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // @Group: VRS_
     // @Path: RollStabilizationParams.cpp
     AP_SUBGROUPINFO(vrs_params, "VRS_", 8, Logic, RollStabilizationParameters),
-    // @Group: VHDG_
-    // @Path: HeadingHoldParams.cpp
-    AP_SUBGROUPINFO(vhdg_params, "VHDG_", 9, Logic, HeadingHoldParameters),
     // @Group: VFN
     // @Path: FunctionParameters.cpp
     AP_SUBGROUPINFO(vfn_params, "VFN", 10, Logic, FunctionParameters),
@@ -119,7 +116,6 @@ void Logic::begin_cycle()
     const bool vector_owned = vsp1_params.vmode.get() != 0 || vsp2_params.vmode.get() != 0 ||
         _vectors[0].blocks_assistance() || _vectors[1].blocks_assistance();
     _roll_enabled = !vector_owned && vrs_params.enabled() && vfn.permits(Functions::Type::Roll);
-    _heading_enabled = vhdg_params.enabled() && vfn.permits(Functions::Type::Heading);
     vrs.update(vrs_params, vsp1_params.roll, vsp2_params.roll, _roll_enabled);
     for (uint8_t component = 0; component < component_count; component++) {
         for (uint8_t port = 0; port < max_inputs; port++) {
@@ -177,16 +173,13 @@ bool Logic::prepare_vsp(uint8_t drive)
                                   runtime.sources_valid[0] && runtime.sources_valid[1]);
 }
 
-void Logic::finish_vsp(uint8_t drive, bool vector_owned, const VspMapper::Vector* heading)
+void Logic::finish_vsp(uint8_t drive, bool vector_owned)
 {
     auto& runtime = _runtime[drive];
     if (vector_owned) {
-        const bool assisted = _vectors[drive].apply(runtime.outputs[0], runtime.outputs[1], heading);
+        _vectors[drive].apply(runtime.outputs[0], runtime.outputs[1]);
         runtime.outputs[2] = runtime.inputs[2]; // RPM remains independent.
         _vsp_authority[drive] = _vectors[drive].state() == VspVectorControl::State::Active ? Manual : NeutralGuard;
-        if (assisted) {
-            _vsp_authority[drive] |= AutoHeading;
-        }
         return;
     }
     const auto id = ComponentId(drive);
@@ -206,76 +199,6 @@ void Logic::set_thruster_routes(uint8_t mask, uint32_t revision)
     _thruster_routes = mask;
 }
 
-HeadingActuation Logic::heading_auxiliary() const
-{
-    HeadingActuation result;
-    for (const auto& thruster : _thrusters) {
-        result.manual |= thruster.manual_override();
-        result.revision += thruster.revision();
-        if (thruster.heading_available()) {
-            result.available = true;
-            result.slew = fminf(result.slew, thruster.heading_slew());
-        }
-    }
-    return result;
-}
-
-void Logic::run_heading_group(bool controls_valid, uint32_t route_revision)
-{
-    run(ComponentId::ThrusterBow);
-    run(ComponentId::ThrusterStern);
-    if (vhdg_params.values().vsp_enabled) {
-        run_vsp_pair(controls_valid, route_revision);
-    } else {
-        vhdg.update(vhdg_params, heading_auxiliary(), controls_valid, true, route_revision,
-                    _heading_enabled);
-    }
-    const auto& heading = vhdg.controller();
-    for (uint8_t n = 0; n < 2; n++) {
-        _thrusters[n].apply_heading(heading.command(), heading.state() == HeadingHold::State::Hold);
-        _runtime[uint8_t(ComponentId::ThrusterBow) + n].outputs[0] = _thrusters[n].output();
-    }
-}
-
-void Logic::run_vsp_pair(bool controls_valid, uint32_t route_revision)
-{
-    const bool managed[2] {prepare_vsp(0), prepare_vsp(1)};
-    const VspVectorControl::Settings settings[2] {vsp1_params.vector_settings(), vsp2_params.vector_settings()};
-    const auto auxiliary = heading_auxiliary();
-    HeadingActuation actuation;
-    actuation.available = true;
-    actuation.manual = auxiliary.manual;
-    actuation.slew = auxiliary.available ? auxiliary.slew : 100;
-    actuation.revision = auxiliary.revision;
-    const auto heading_settings = vhdg_params.values();
-    for (uint8_t n = 0; n < 2; n++) {
-        // The actuator's preparation stage is the sole mapping/settings validator.
-        actuation.configuration_valid &= settings[n].mode == 1 &&
-            _vectors[n].state() != VspVectorControl::State::Invalid;
-        actuation.available &= _vectors[n].heading_ready();
-        actuation.slew = fminf(actuation.slew, settings[n].slew);
-        actuation.revision += _vectors[n].revision();
-        // Both neutral definitions must agree before automatic authority begins.
-        for (uint8_t axis = 0; axis < 2; axis++) {
-            const int32_t offset = int32_t(_runtime[n].inputs[axis]) - 1500;
-            if (input_valid(ComponentId(n), axis) &&
-                (offset < -heading_settings.stick_deadband || offset > heading_settings.stick_deadband ||
-                 offset < -settings[n].deadband_us || offset > settings[n].deadband_us)) {
-                actuation.manual = true;
-            }
-        }
-    }
-    vhdg.update(vhdg_params, actuation, controls_valid, true, route_revision, _heading_enabled);
-    const auto& heading = vhdg.controller();
-    const bool holding = heading.state() == HeadingHold::State::Hold;
-    // One signed yaw effort, positive toward starboard. The mapper owns all
-    // rotor/installation/rod geometry; no rod-Y correction path remains.
-    const VspMapper::Vector commands[2] {{heading.command(), 0}, {-heading.command(), 0}};
-    for (uint8_t n = 0; n < 2; n++) {
-        finish_vsp(n, managed[n], holding ? &commands[n] : nullptr);
-    }
-}
-
 void Logic::record_vsp_authority(uint8_t drive)
 {
     if (drive >= 2) {
@@ -292,11 +215,6 @@ void Logic::record_vsp_authority(uint8_t drive)
     _vsp_authority[drive] = flags;
 }
 
-void Logic::update_heading_bypass(bool controls_valid, bool routes_valid, uint32_t route_revision)
-{
-    vhdg.update(vhdg_params, HeadingActuation{}, controls_valid, routes_valid, route_revision, _heading_enabled);
-}
-
 bool Logic::output_valid(ComponentId id) const
 {
     if (!valid(id)) {
@@ -308,6 +226,21 @@ bool Logic::output_valid(ComponentId id) const
         }
     }
     return true;
+}
+
+bool Logic::output_valid(ComponentId id, uint8_t port) const
+{
+    if (!valid(id) || port >= definition(id).output_count) {
+        return false;
+    }
+    const auto& runtime = _runtime[uint8_t(id)];
+    if (id == ComponentId::VSP1 || id == ComponentId::VSP2) {
+        // VSP rods need both vector/legacy X and Y inputs. RPM_OUT only
+        // requires RPM_IN; do not reject good rods for an unused RPM route.
+        return port == 2 ? runtime.sources_valid[2] :
+               (runtime.sources_valid[0] && runtime.sources_valid[1]);
+    }
+    return runtime.sources_valid[0];
 }
 
 bool Logic::input_valid(ComponentId id, uint8_t port) const

@@ -71,13 +71,9 @@ void App::logging_task()
         }
     }
     if (logger.should_log(1U << 3)) {
-        const auto& hdg = logic.vhdg.controller();
-        const bool holding = hdg.state() == HeadingHold::State::Hold;
-        logger.WriteStreaming("VHDG", "TimeUS,En,State,Inhib,Hdg,Tgt,Err,Rate,Req,I,Scale,Wait,Cmd",
-                              "QBBHfffffffff", time_us, hdg.enabled(), uint8_t(hdg.state()), hdg.inhibited(),
-                              hdg.heading(), holding ? hdg.target() : NAN, holding ? hdg.error() : NAN,
-                              hdg.rate(), hdg.demand(), hdg.integral(), hdg.travel_scale(),
-                              hdg.wait_ms() * 0.001f, hdg.command());
+        const auto& nav = nav_supervisor.status();
+        logger.WriteStreaming("VNST", "TimeUS,State,RBits", "QBH", time_us,
+                              uint8_t(nav.state), nav.reason_bits);
     }
     if (logger.should_log(1U << 4)) {
         const auto* roll = logic.vrs.controller();

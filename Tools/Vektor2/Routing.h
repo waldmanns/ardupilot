@@ -4,6 +4,7 @@
 #include "Logic.h"
 #include "PwmOut.h"
 #include "RcInput.h"
+#include "Sequencer.h"
 
 #include <stdint.h>
 
@@ -12,6 +13,7 @@ namespace Vektor2 {
 enum class SourceKind : uint8_t {
     RcInput = 0,
     ComponentOutput = 1,
+    SequencerOutput = 2,
 };
 
 struct SourceEndpoint {
@@ -41,6 +43,7 @@ enum class ConsumerKind : uint8_t {
     ComponentInput = 0,
     PwmOutput = 1,
     FunctionInput = 2,
+    SequencerTrigger = 3,
 };
 
 struct ConsumerEndpoint {
@@ -111,6 +114,11 @@ public:
 
     void update(const RcInput& rc, Logic& logic, PwmOut& pwm);
 
+    void attach_sequencer(Sequencer& sequencer) { _sequencer = &sequencer; }
+    uint32_t sequencer_errors() const { return _sequencer_errors; }
+    void set_sequencer_errors(uint32_t mask) { _sequencer_errors = mask; }
+    void reconcile_sequencer(const Route (&previous)[capacity], uint32_t previous_errors);
+
     // Invalid/duplicate parameter routes must inhibit the entire function
     // consumer, not leave the first accepted producer active.
     void set_function_errors(uint16_t mask) { _function_error_mask = mask; }
@@ -139,11 +147,14 @@ private:
     void sample_functions(const RcInput& rc, Logic& logic,
                           const Route* const (&routes)[Functions::count]) const;
 
+    void sample_sequencer(const RcInput& rc, const Logic& logic) const;
+
     Route _routes[capacity] {};
+    Sequencer* _sequencer = nullptr;
+    uint32_t _sequencer_errors = 0;
     RcLossPolicy _rc_loss_policy = RcLossPolicy::HoldLast;
     uint32_t _driven_output_mask = 0;
     uint32_t _revision = 0;
-    bool _heading_routes_valid = true;
     uint16_t _function_error_mask = 0;
     Route _function_routes[Functions::count] {};
     uint32_t _function_revisions[Functions::count] {};
@@ -153,10 +164,6 @@ private:
         ComponentId::VSP2,
         ComponentId::ThrusterBow,
         ComponentId::ThrusterStern,
-    };
-    ComponentId _paired_execution_order[Logic::component_count] {
-        ComponentId::VSP1, ComponentId::VSP2,
-        ComponentId::ThrusterBow, ComponentId::ThrusterStern,
     };
 };
 

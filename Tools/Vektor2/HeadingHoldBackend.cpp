@@ -1,5 +1,4 @@
 #include "HeadingHoldBackend.h"
-#include "Telemetry.h"
 
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Compass/AP_Compass.h>
@@ -44,23 +43,6 @@ void HeadingHoldBackend::update(const HeadingHoldParameters& params, const Headi
     _yaw_reset_ms = yaw_reset_ms;
     _route_revision = route_revision;
     _controller.update(now_ms, params.values(), sample, actuation);
-}
-
-void HeadingHoldBackend::send_telemetry(const HeadingTelemetry& telemetry) const
-{
-    if (!_controller.enabled()) {
-        return;
-    }
-    const bool holding = _controller.state() == HeadingHold::State::Hold;
-    telemetry.send_float("HDG_NOW", _controller.heading());
-    telemetry.send_float("HDG_TGT", holding ? _controller.target() : NAN);
-    telemetry.send_float("HDG_ERR", holding ? _controller.error() : NAN);
-    telemetry.send_float("HDG_RATE", _controller.rate());
-    telemetry.send_float("HDG_REQ", _controller.demand());
-    telemetry.send_float("HDG_I", _controller.integral());
-    telemetry.send_float("HDG_WAIT", _controller.wait_ms() * 0.001f);
-    telemetry.send_float("HDG_SCALE", _controller.travel_scale());
-    telemetry.send_float("HDG_CMD", _controller.command());
 }
 
 } // namespace Vektor2

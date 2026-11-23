@@ -14,8 +14,8 @@
 namespace Vektor2 {
 
 static constexpr uint16_t firmware_major = 0;
-static constexpr uint16_t firmware_minor = 5;
-static constexpr uint16_t firmware_patch = 0;
+static constexpr uint16_t firmware_minor = 6;
+static constexpr uint16_t firmware_patch = 4;
 
 // EKF/IMU service rate. 100 Hz is intentionally conservative for F405-class
 // hardware and can be raised later after timing and RAM/flash are measured.

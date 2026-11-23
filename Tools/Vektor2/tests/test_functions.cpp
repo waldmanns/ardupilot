@@ -162,7 +162,7 @@ static void arbitration_and_faults()
         case 2: f.settings[0].low = 799; break;
         case 3: f.settings[0].high = 2201; break;
         case 4: f.settings[0].low = 2001; break;
-        case 5: f.settings[0].type = 5; break;
+        case 5: f.settings[0].type = 8; break;
         case 6: f.settings[0].type = -1; break;
         }
         f.tick();

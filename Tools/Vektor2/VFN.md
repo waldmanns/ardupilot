@@ -1,5 +1,7 @@
 # Routed functions (VFN)
 
+
+
 Ten fixed function slots convert routed microsecond signals into runtime
 requests for built-in controller features. The compiled defaults leave every
 slot unused and disabled; existing routing, master enables and controller
@@ -18,14 +20,14 @@ Replace `n` with 1..10, without an underscore after VFN: for example,
 | Parameter | Default | Values |
 | --- | --- | --- |
 | `VFNn_ENABLE` | 0 | 0 disabled, 1 enabled |
-| `VFNn_TYPE` | 0 | 0 unused, 1 VRS on/off request, 2 Auto heading request, 3 Bow enable, 4 Stern enable |
-| `VFNn_MODE` | 0 | 0 level, 1 toggle on entry |
-| `VFNn_LOW` | 1700 | Inclusive lower activation bound, 800..2200 us |
-| `VFNn_HIGH` | 2000 | Inclusive upper activation bound, LOW..2200 us |
+| `VFNn_TYPE` | 0 | 0 unused, 1 VRS gate, 2 Auto heading gate, 3 Bow gate, 4 Stern gate, **7 NavMode** (5/6 retired; invalid until reconfigured) |
+| `VFNn_MODE` | 0 | 0 level, 1 toggle on entry (NavMode requires 0) |
+| `VFNn_LOW` | 1700 | Normal actions: inclusive lower bound. NavMode: Free / Heading boundary |
+| `VFNn_HIGH` | 2000 | Normal actions: inclusive upper bound. NavMode: Heading / DP boundary |
 | `VFN_TEL_HZ` | 1 | 0 stops function telemetry; 1..10 Hz |
 
 There are 51 parameters. Unsupported types/modes, nonbinary ENABLE values,
-reversed bounds and out-of-range bounds report a configuration error and
+reversed bounds, NavMode bands too narrow for +/-50us transitions, and out-of-range bounds report a configuration error and
 contribute no request. Values are not silently corrected. Telemetry rate does
 not affect evaluation, timing or the toggle latch; positive rates above ten
 are bounded to ten. Custom display names remain client settings.
@@ -79,9 +81,15 @@ execution. Such a connection can change state every cycle if its output
 moves across the activation interval; a delayed feedback path does not
 guarantee a stable control choice.
 
-Level mode requests the action whenever `LOW <= pulse <= HIGH`. A zero-width
-interval (LOW=HIGH) matches exactly that microsecond value. There is no hidden
-hysteresis, deadband or debounce that would change the configured interval.
+For ordinary VFN actions, level mode requests the action whenever
+`LOW <= pulse <= HIGH`. A zero-width interval (LOW=HIGH) matches exactly that
+microsecond value. **NavMode is the sole exception**: `LOW` and `HIGH` are
+ordered transition thresholds for a **required three-position RC switch**.
+For NavMode, `Matched` and `Requested` reflect the selected non-Free mode,
+including when the mode is held in a transition band. There is a fixed +/-50us
+no-change interval around each threshold (not an additional mode): during a
+transition, the last stable request is retained. RC loss/errors reset to Free.
+Set LOW/HIGH between the *measured* stable switch positions.
 
 Toggle mode starts off and requires a valid sample outside the interval to
 arm. The next entry flips its request once. Remaining inside does not flip
@@ -97,9 +105,56 @@ cycle, just like other function changes. The controllers' existing direct
 sensor/input validity checks continue to apply independently. Toggle state,
 captured heading targets and requests are never saved to persistent storage.
 
+## M3.8.1 single NavMode action (observation only)
+
+`VFNn_TYPE=7` (`NavMode`) is the **only** navigation mode selector. Use **one**
+VFN slot and **one** routed RC input. Unlike other VFN actions, `LOW` and `HIGH`
+are PWM thresholds, not a single inclusive activation interval:
+
+`NavMode` **requires a physical three-position switch**, verified to have
+three stable pulse values (for example 1000 / 1500 / 2000 us). It does not
+support a documented two-position Free/DP configuration. `LOW` and `HIGH` are
+transition centers, with a fixed 50 us no-change zone on either side:
+
+| Input pulse (LOW=1300, HIGH=1700) | Requested `VNAV_MODE` |
+| --- | --- |
+| 800..1249 us | 0 Free |
+| 1250..1349 us | No change: hold previously selected mode |
+| 1350..1649 us | 1 Heading Hold |
+| 1650..1749 us | No change: hold previously selected mode |
+| 1750..2200 us | 2 Full DP |
+
+On boot, the retained mode starts Free. Invalid/lost RC or invalid assignment
+immediately resets to Free, even when the pulse lies in a no-change zone.
+`VFNn_MODE` must be `0` (level). Thresholds must leave nonempty stable Free,
+Heading and DP ranges and transition zones. A PWM signal alone cannot verify
+the hardware switch has three detents; commissioning must confirm all three.
+Standard VFN defaults (1700/2000) are not recommended: configure boundaries
+between the actual stable switch readings.
+
+Stored M3.8 types **5** (`NavHeading`) and **6** (`NavDP`) have been **retired**.
+They are deliberately rejected with VFN configuration errors and cannot be
+reinterpreted as type 7. Remove any old assignments (`TYPE=0`, disable the
+unused slot and remove its route) and assign one new type-7 slot. A second
+NavMode slot or mixing an old and new selector is a conflict that fails to
+Free. Unrouted, disabled, invalid, out-of-range or lost RC input also fails
+to Free; `NAV_RBITS` includes `CONFIG_INVALID` for configuration conflicts,
+and the VFN slot errors explain invalid routes/inputs. Type 2 remains the
+separate older auto-heading **enable gate**, not the navigation mode selector.
+
+The selected request updates `VNAV_MODE` in **RAM only**; it is never saved
+from RC changes. Removing the last selector returns the request to Free and
+then allows direct parameter mode selection. The navigation master enables
+are still separate. Only calculations and telemetry are enabled in this
+revision: `NAV_STATE` remains `HDG_WAIT` when auto actuator ownership is
+absent, even with `DP_CALC=1` / `HDG_CALC=1`.
+
+Board configuration and migration instructions:
+[NAVIGATION_M381_HANDOVER.md](NAVIGATION_M381_HANDOVER.md).
+
 ## Master enables and arbitration
 
-`VRS_ENABLE` and `VHDG_ENABLE` remain persistent master enables. VFN does not
+`VRS_ENABLE` and `VNAV_HDG_ENABLE` remain persistent master enables. VFN does not
 write or save them during runtime switching.
 
 For each action:
@@ -116,20 +171,19 @@ action can still enable it. Set TYPE=0 to remove an assignment. With no
 assignments of that type, the master works exactly as before. Turning off a
 master overrides every request; it does not alter slot configuration/latches.
 
-Effective disable uses the existing controller bypass/reset paths. Removing
-heading enable discards its target and corrections; reactivation waits for
-neutral controls and captures a fresh target. Compass/attitude/input checks,
-manual override and heading-before-VRS travel allocation remain unchanged.
+Effective disable gates the relevant function. In the navigation-base stage,
+heading gates `VNAV_HDG_ENABLE` readiness but no automatic yaw is yet wired.
+Mode changes and eventual target capture are owned by the navigation supervisor.
 
 ## Telemetry
 
-`VFN_TEL_HZ` independently controls a coherent snapshot of 32
+`VFN_TEL_HZ` independently controls a coherent snapshot of 31
 `NAMED_VALUE_FLOAT` fields. Their common timestamp is the sample time, even
 when transmission spans multiple control loops. Unsent fields are retried
 per active link without blocking control. No VFN stream is emitted before
 any slot is configured. Removing the last configuration sends one final
 clearing snapshot, then stops. Setting the rate to zero stops pending sends
-as well. Existing VRS/heading telemetry retains its previous enable/rate rules.
+as well. Navigation status is independent and uses `NAV_STATE` / `NAV_RBITS`.
 
 | Wire name | Meaning |
 | --- | --- |
@@ -137,21 +191,19 @@ as well. Existing VRS/heading telemetry retains its previous enable/rate rules.
 | `VFNn_ST` | Exact integer status flags below |
 | `VFNn_ERR` | Exact integer error flags below |
 | `VFN_VRS` | Effective master/function-gated VRS enable used this cycle, 0/1 |
-| `VFN_HDG` | Effective master/function-gated heading enable used this cycle, 0/1 |
 
 Here n=1..10. All names fit the ten-byte MAVLink name field. Routed input
-and interval match are available even for a disabled/unused slot, whenever
+and request match are available even for a disabled/unused slot, whenever
 another slot keeps the stream active. ST bit 16 describes the **next** cycle's
-request; VFN_VRS/VFN_HDG describe gates already used in the current cycle.
-These enables do not claim that a controller is producing a correction:
-consult existing RS_STATE/RS_INHIB and HDG_STATE/HDG_INHIB/HDG_REASON telemetry.
+request; `VFN_VRS` reports the VRS gate already used in the current cycle.
+Navigation control status is only reported by `NAV_STATE`/`NAV_RBITS`.
 
 | ST bit value | Meaning |
 | --- | --- |
 | 1 | Slot ENABLE=1 |
 | 2 | A runtime producer route exists |
 | 4 | Current source/input pulse valid |
-| 8 | Current pulse matches the inclusive interval |
+| 8 | Pulse matches ordinary interval; for NavMode, a non-Free position |
 | 16 | Slot requests its action |
 | 32 | Toggle armed by a valid outside-range sample |
 

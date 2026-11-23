@@ -65,7 +65,7 @@ and firmware/system metadata, followed by selected Vektor samples:
 | 1 | `VATT`, `VIMU` | Roll/pitch/yaw in degrees, attitude validity, acceleration in m/s², body gyro in rad/s, INS health |
 | 2 | `VGPS`, `VPOS` | Receiver fix/satellites/position/speed/course/HDOP; fused position and NED velocity with validity flags |
 | 4 | `VVSP`, `VRC`, `VPWM` | Both VSP raw X/Y/RPM inputs and final component outputs; RC pulse widths/validity; enabled physical PWM outputs |
-| 8 | `VHDG`, `VHST` | Heading hold enable/state/inhibition, heading/target/error/rate, PID request/integral, travel scale, idle wait and both applied Y additions; slow status snapshot with readable reason |
+| 8 | `VNST` | Navigation state and unified reason bits (two numeric fields) |
 | 16 | `VROL`, `VRSD` | Enabled roll controller state/inhibition/roll/rate/demand and each drive's correction/headroom/duty/limiting/burst count |
 | 32 | `VSTA` | Storage state, control-input validity, total/free bytes and dropped logger blocks |
 

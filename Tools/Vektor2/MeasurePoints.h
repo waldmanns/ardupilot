@@ -11,6 +11,8 @@ public:
     MeasurePoints();
     void init();
     void update(uint32_t now_ms);
+    // Independent of the MAVLink MP_TEL_HZ publisher. Absent channels are invalid.
+    bool read_voltage(uint8_t point, float& volts) const;
 
     static const AP_Param::GroupInfo var_info[];
 

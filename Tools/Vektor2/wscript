@@ -33,7 +33,12 @@ def build(bld):
     # These are application-level exclusions, not runtime state machines.
     # They keep the generic GCS/AHRS libraries from pulling vehicle concepts
     # into Vektor2 while leaving EKF3, GPS, RCProtocol and MAVLink enabled.
+    profile = bld.env.VEKTOR2_SEQ_PROFILE
+    if not profile:
+        profile = 'large' if bld.env.BOARD in ('MatekH743', 'sitl') else 'compact'
     bld.env.DEFINES += [
+        'VEKTOR2_SEQ_LARGE=' + ('1' if profile == 'large' else '0'),
+        'VEKTOR2_SEQ_FTP=1',
         'AP_ARMING_ENABLED=0',
         'AP_VEHICLE_ENABLED=0',
         'HAL_GCS_ENABLED=1',

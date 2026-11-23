@@ -3,7 +3,6 @@
 #include "HeadingHoldParams.h"
 
 namespace Vektor2 {
-class HeadingTelemetry;
 
 class HeadingHoldBackend {
 public:
@@ -12,7 +11,6 @@ public:
                 bool controls_valid, bool routes_valid, uint32_t route_revision,
                 bool permitted = true);
     const HeadingHold& controller() const { return _controller; }
-    void send_telemetry(const HeadingTelemetry& telemetry) const;
 
 private:
     HeadingHold _controller;

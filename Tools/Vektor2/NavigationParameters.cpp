@@ -12,7 +12,7 @@ const AP_Param::GroupInfo NavigationParameters::var_info[] = {
 
     // @Param: MODE
     // @DisplayName: Current navigation mode
-    // @Description: Current navigation mode
+    // @Description: Requested navigation mode. When VFN type 5 or 6 is assigned, live RC selection overrides this value in RAM without saving it to flash. Free/Heading/DP calculations only; no automatic propulsion in M3.8.
     // @Values: 0:Manual,1:Heading Hold,2:Dynamic Positioning
     // @User: Standard
     AP_GROUPINFO("MODE", 2, NavigationParameters, mode, 0),
