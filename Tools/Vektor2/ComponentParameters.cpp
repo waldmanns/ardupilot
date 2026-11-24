@@ -146,6 +146,71 @@ const AP_Param::GroupInfo VSP2ParameterStore::var_info[] = {
     AP_GROUPEND
 };
 
+const AP_Param::GroupInfo AzipodParameterStore::var_info[] = {
+    // Layout selects installed drives; these parameters are calibration only.
+    // @Param: ANG_MIN
+    // @Description: Mechanical angle at logical 1000 us (degrees).
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("ANG_MIN", 2, AzipodParameterStore, angle_min, -90),
+    // @Param: ANG_MAX
+    // @Description: Mechanical angle at logical 2000 us (degrees). Travel must be less than 360 degrees.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("ANG_MAX", 3, AzipodParameterStore, angle_max, 90),
+    // @Param: OFFSET
+    // @Description: Body thrust angle at mechanical zero (degrees clockwise).
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("OFFSET", 4, AzipodParameterStore, offset, 0),
+    // @Param: REV
+    // @Description: ESC type: 0 forward only (1000 stop), 1 reversible (1500 stop).
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("REV", 5, AzipodParameterStore, reversible, 0),
+    // @Param: REV_OPT
+    // @Description: Prefer short steering travel using reverse when possible.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("REV_OPT", 6, AzipodParameterStore, reverse_opt, 1),
+    // @Param: UNREACH
+    // @Description: 0 stop for unreachable thrust, 1 project onto reachable direction.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("UNREACH", 7, AzipodParameterStore, unreachable, 0),
+    // @Param: DB
+    // @Description: Radial joystick deadband in microseconds.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("DB", 8, AzipodParameterStore, deadband, 25),
+    // @Param: RATE
+    // @Description: Conservative estimated servo travel rate in degrees per second.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("RATE", 9, AzipodParameterStore, rate, 90),
+    // @Param: REV_HYST
+    // @Description: Extra steering cost in degrees for changing motor direction.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("REV_HYST", 10, AzipodParameterStore, hysteresis, 15),
+    // @Param: REV_DLY
+    // @Description: Minimum neutral dwell before reversing in milliseconds.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("REV_DLY", 11, AzipodParameterStore, reverse_delay, 500),
+    // @Param: ALIGN
+    // @Description: Maximum commanded steering error for motor thrust in degrees.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("ALIGN", 12, AzipodParameterStore, align, 5),
+    // @Param: SLEW
+    // @Description: Motor thrust slew in normalized units per second.
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("SLEW", 13, AzipodParameterStore, motor_slew, 1.0f),
+    AP_GROUPEND
+};
+
 const AP_Param::GroupInfo ThrusterBowParameterStore::var_info[] = {
     // @Param: MID
     // @DisplayName: Bow thruster midpoint
@@ -156,7 +221,9 @@ const AP_Param::GroupInfo ThrusterBowParameterStore::var_info[] = {
 
     // @Param: DST
     // @DisplayName: Bow thruster distance
-    // @Description: Distance reserved for bow thruster control logic.
+    // @Description: Positive longitudinal distance forward of the vessel center, in centimeters. Required for automatic yaw when HDG_EN is enabled.
+    // @Units: cm
+    // @Range: 0 32767
     // @User: Standard
     AP_GROUPINFO("DST", 2, ThrusterBowParameterStore, dst, 0),
 
@@ -218,7 +285,9 @@ const AP_Param::GroupInfo ThrusterSternParameterStore::var_info[] = {
 
     // @Param: DST
     // @DisplayName: Stern thruster distance
-    // @Description: Distance reserved for stern thruster control logic.
+    // @Description: Positive longitudinal distance aft of the vessel center, in centimeters. Required for automatic yaw when HDG_EN is enabled.
+    // @Units: cm
+    // @Range: 0 32767
     // @User: Standard
     AP_GROUPINFO("DST", 2, ThrusterSternParameterStore, dst, 0),
 

@@ -53,7 +53,7 @@ void App::logging_task()
                               velocity_valid ? velocity.z : NAN, position_valid, velocity_valid);
     }
     if (logger.should_log(1U << 2)) {
-        for (uint8_t n = 0; n < 2; n++) {
+        for (uint8_t n = 0; logic.vsp_selected() && n < 2; n++) {
             const auto id = ComponentId(n);
             logger.WriteStreaming("VVSP", "TimeUS,Drive,InX,InY,InRPM,OutX,OutY,OutRPM", "QBHHHHHH",
                                   time_us, n + 1, logic.input(id, 0), logic.input(id, 1), logic.input(id, 2),
@@ -76,7 +76,7 @@ void App::logging_task()
                               uint8_t(nav.state), nav.reason_bits);
     }
     if (logger.should_log(1U << 4)) {
-        const auto* roll = logic.vrs.controller();
+        const auto* roll = logic.roll_controller();
         if (roll != nullptr) {
             logger.WriteStreaming("VROL", "TimeUS,State,Inhib,Roll,Rate,Req", "QBHfff", time_us,
                                   uint8_t(roll->state()), roll->inhibited(), roll->roll(), roll->rate(), roll->demand());

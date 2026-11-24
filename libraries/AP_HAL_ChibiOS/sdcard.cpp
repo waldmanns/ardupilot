@@ -45,6 +45,10 @@ static AP_HAL::SPIDevice *device;
 static MMCConfig mmcconfig;
 static SPIConfig lowspeed;
 static SPIConfig highspeed;
+static bool probe_active;
+static uint8_t probe_command;
+static uint8_t probe_response;
+static unsigned probe_transfer_errors;
 #endif
 
 /*
@@ -137,11 +141,25 @@ bool sdcard_init()
     for (uint8_t i=0; i<tries; i++) {
         mmcStart(&MMCD1, &mmcconfig);
 
-        if (mmcConnect(&MMCD1) == HAL_FAILED) {
+        probe_active = true;
+        probe_command = UINT8_MAX;
+        probe_response = UINT8_MAX;
+        probe_transfer_errors = 0;
+        const bool connect_failed = mmcConnect(&MMCD1) == HAL_FAILED;
+        probe_active = false;
+        if (connect_failed) {
+            if (i == 0) {
+                printf("SD SPI init: CMD%u response %02x, %u transfer errors\n",
+                       unsigned(probe_command), unsigned(probe_response), probe_transfer_errors);
+            }
             mmcStop(&MMCD1);
             continue;
         }
-        if (f_mount(&SDC_FS, "/", 1) != FR_OK) {
+        const auto result = f_mount(&SDC_FS, "/", 1);
+        if (result != FR_OK) {
+            if (i == 0) {
+                printf("SD SPI connected: FAT mount error %u\n", unsigned(result));
+            }
             mmcDisconnect(&MMCD1);
             mmcStop(&MMCD1);
             continue;
@@ -253,21 +271,35 @@ __RAMFUNC__ void spiUnselectHook(SPIDriver *spip)
 void spiIgnoreHook(SPIDriver *spip, size_t n)
 {
     if (sdcard_running) {
-        device->clock_pulse(n);
+        if (!device->clock_pulse(n) && probe_active) {
+            probe_transfer_errors++;
+        }
     }
 }
 
 __RAMFUNC__ void spiSendHook(SPIDriver *spip, size_t n, const void *txbuf)
 {
     if (sdcard_running) {
-        device->transfer((const uint8_t *)txbuf, n, nullptr, 0);
+        if (probe_active && n == 6) {
+            probe_command = static_cast<const uint8_t*>(txbuf)[0] & 0x3f;
+            probe_response = UINT8_MAX;
+        }
+        if (!device->transfer((const uint8_t *)txbuf, n, nullptr, 0) && probe_active) {
+            probe_transfer_errors++;
+        }
     }
 }
 
 __RAMFUNC__ void spiReceiveHook(SPIDriver *spip, size_t n, void *rxbuf)
 {
     if (sdcard_running) {
-        device->transfer(nullptr, 0, (uint8_t *)rxbuf, n);
+        if (!device->transfer(nullptr, 0, (uint8_t *)rxbuf, n)) {
+            if (probe_active) {
+                probe_transfer_errors++;
+            }
+        } else if (probe_active && n == 1 && probe_response == UINT8_MAX) {
+            probe_response = static_cast<const uint8_t*>(rxbuf)[0];
+        }
     }
 }
 

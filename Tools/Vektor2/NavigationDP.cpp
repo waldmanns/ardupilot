@@ -104,7 +104,9 @@ void NavigationDP::update(const Input& in, const Config& config, float dt_second
     out.distance_m = std::hypot(out.error_n_m, out.error_e_m);
     out.bearing_deg = out.distance_m > 0 ? bearing(out.error_n_m, out.error_e_m) : 0;
 
-    if (out.reason_bits != 0) {
+    // The supervisor reports shared yaw blockers. Keep position diagnostics
+    // available while holding translation demand until yaw control is ready.
+    if (out.reason_bits != 0 || !in.heading_command_valid) {
         _filter_seeded = false;
         _output = out;
         return;

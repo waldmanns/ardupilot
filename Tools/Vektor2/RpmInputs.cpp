@@ -1,4 +1,5 @@
 #include "RpmInputs.h"
+#include "Logic.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <GCS_MAVLink/GCS.h>
@@ -31,16 +32,17 @@ void RpmInputs::init()
     static_assert(ARRAY_SIZE(pins) == ARRAY_SIZE(_inputs), "Expected two RPM input pins");
     for (uint8_t i = 0; i < ARRAY_SIZE(pins); i++) {
         auto* input = &_inputs[i];
-        if (!hal.gpio->attach_interrupt(pins[i],
-                                       FUNCTOR_BIND(input, &Input::on_falling_edge, void, uint8_t, bool, uint32_t),
-                                       AP_HAL::GPIO::INTERRUPT_FALLING)) {
+        input->attached = hal.gpio->attach_interrupt(pins[i],
+            FUNCTOR_BIND(input, &Input::on_falling_edge, void, uint8_t, bool, uint32_t),
+            AP_HAL::GPIO::INTERRUPT_FALLING);
+        if (!input->attached) {
             GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "RPM%u input unavailable on GPIO %u", unsigned(i + 1), unsigned(pins[i]));
         }
     }
 #endif
 }
 
-void RpmInputs::update(uint32_t now_ms, int16_t telemetry_hz)
+void RpmInputs::update()
 {
 #ifdef HAL_VEKTOR2_RPM_PINS
     uint32_t periods_us[ARRAY_SIZE(_inputs)];
@@ -63,26 +65,36 @@ void RpmInputs::update(uint32_t now_ms, int16_t telemetry_hz)
     for (uint8_t i = 0; i < ARRAY_SIZE(_inputs); i++) {
         _inputs[i].rpm = periods_us[i] == 0 ? 0.0f : 60000000.0f / periods_us[i];
     }
-
-    if (telemetry_hz <= 0) {
-        reset();
-    } else if (ready(now_ms, telemetry_hz)) {
-        const bool magnet1 = hal.gpio->read(pins[0]) == 0;
-        const bool magnet2 = hal.gpio->read(pins[1]) == 0;
-        send_float("VRPM1_RPM", rpm(0));
-        send_float("VRPM2_RPM", rpm(1));
-        send_float("VRPM1_IRQ", magnet1);
-        send_float("VRPM2_IRQ", magnet2);
-    }
-#else
-    (void)now_ms;
-    (void)telemetry_hz;
 #endif
+}
+
+void RpmInputs::send_telemetry(uint32_t now_ms, int16_t telemetry_hz, const Logic& logic)
+{
+    if (!ready(now_ms, telemetry_hz)) {
+        return;
+    }
+#ifdef HAL_VEKTOR2_RPM_PINS
+    const bool magnet1 = hal.gpio->read(pins[0]) == 0;
+    const bool magnet2 = hal.gpio->read(pins[1]) == 0;
+    send_float("VRPM1_RPM", rpm(0));
+    send_float("VRPM2_RPM", rpm(1));
+    send_float("VRPM1_IRQ", magnet1);
+    send_float("VRPM2_IRQ", magnet2);
+#endif
+    if (logic.vsp_selected()) {
+        send_float("VRPM1_STAT", logic.vsp_rpm_status(0));
+        send_float("VRPM2_STAT", logic.vsp_rpm_status(1));
+    }
 }
 
 float RpmInputs::rpm(uint8_t channel) const
 {
     return channel < ARRAY_SIZE(_inputs) ? _inputs[channel].rpm : 0.0f;
+}
+
+bool RpmInputs::available(uint8_t channel) const
+{
+    return channel < ARRAY_SIZE(_inputs) && _inputs[channel].attached;
 }
 
 } // namespace Vektor2

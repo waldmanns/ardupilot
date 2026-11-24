@@ -281,6 +281,30 @@ def run(binary):
                 assert sitl.parameter('VNAV_MODE') == mode, (pulse, mode)
             sitl.named('NAV_STATE', lambda value: value == 1)  # HeadingWait
             sitl.named('NAV_RBITS', lambda value: int(value) & (1 << 6))  # OutputNotReady
+            sitl.parameter('DP_TEL_HZ', 5)
+            channels[15] = 1500
+            sitl.override(channels)
+            sitl.named('VFN2_IN', lambda value: value == 1500)
+            assert sitl.parameter('VNAV_MODE') == 1
+            assert sitl.parameter('VNAV_HDG_KP') == 0
+            sitl.named('HDG_ACT', math.isfinite)
+            sitl.named('HDG_TGT', math.isfinite)
+            sitl.named('NAV_RBITS', lambda value: value == 1088)  # ConfigInvalid | OutputNotReady
+            sitl.named('HDG_CALC', lambda value: value == 0)
+            sitl.parameter('VNAV_HDG_KP', 0.02)
+            sitl.named('HDG_CALC', lambda value: value == 1)
+            sitl.named('NAV_RBITS', lambda value: value == 64)
+
+            # A saved bow heading assignment still counts for AFT, but it
+            # must not become a Heading Hold prerequisite on a VWT.
+            sitl.parameter('VSP_CONF', 1)
+            sitl.parameter('THR_BOW_HDG_EN', 1)
+            sitl.named('NAV_RBITS', lambda value: int(value) & (1 << 12))
+            sitl.parameter('VSP_CONF', 2)
+            sitl.named('NAV_RBITS', lambda value: value == 64)
+            sitl.parameter('THR_BOW_HDG_EN', 0)
+
+            sitl.parameter('DP_TEL_HZ', 0)
             channels[15] = 65534  # Release the extension channel.
             sitl.override(channels)
             sitl.named('VFN2_ERR', lambda value: int(value) & 8)

@@ -1,20 +1,19 @@
 # VSP rod authority telemetry
 
-`VSP1_AUTH` / `VSP2_AUTH` are per-drive `NAMED_VALUE_FLOAT` bitmasks emitted
-at `VSP_TEL_HZ`, reflecting the actual rod command path for this cycle.
+`VSP1_AUTH` / `VSP2_AUTH` are per-drive `NAMED_VALUE_FLOAT` bitmasks at
+`VSP_TEL_HZ` and VTEL sources 66/67. RPM ownership is independent.
 
 | Value | Meaning |
 | ---: | --- |
-| 1 | Manual baseline owns rods (legacy inputs or active manual vector) |
-| 4 | Roll stabilization (VRS) applied a nonzero correction |
-| 8 | Vector controller guards output at neutral during a transition or invalid input |
+| 1 | Manual baseline / pilot translation |
+| 2 | Confirmed coordinated navigation yaw ownership |
+| 4 | Roll stabilization applied a nonzero correction |
+| 8 | Neutral guard / automatic rollback |
+| 16 | Confirmed DP translation ownership |
 
-Bit values combine (for example, 5 = manual plus VRS). A value of zero can
-mean that legacy inputs were invalid, and does not promise that physical PWM is
-at neutral. RPM routing is independent.
-
-**There is currently no automatic navigation actuator owner.** The old bit 2
-(heading correction) is unused and is not published as a compatibility alias.
-Future heading and DP actuator ownership will be explicitly integrated after
-the common allocator is tested. See `NAVIGATION.md` for the navigation status
-and reason mask.
+Typical combinations: 1 = manual, 5 = manual + VRS, 3 = Heading Hold
+(pilot translation + automatic yaw), 18 = Full DP, 8 = neutral guard.
+Both VSP authority masks are committed together for automatic control, after
+all required output writes succeed. A neutral guard or zero mask is not proof
+that the physical actuator has reached neutral. See VSP_ALLOCATOR.md for the
+pair status and NAV_RBITS definitions.

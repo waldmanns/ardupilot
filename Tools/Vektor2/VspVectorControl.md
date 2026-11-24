@@ -9,7 +9,7 @@ Each drive has independent `VSPn_VMODE`: 0 (default) preserves legacy rod input;
 | --- | --- |
 | IN1 | 1000 backward, 1500 neutral, 2000 forward |
 | IN2 | 1000 port, 1500 neutral, 2000 starboard |
-| RPM_IN | Existing independent passthrough to RPM_OUT |
+| RPM_IN | Throttle or RPM setpoint input, according to the [RPM governor mode](README.md#vsp-rpm-governor) |
 
 Vector mode requires fresh valid IN1/IN2, not RPM input. A motor can be routed
 separately. Changing VMODE never changes the RPM policy or starts/stops a motor.

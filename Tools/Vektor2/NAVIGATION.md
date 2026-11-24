@@ -1,4 +1,4 @@
-# Vektor2 Navigation — M3.8.1 observation-only NavMode switch
+# Vektor2 Navigation — NavMode and coordinated VSP allocation
 
 One `NavigationSupervisor` is responsible for `NAV_STATE` and `NAV_RBITS`.
 `VNAV_MODE` requests 0=Free, 1=Heading Hold or 2=Full DP.
@@ -13,8 +13,9 @@ assignments fail to Free. Firmware cannot infer physical switch positions
 from a static PWM sample: verify three distinct levels on the board.
 The selected mode is mirrored into `VNAV_MODE` in RAM without a flash save.
 See [NAVIGATION_M381_HANDOVER.md](NAVIGATION_M381_HANDOVER.md).
-**No automatic propulsion is active in M3.8.1**. Existing manual VSP/thruster
-routing remains unchanged, and the supervisor deliberately reports `HDG_WAIT`
+The legacy tunnel-thruster heading backend remains available. Opt-in VSP
+Heading Hold and Full DP use the coordinated pair owner described in
+[VSP_ALLOCATOR.md](VSP_ALLOCATOR.md). The supervisor reports `HDG_WAIT`
 when automatic actuator ownership has not been acknowledged.
 
 ## Controller core
@@ -37,8 +38,9 @@ when automatic actuator ownership has not been acknowledged.
   `VNAV_HDG_CAPTURE`, `VNAV_DP_CAP_HDG` and `VNAV_DP_CAP_POS`, once the
   associated estimator conditions are good. Switching to Free or detecting
   an EKF yaw, horizontal position or horizontal velocity reset clears captured
-  targets. The AHRS reset timestamps are used directly; after a reset, an
-  explicit recapture or fresh mode transition is required.
+  targets. The AHRS reset timestamps are used directly. An initial VSP mode
+  request can wait through estimator startup. A reset during active VSP
+  control requires a return to Free before re-engagement.
 - `VNAV_DP_POS_KP`, `VNAV_DP_VEL_KP`, `VNAV_DP_MAX_SPD`,
   `VNAV_DP_ACC_LIM`, `VNAV_DP_RADIUS` and `VNAV_DP_VEL_FILT` provide the
   initial simple PD control. They default to safe non-operational values;
@@ -61,17 +63,21 @@ readiness reasons.
 | Bit | Hex | Meaning |
 |---:|---:|---|
 | 0 | `0x0001` | automation disabled |
-| 1 | `0x0002` | heading invalid |
+| 1 | `0x0002` | AHRS heading estimate invalid |
 | 2 | `0x0004` | position invalid |
 | 3 | `0x0008` | horizontal velocity invalid |
 | 4 | `0x0010` | RC invalid |
 | 5 | `0x0020` | pilot override |
-| 6 | `0x0040` | output not ready / no ownership ACK |
+| 6 | `0x0040` | command or actuator output unavailable, or ownership unconfirmed |
 | 7 | `0x0080` | wait neutral |
 | 8 | `0x0100` | target invalid / missing |
 | 9 | `0x0200` | estimator reset |
 | 10 | `0x0400` | configuration invalid |
 | 11 | `0x0800` | timing fault |
+| 12 | `0x1000` | required bow unavailable |
+| 13 | `0x2000` | required stern unavailable |
+| 14 | `0x4000` | automatic rearm required |
+| 15 | `0x8000` | VSP pair or output routes unavailable |
 
 `NAV_STATE`: 0=FREE, 1=HDG_WAIT, 2=HDG_ACTIVE, 3=DP_WAIT (heading active),
 4=DP_ACTIVE, 5=FAULT. ACTIVE is never inferred merely from a valid

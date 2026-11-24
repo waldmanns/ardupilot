@@ -20,11 +20,26 @@ int main()
     assert(nav.status().reason_bits & N::OutputNotReady);
 
     in.enabled = in.heading_enabled = in.heading_valid = true;
+    in.heading_command_valid = true;
     in.heading_target_valid = in.output_ready = in.yaw_owned = true;
     nav.update(in);
     assert(nav.status().state == N::State::HeadingActive);
     assert(nav.status().reason_bits == 0);
 
+    // A good heading estimate can coexist with an unusable yaw command.
+    in.heading_command_valid = false;
+    in.configuration_valid = false;
+    nav.update(in);
+    assert(nav.status().state == N::State::HeadingWait);
+    assert(nav.status().reason_bits == (N::ConfigInvalid | N::OutputNotReady));
+    in.configuration_valid = true;
+    nav.update(in);
+    assert(nav.status().state == N::State::HeadingWait);
+    assert(nav.status().reason_bits == N::OutputNotReady);
+    in.heading_command_valid = true;
+
+    in.vsp_unavailable=true; nav.update(in); assert(nav.status().reason_bits & N::VspUnavailable);
+    in.vsp_unavailable=false;
     in.requested_mode = 2;
     nav.update(in);
     assert(nav.status().state == N::State::DPWait);

@@ -7,10 +7,12 @@ namespace Vektor2 {
 class RpmInputs : private NamedFloatTelemetry {
 public:
     void init();
-    void update(uint32_t now_ms, int16_t telemetry_hz);
+    void update();
+    void send_telemetry(uint32_t now_ms, int16_t telemetry_hz, const Logic& logic);
 
     // Zero-based channel index, in revolutions per minute.
     float rpm(uint8_t channel) const;
+    bool available(uint8_t channel) const;
 
 private:
     struct Input {
@@ -19,6 +21,7 @@ private:
         uint32_t last_edge_us = 0;
         uint32_t period_us = 0;
         bool have_edge = false;
+        bool attached = false;
         float rpm = 0;
     };
 

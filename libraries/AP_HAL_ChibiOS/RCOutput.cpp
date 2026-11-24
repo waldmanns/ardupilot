@@ -672,6 +672,19 @@ uint16_t RCOutput::get_freq(uint8_t chan)
     return 50;
 }
 
+bool RCOutput::has_pwm_output(uint8_t chan)
+{
+#if HAL_WITH_IO_MCU
+    if (chan < chan_offset && iomcu_enabled) {
+        return !iomcu_dshot;
+    }
+#endif
+    uint8_t index;
+    const pwm_group *group = find_chan(chan, index);
+    return group && group->pwm_started && group->current_mode == MODE_PWM_NORMAL &&
+           GPIO::resolve_alt_config(group->pal_lines[index], PERIPH_TYPE::OTHER, UINT8_MAX) != 0;
+}
+
 void RCOutput::enable_ch(uint8_t chan)
 {
 #if HAL_WITH_IO_MCU

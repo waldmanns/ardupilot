@@ -22,7 +22,8 @@ uint16_t neutral(int16_t center)
 float axis(uint16_t pulse, int16_t deadband)
 {
     const int offset = int(pulse) - 1500;
-    return copysignf(fmaxf(0, abs(offset) - deadband) / (500 - deadband), offset);
+    const float magnitude = fminf(abs(offset), 500);
+    return copysignf(fmaxf(0, magnitude - deadband) / (500 - deadband), offset);
 }
 }
 
@@ -53,25 +54,21 @@ bool VspVectorControl::prepare(uint32_t now_ms, uint32_t revision, const Setting
         return false;
     }
     if (changed || elapsed > 100) {
-        _ready = false;
-        _command = {0, 0};
+        reset_command();
         _heading_last = false;
         _generation++;
     }
     if ((s.mode != 0 && s.mode != 1) || s.deadband_us < 0 || s.deadband_us > 250 ||
         !isfinite(s.slew) || s.slew <= 0 || s.slew > 100 || !VspMapper::valid_config(s.mapper)) {
-        _ready = false;
-        _command = {0, 0};
+        reset_command();
         _state = State::Invalid;
         return true;
     }
-    if (!inputs_valid || forward_us < 1000 || forward_us > 2000 ||
-        starboard_us < 1000 || starboard_us > 2000) {
+    if (!inputs_valid || forward_us == 0 || starboard_us == 0) {
         if (_ready) {
             _generation++;
         }
-        _ready = false;
-        _command = {0, 0};
+        reset_command();
         _state = State::InputLost;
         return true;
     }
@@ -110,10 +107,10 @@ bool VspVectorControl::apply(uint16_t& x_us, uint16_t& y_us, const VspMapper::Ve
         _command = *heading;
     } else {
         // Release automatic contribution immediately before slewing manual demand.
-        if (_heading_last || _centered) {
+        if (!_allocation_handover && (_heading_last || _centered)) {
             _command = {0, 0};
         }
-        if (!_centered) {
+        if (!_centered || _allocation_handover) {
             const float df = _requested.forward - _command.forward;
             const float ds = _requested.starboard - _command.starboard;
             const float distance = hypotf(df, ds);
@@ -121,6 +118,10 @@ bool VspVectorControl::apply(uint16_t& x_us, uint16_t& y_us, const VspMapper::Ve
             const float scale = distance > step ? step / distance : 1;
             _command.forward += df * scale;
             _command.starboard += ds * scale;
+            if (distance <= step) {
+                _command = _requested;
+                _allocation_handover = false;
+            }
         }
     }
     _heading_last = assisted;
@@ -130,8 +131,7 @@ bool VspVectorControl::apply(uint16_t& x_us, uint16_t& y_us, const VspMapper::Ve
         y_us = result.y_us;
         return assisted;
     }
-    _ready = false;
-    _command = {0, 0};
+    reset_command();
     _state = State::Invalid;
     return false;
 }

@@ -34,6 +34,9 @@ public:
 #endif
 
     bool write_us(uint8_t channel, uint16_t pulse_us);
+    bool heading_output_ready(uint8_t channel) const;
+    void begin_batch();
+    void end_batch();
     bool set_rate_hz(uint8_t channel, uint16_t rate_hz);
     void disable(uint8_t channel);
     void disable_all();
@@ -52,6 +55,7 @@ public:
     uint32_t enabled_mask() const { return _enabled_mask; }
 
 private:
+    bool configuration_valid(uint8_t channel) const;
     uint16_t _values_us[max_pwm_channels] {};
     uint32_t _enabled_mask = 0;
 };

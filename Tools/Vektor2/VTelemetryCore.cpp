@@ -163,6 +163,7 @@ static const Source sources[] = {
     // Controller maths readiness, independent of NAV_STATE/actuator ownership.
     SRC(260, "DP_CALC", Number, "bool", 0x02, 2, 1, 0),
     SRC(261, "HDG_CALC", Number, "bool", 0x02, 2, 1, 0),
+    SRC(262, "VSP_AL_ST", Number, "mask", 0x02, 2, 1, 0),
     SRC(200, "PWM1_OUT", Number, "us", 0x02, 2, 1, 0),
     SRC(201, "PWM2_OUT", Number, "us", 0x02, 2, 1, 0),
     SRC(202, "PWM3_OUT", Number, "us", 0x02, 2, 1, 0),
@@ -195,6 +196,24 @@ static const Source sources[] = {
     SRC(229, "PWM30_OUT", Number, "us", 0x02, 2, 1, 0),
     SRC(230, "PWM31_OUT", Number, "us", 0x02, 2, 1, 0),
     SRC(231, "PWM32_OUT", Number, "us", 0x02, 2, 1, 0),
+    // Active propulsion configuration and AZI commissioning commands.
+    SRC(270, "MAIN_PROP_TYPE", Number, "enum", 0x02, 2, 1, 0),
+    SRC(271, "VSP_CONF", Number, "enum", 0x02, 2, 1, 0),
+    SRC(272, "AZI_CONF", Number, "enum", 0x02, 2, 1, 0),
+    SRC(280, "AZI1_AZ_PWM", Number, "us", 0x02, 2, 1, 0),
+    SRC(281, "AZI1_MOT_PWM", Number, "us", 0x02, 2, 1, 0),
+    SRC(282, "AZI1_ANG_CMD", Number, "deg", 0x02, 2, 10, 0),
+    SRC(283, "AZI1_ANG_TGT", Number, "deg", 0x02, 2, 10, 0),
+    SRC(284, "AZI1_MOT_CMD", Number, "norm", 0x02, 2, 1000, 0),
+    SRC(285, "AZI1_STATE", Number, "enum", 0x02, 2, 1, 0),
+    SRC(286, "AZI1_RB", Number, "mask", 0x02, 2, 1, 0),
+    SRC(290, "AZI2_AZ_PWM", Number, "us", 0x02, 2, 1, 0),
+    SRC(291, "AZI2_MOT_PWM", Number, "us", 0x02, 2, 1, 0),
+    SRC(292, "AZI2_ANG_CMD", Number, "deg", 0x02, 2, 10, 0),
+    SRC(293, "AZI2_ANG_TGT", Number, "deg", 0x02, 2, 10, 0),
+    SRC(294, "AZI2_MOT_CMD", Number, "norm", 0x02, 2, 1000, 0),
+    SRC(295, "AZI2_STATE", Number, "enum", 0x02, 2, 1, 0),
+    SRC(296, "AZI2_RB", Number, "mask", 0x02, 2, 1, 0),
 };
 #undef SRC
 

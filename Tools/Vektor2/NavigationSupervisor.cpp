@@ -23,13 +23,17 @@ void NavigationSupervisor::update(const Input& in)
     if (!in.enabled || !in.heading_enabled) { yaw_blockers |= Disabled; }
     if (!in.heading_valid) { yaw_blockers |= HeadingInvalid; }
     if (!in.rc_valid) { yaw_blockers |= RCInvalid; }
-    if (!in.output_ready) { yaw_blockers |= OutputNotReady; }
+    if (!in.output_ready || !in.heading_command_valid) { yaw_blockers |= OutputNotReady; }
     if (!in.controls_neutral) { yaw_blockers |= WaitNeutral; }
     if (in.pilot_override) { yaw_blockers |= PilotOverride; }
     if (!in.heading_target_valid) { yaw_blockers |= TargetInvalid; }
     if (!in.configuration_valid) { yaw_blockers |= ConfigInvalid; }
     if (!in.timing_ok) { yaw_blockers |= TimingFault; }
     if (in.estimator_reset) { yaw_blockers |= EstimatorReset; }
+    if (in.vsp_unavailable) { yaw_blockers |= VspUnavailable; }
+    if (in.bow_unavailable) { yaw_blockers |= BowUnavailable; }
+    if (in.stern_unavailable) { yaw_blockers |= SternUnavailable; }
+    if (in.heading_rearm_required) { yaw_blockers |= HeadingRearmRequired; }
 
     reasons |= yaw_blockers;
     uint16_t dp_blockers = yaw_blockers;

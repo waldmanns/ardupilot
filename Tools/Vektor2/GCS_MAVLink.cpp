@@ -138,6 +138,21 @@ void GCS_MAVLINK_Vektor2::handle_sequencer_command(const mavlink_message_t& msg,
     send_sequencer_ack(command, msg.sysid, msg.compid, result, pending);
 }
 
+void GCS_MAVLINK_Vektor2::handle_azipod_calibration(const mavlink_message_t& msg,
+    uint8_t system, uint8_t component, const float (&fields)[7])
+{
+    if (system != mavlink_system.sysid || component != mavlink_system.compid) { return; }
+    if (!HAVE_PAYLOAD_SPACE(chan, COMMAND_ACK)) { return; }
+    auto& app = Vektor2::app;
+    using Result = Vektor2::Routing::CalibrationResult;
+    const auto result = app.routing.azipod_calibration(AP_HAL::millis(), msg.sysid, msg.compid,
+                                                        chan, fields, app.logic, app.pwm);
+    const MAV_RESULT ack = result == Result::Accepted ? MAV_RESULT_ACCEPTED :
+        result == Result::Busy ? MAV_RESULT_TEMPORARILY_REJECTED :
+        result == Result::Unavailable ? MAV_RESULT_FAILED : MAV_RESULT_DENIED;
+    mavlink_msg_command_ack_send(chan, MAV_CMD_USER_3, ack, 0, int32_t(result), msg.sysid, msg.compid);
+}
+
 void GCS_MAVLINK_Vektor2::handle_message(const mavlink_message_t& msg)
 {
     if (msg.msgid == MAVLINK_MSG_ID_PARAM_SET) {
@@ -166,6 +181,11 @@ void GCS_MAVLINK_Vektor2::handle_message(const mavlink_message_t& msg)
     if (msg.msgid == MAVLINK_MSG_ID_COMMAND_LONG) {
         mavlink_command_long_t p;
         mavlink_msg_command_long_decode(&msg, &p);
+        if (p.command == MAV_CMD_USER_3) {
+            const float fields[] = {p.param1, p.param2, p.param3, p.param4, p.param5, p.param6, p.param7};
+            handle_azipod_calibration(msg, p.target_system, p.target_component, fields);
+            return;
+        }
         if (is_sequencer_command(p.command)) {
             const float fields[] = {p.param1, p.param2, p.param3, p.param4, p.param5, p.param6, p.param7};
             handle_sequencer_command(msg, p.command, p.target_system, p.target_component, fields);
@@ -176,6 +196,19 @@ void GCS_MAVLINK_Vektor2::handle_message(const mavlink_message_t& msg)
     if (msg.msgid == MAVLINK_MSG_ID_COMMAND_INT) {
         mavlink_command_int_t p;
         mavlink_msg_command_int_decode(&msg, &p);
+        if (p.command == MAV_CMD_USER_3) {
+            if (p.target_system != mavlink_system.sysid || p.target_component != mavlink_system.compid) { return; }
+            if (p.frame != MAV_FRAME_MISSION || p.current != 0 || p.autocontinue != 0 || p.x < 1 || p.x > 65535 || p.y != 0) {
+                if (HAVE_PAYLOAD_SPACE(chan, COMMAND_ACK)) {
+                    mavlink_msg_command_ack_send(chan, p.command, MAV_RESULT_DENIED, 0,
+                        int32_t(Vektor2::Routing::CalibrationResult::Invalid), msg.sysid, msg.compid);
+                }
+                return;
+            }
+            const float fields[] = {p.param1, p.param2, p.param3, p.param4, float(p.x), float(p.y), p.z};
+            handle_azipod_calibration(msg, p.target_system, p.target_component, fields);
+            return;
+        }
         if (is_sequencer_command(p.command)) {
             if (p.target_system != mavlink_system.sysid || p.target_component != mavlink_system.compid) {
                 return;

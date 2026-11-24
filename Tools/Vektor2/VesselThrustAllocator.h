@@ -50,6 +50,7 @@ public:
     // assumed available. Callers must NOT send results directly to hardware.
     static Result allocate(const Geometry& geometry, const Demand& demand,
                            bool bow_available);
+    static Demand achieved(const Geometry& geometry, const Result& command);
 };
 
 } // namespace Vektor2

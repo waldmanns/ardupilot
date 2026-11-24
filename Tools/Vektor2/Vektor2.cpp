@@ -69,6 +69,7 @@ void App::update_status_led(uint32_t now_ms)
 void App::setup()
 {
     load_parameters();
+    logic.initialize_main_propulsion();
 
     // BoardConfig stays because it is hardware infrastructure, not vehicle
     // behaviour. It applies board orientation and board-level driver options.
@@ -131,6 +132,14 @@ void App::setup()
     vtel.init(*this, vtel_params, serial_manager);
 
 #if HAL_GCS_ENABLED
+    const auto main_type = logic.main_propulsion_type();
+    if (main_type == MainPropulsionType::None) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "Invalid MAIN_PROP_TYPE; main propulsion inhibited");
+    } else if (main_type == MainPropulsionType::Azipod) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Main propulsion: AZI, layout %u", unsigned(logic.azipod_layout()));
+    } else {
+        gcs().send_text(MAV_SEVERITY_INFO, "Main propulsion: VSP");
+    }
     gcs().send_text(MAV_SEVERITY_INFO,
                     "Vektor2 %u.%u.%u ready",
                     unsigned(firmware_major),
@@ -227,26 +236,35 @@ void App::loop()
     report_ekf_startup(now_ms);
     report_rc_protocol(now_ms);
 
-    // Route uint16 microsecond signals through the two logic components and
+    // Route uint16 microsecond signals through selected logic components and
     // on to final PWM consumers. Sources may fan out; each consumer has only
     // one producer. Component dependency order is compiled when routes change.
     if (!storage.formatting()) {
         sequencer.end_maintenance();
     }
     sequencer.update(now_ms);
-    routing.update(rcin, logic, pwm);
+    rpm_inputs.update();
+    const VspRpmGovernor::Feedback shaft_rpm[] = {
+        {rpm_inputs.rpm(0), rpm_inputs.available(0)},
+        {rpm_inputs.rpm(1), rpm_inputs.available(1)},
+    };
+    routing.prepare(rcin, logic, pwm, shaft_rpm);
+    update_navigation_status(now_ms);
 #if HAL_ENABLE_DRONECAN_DRIVERS
     pwm.push_can();
 #endif
 
-    update_navigation_status(now_ms);
+    rpm_inputs.send_telemetry(now_ms, rpm_tel_hz.get(), logic);
     nav_telemetry.update(now_ms, nav_supervisor.status());
     dp_telemetry.update(now_ms, dp_tel_hz.get(), nav_dp.output(), nav_heading.output());
     function_telemetry.update(now_ms, logic);
-    vsp_telemetry.update(now_ms, logic.vsp_tel_hz.get(), logic);
+    if (logic.vsp_selected()) {
+        vsp_telemetry.update(now_ms, logic.vsp_tel_hz.get(), logic);
+    } else {
+        vsp_telemetry.update_azipods(now_ms, logic.azi_tel_hz.get(), logic);
+    }
     thruster_telemetry.update(now_ms, logic.thr_tel_hz.get(), logic);
     measure_points.update(now_ms);
-    rpm_inputs.update(now_ms, rpm_tel_hz.get());
     vtel.update(*this, vtel_params, now_ms);
 
     update_mavlink(now_ms);
@@ -256,10 +274,40 @@ void App::loop()
 }
 
 
+App::ThrusterHeadingStatus App::thruster_heading_status() const
+{
+    ThrusterHeadingStatus status;
+    // A VWT has no heading-controlled bow tunnel, including on the legacy
+    // tunnel path when coordinated VSP navigation is disabled.
+    const bool vwt = logic.vsp_configuration() == uint8_t(VesselThrustAllocator::Layout::VWT);
+    for (uint8_t i = 0; i < 2; i++) {
+        if (i == 0 && vwt) {
+            continue;
+        }
+        const auto& thruster = logic.thruster(i);
+        status.pilot_override |= thruster.manual_override();
+        if (!thruster.heading_selected()) {
+            continue;
+        }
+        status.selected |= 1U << i;
+        const uint16_t reasons = thruster.reasons();
+        if (reasons != 0) {
+            status.unavailable |= 1U << i;
+        }
+        status.neutral &= (reasons & (ThrusterControl::WaitNeutral | ThrusterControl::ManualOverride)) == 0;
+        status.configuration_valid &= (reasons & (ThrusterControl::ConfigInvalid | ThrusterControl::GeometryInvalid)) == 0;
+        status.revision_changed |= thruster.revision() != _heading_thruster_revision[i];
+        if (reasons == 0) {
+            status.arm_m += thruster.lever_arm_m();
+            const float slew = thruster.heading_slew();
+            status.slew = status.slew > 0 ? std::fmin(status.slew, slew) : slew;
+        }
+    }
+    return status;
+}
+
 void App::update_navigation_status(uint32_t now_ms)
 {
-    // M3: calculate vessel-level DP / shared heading diagnostics only.
-    // Manual routing continues unchanged; no automatic output ownership.
     // The ordinary VFN route/slot evaluator has already sampled the RC
     // switch. Read the single NavMode action rather than creating another
     // channel parser or hard-coding a switch number. Keep VNAV_MODE
@@ -315,6 +363,44 @@ void App::update_navigation_status(uint32_t now_ms)
                                                     pos_reset_ms, vel_reset_ms);
 
     const int8_t mode = input.requested_mode;
+    const auto thrusters = thruster_heading_status();
+    auto* vsp_alloc=logic.vsp_allocator();
+    const bool vsp_selected= vsp_alloc && navigation.vsp_enable.get()!=0;
+    const bool vsp_path= vsp_alloc && (vsp_selected || vsp_alloc->active() || vsp_alloc->rearm());
+    const bool vsp_centered = vsp_path && logic.vsp_centered();
+    const bool manual_override = navigation.manual_override.get() != 0;
+    const bool dp_entry_ready = !vsp_path || vsp_alloc->dp_active() || vsp_centered ||
+                                (vsp_alloc->active() && !manual_override);
+    const bool automatic_heading = !vsp_path && mode == 1 && thrusters.selected != 0;
+    const float yaw_limit = navigation.alloc_max_yaw.get();
+    const auto& gyro = ins.get_gyro();
+    float yaw_rate_deg_s = NAN;
+    if (input.heading_valid && input.timing_ok) {
+        NavigationHeading::earth_yaw_rate(gyro.y, gyro.z,
+                ahrs.get_roll_deg(), ahrs.get_pitch_deg(), yaw_rate_deg_s);
+    }
+    NavigationHeading::Config heading_config{};
+    heading_config.kp = navigation.hdg_kp.get();
+    heading_config.kd = navigation.hdg_kd.get();
+    heading_config.max_yaw_percent = navigation.hdg_max_yaw.get();
+    heading_config.deadband_deg = navigation.hdg_deadband.get();
+    input.configuration_valid = rc_selection.valid && !rc_selection.conflict &&
+        (mode == 0 || NavigationHeading::config_valid(heading_config)) &&
+        (!automatic_heading || (thrusters.configuration_valid && std::isfinite(yaw_limit) && yaw_limit >= 0));
+    input.pilot_override = automatic_heading && thrusters.pilot_override;
+    input.controls_neutral = !automatic_heading || thrusters.neutral;
+    const bool can_own_yaw = automatic_heading && thrusters.unavailable == 0 &&
+        input.enabled && input.heading_enabled && input.rc_valid && input.heading_valid &&
+        input.timing_ok && !input.estimator_reset && std::isfinite(yaw_rate_deg_s) &&
+        input.configuration_valid && !input.pilot_override;
+    if (_heading_thruster_owner &&
+        (!can_own_yaw || _heading_thruster_owner != thrusters.selected || thrusters.revision_changed)) {
+        _heading_rearm_required = true;
+    }
+    if (mode == 0 && input.rc_valid && (!rc_selection.assigned || rc_selection.free_selected)) {
+        _heading_rearm_required = false;
+    }
+
     const bool hdg_capture = navigation.hdg_capture.get() != 0;
     const bool dp_hdg_capture = navigation.dp_capture_hdg.get() != 0;
     const bool dp_pos_capture = navigation.dp_capture_pos.get() != 0;
@@ -331,14 +417,16 @@ void App::update_navigation_status(uint32_t now_ms)
         _heading_capture_pending = false;
         _dp_capture_pending = false;
     } else if (input.estimator_reset) {
-        // No silent re-acquisition after an estimator yaw / position / velocity
-        // reset. An explicit capture request or mode transition is required.
+        // A startup alignment can complete while the first automatic request
+        // is pending. A reset during published control still requires rearm.
         nav_heading.clear_target();
         nav_dp.clear_target();
-        _heading_capture_pending = false;
-        _dp_capture_pending = false;
+        const bool awaiting_first_ownership = vsp_path && !vsp_alloc->active() && !vsp_alloc->rearm();
+        _heading_capture_pending = awaiting_first_ownership;
+        _dp_capture_pending = awaiting_first_ownership && mode == 2;
     } else {
-        if (_previous_nav_mode == 0) {
+        if (_previous_nav_mode == 0 || (automatic_heading && _previous_nav_mode != 1)) {
+            nav_heading.clear_target();
             _heading_capture_pending = true;
         }
         if (mode == 2 && _previous_nav_mode != 2) {
@@ -358,13 +446,14 @@ void App::update_navigation_status(uint32_t now_ms)
             _dp_capture_pending = true;
         }
         if (_heading_capture_pending && input.enabled && input.heading_enabled &&
-            input.rc_valid && input.heading_valid) {
+            input.rc_valid && input.heading_valid &&
+            (!automatic_heading || (can_own_yaw && !_heading_rearm_required))) {
             if (nav_heading.capture(heading_deg)) {
                 _heading_capture_pending = false;
             }
         }
         if (mode == 2 && _dp_capture_pending && input.enabled && input.dp_enabled &&
-            input.rc_valid && input.position_valid && input.velocity_valid) {
+            input.rc_valid && input.position_valid && input.velocity_valid && dp_entry_ready) {
             NavigationDP::Point actual{location.lat, location.lng};
             if (nav_dp.capture(actual)) {
                 _dp_capture_pending = false;
@@ -373,31 +462,21 @@ void App::update_navigation_status(uint32_t now_ms)
     }
     _previous_nav_mode = mode;
 
-    const auto& gyro = ins.get_gyro();
-    float yaw_rate_deg_s = NAN;
-    if (input.heading_valid && input.timing_ok) {
-        NavigationHeading::earth_yaw_rate(gyro.y, gyro.z,
-                ahrs.get_roll_deg(), ahrs.get_pitch_deg(), yaw_rate_deg_s);
-    }
-    NavigationHeading::Config heading_config{};
-    heading_config.kp = navigation.hdg_kp.get();
-    heading_config.kd = navigation.hdg_kd.get();
-    heading_config.max_yaw_percent = navigation.hdg_max_yaw.get();
-    heading_config.deadband_deg = navigation.hdg_deadband.get();
     // Keep actual estimated heading observable even with automation disabled.
     // Controller output validity remains gated by mode, timing and target.
     nav_heading.update(heading_deg, yaw_rate_deg_s, input.heading_valid,
                        heading_config,
                        input.timing_ok && !input.estimator_reset &&
                        (mode == 1 || mode == 2) && input.enabled && input.heading_enabled);
+    input.heading_command_valid = nav_heading.output().valid;
 
     NavigationDP::Input dp_in{};
     dp_in.actual = {location.lat, location.lng};
     dp_in.position_valid = input.position_valid;
     dp_in.velocity_valid = input.velocity_valid && mode == 2 &&
                            input.enabled && input.dp_enabled;
-    dp_in.heading_valid = nav_heading.output().valid &&
-                          input.heading_valid && input.timing_ok && !input.estimator_reset;
+    dp_in.heading_valid = input.heading_valid;
+    dp_in.heading_command_valid = input.heading_command_valid;
     dp_in.velocity_n_ms = velocity.x;
     dp_in.velocity_e_ms = velocity.y;
     dp_in.heading_deg = heading_deg;
@@ -411,18 +490,101 @@ void App::update_navigation_status(uint32_t now_ms)
     dp_config.velocity_filter_hz = navigation.dp_vel_filter.get();
     nav_dp.update(dp_in, dp_config, float(elapsed_ms) * 0.001f);
 
-    // DP-specific configuration failures must not inhibit an otherwise
-    // functioning shared Heading Hold controller during DP_WAIT.
-    input.configuration_valid = rc_selection.valid && !rc_selection.conflict &&
-        (mode == 0 || NavigationHeading::config_valid(heading_config));
     input.dp_controller_reasons = nav_dp.output().reason_bits;
-    input.heading_valid = input.heading_valid && nav_heading.output().valid;
     input.heading_target_valid = nav_heading.target_valid();
     input.position_target_valid = nav_dp.target_valid();
-    // No actuator ownership ACK exists yet. Never report HDG_ACTIVE/DP_ACTIVE.
-    input.output_ready = false;
-    input.yaw_owned = false;
-    input.translation_owned = false;
+
+    if (vsp_path) {
+        VspAllocator::Config c;
+        c.geometry.layout=VesselThrustAllocator::Layout(logic.vsp_configuration());
+        c.geometry.vsp1={navigation.vsp1_x.get(),navigation.vsp1_y.get(),navigation.vsp1_force.get()};
+        c.geometry.vsp2={navigation.vsp2_x.get(),navigation.vsp2_y.get(),navigation.vsp2_force.get()};
+        c.geometry.bow_force=navigation.vsp_bow_force.get();
+        c.bow = c.geometry.layout == VesselThrustAllocator::Layout::AFT &&
+                !(fabsf(c.geometry.bow_force) <= 0.0f);
+        c.geometry.bow_x=logic.thruster(0).lever_arm_m();
+        c.max_surge=navigation.alloc_max_surge.get(); c.max_sway=navigation.alloc_max_sway.get(); c.max_yaw=yaw_limit;
+        c.slew1=logic.vsp1_params.vector_slew.get(); c.slew2=logic.vsp2_params.vector_slew.get();
+        const auto bow_settings=logic.thruster_bow_params.control_values();
+        c.bow_slew=c.bow && bow_settings.heading_maximum>0 ? bow_settings.slew/bow_settings.heading_maximum : 0;
+        c.revision1=logic.vsp_revision(0); c.revision2=logic.vsp_revision(1); c.bow_revision=logic.thruster(0).revision();
+        VspAllocator::Input a;
+        const bool dp_ready = input.dp_enabled && nav_dp.output().valid && dp_entry_ready;
+        // Keep the published heading owner while a new DP request is pending.
+        // Losing DP readiness after DP took ownership still follows the fault path.
+        a.mode = mode == 2 && vsp_alloc->active() && !vsp_alloc->dp_active() && !dp_ready ? 1 : mode;
+        a.selected=vsp_selected && navigation.vsp_enable.get()==1;
+        a.pair_ready=logic.vsp_pair_ready() && routing.vsp_routes_ready(pwm,false) && _route_config_valid;
+        a.centered = vsp_centered;
+        a.bow_ready=!c.bow || (logic.thruster(0).reasons()==0 && routing.vsp_routes_ready(pwm,true));
+        a.override=(mode==2 && vsp_alloc->dp_active() && a.pair_ready && !a.centered && manual_override) ||
+                   (mode!=0 && c.bow && logic.thruster(0).manual_override());
+        a.allowed=input.enabled && input.heading_enabled && input.heading_valid && input.heading_command_valid &&
+                  input.rc_valid && input.timing_ok && !input.estimator_reset && input.configuration_valid &&
+                  input.heading_target_valid && (a.mode != 2 || dp_ready);
+        a.dt=float(elapsed_ms)*0.001f;
+        const auto pilot=logic.vsp_pilot();
+        a.demand={a.mode==2?nav_dp.output().surge:pilot.forward,a.mode==2?nav_dp.output().sway:pilot.starboard,nav_heading.output().yaw_demand};
+        a.manual[0] = logic.vsp_commanded(0);
+        a.manual[1] = logic.vsp_commanded(1);
+        if (c.bow && a.bow_ready) {
+            a.manual_bow = logic.thruster(0).heading_equivalent();
+        }
+        // A valid Free selection is required to clear a latched failure.
+        if (mode==0 && (!input.rc_valid || (rc_selection.assigned && !rc_selection.free_selected))) a.mode=-1;
+        bool pending=vsp_alloc->update(c,a);
+        if (pending && !logic.apply_vsp_allocation(vsp_alloc->command())) { vsp_alloc->reject(); pending=false; }
+        const bool guard=vsp_alloc->guard();
+        const bool bow=pending?c.bow:(guard && vsp_alloc->bow_guard());
+        if (guard) logic.neutral_vsp_allocation(bow);
+        const auto published=routing.publish_outputs(rcin,logic,pwm,0,pending,bow,guard);
+        if (pending && published==4) logic.confirm_vsp_allocation(a.mode == 2);
+        _heading_effort=0; _heading_thruster_owner=0;
+        input.configuration_valid &= VspAllocator::valid(c) && navigation.vsp_enable.get()==1;
+        input.vsp_unavailable = !a.pair_ready;
+        input.bow_unavailable=c.bow && !a.bow_ready;
+        input.pilot_override=a.override;
+        input.controls_neutral=a.centered || vsp_alloc->active();
+        input.heading_rearm_required=vsp_alloc->rearm();
+        input.output_ready=input.yaw_owned=vsp_alloc->active();
+        input.translation_owned = vsp_alloc->dp_active();
+        nav_supervisor.update(input);
+        return;
+    }
+
+    if (vsp_alloc) vsp_alloc->update({},{}); // clear stale allocator telemetry when disabled
+    uint8_t heading_mask = 0;
+    if (can_own_yaw && input.heading_command_valid && !_heading_rearm_required) {
+        // HDG_MAX is calibrated to the same transverse force at unit effort on
+        // each selected drive. Summed lever arms give the moment at unit effort.
+        const float max_moment = yaw_limit > 0 ? std::fmin(yaw_limit, thrusters.arm_m) : thrusters.arm_m;
+        const float desired_effort = nav_heading.output().yaw_demand * max_moment / thrusters.arm_m;
+        const float step = thrusters.slew * float(elapsed_ms) * 0.001f;
+        _heading_effort += std::fmax(-step, std::fmin(step, desired_effort - _heading_effort));
+        heading_mask = thrusters.selected;
+        for (uint8_t i = 0; i < 2; i++) {
+            if (heading_mask & (1U << i)) {
+                logic.apply_thruster_heading(i, _heading_effort);
+            }
+        }
+    }
+    const uint8_t owner = routing.publish_outputs(rcin, logic, pwm, heading_mask);
+    if (owner) {
+        for (uint8_t i = 0; i < 2; i++) {
+            _heading_thruster_revision[i] = logic.thruster(i).revision();
+        }
+    } else {
+        _heading_effort = 0;
+        if (heading_mask || (_heading_thruster_owner && mode != 0)) {
+            _heading_rearm_required = true;
+        }
+    }
+    _heading_thruster_owner = owner;
+    input.heading_rearm_required = automatic_heading && _heading_rearm_required;
+    input.bow_unavailable = automatic_heading && (thrusters.selected & 1) && logic.thruster(0).reasons() != 0;
+    input.stern_unavailable = automatic_heading && (thrusters.selected & 2) && logic.thruster(1).reasons() != 0;
+    input.output_ready = owner != 0;
+    input.yaw_owned = owner != 0;
     nav_supervisor.update(input);
 }
 

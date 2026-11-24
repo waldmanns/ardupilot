@@ -115,6 +115,17 @@ private:
     void report_ekf_startup(uint32_t now_ms);
     void report_rc_protocol(uint32_t now_ms);
     void update_navigation_status(uint32_t now_ms);
+    struct ThrusterHeadingStatus {
+        uint8_t selected = 0;
+        uint8_t unavailable = 0;
+        float arm_m = 0;
+        float slew = 0;
+        bool configuration_valid = true;
+        bool neutral = true;
+        bool pilot_override = false;
+        bool revision_changed = false;
+    };
+    ThrusterHeadingStatus thruster_heading_status() const;
     void init_logging();
     void logging_task();
     uint32_t _last_log_ms = 0;
@@ -145,6 +156,10 @@ private:
     int8_t _previous_nav_mode = 0;
     bool _navigation_rc_was_assigned = false;
     bool _heading_capture_pending = false;
+    uint8_t _heading_thruster_owner = 0;
+    uint32_t _heading_thruster_revision[2] {};
+    bool _heading_rearm_required = false;
+    float _heading_effort = 0;
     bool _dp_capture_pending = false;
     bool _previous_hdg_capture = false;
     bool _previous_dp_hdg_capture = false;

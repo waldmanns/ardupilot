@@ -29,6 +29,7 @@ private:
 class VspTelemetry : public NamedFloatTelemetry {
 public:
     void update(uint32_t now_ms, int16_t rate_hz, const Logic& logic);
+    void update_azipods(uint32_t now_ms, int16_t rate_hz, const Logic& logic);
 };
 
 class ThrusterTelemetry : public NamedFloatTelemetry {

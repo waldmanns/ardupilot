@@ -76,6 +76,7 @@ public:
         bool assigned = false;
         bool valid = true;
         bool conflict = false;
+        bool free_selected = false; // confirmed switch position outside the guard band
     };
     NavigationSelection navigation_selection(bool rc_valid);
     bool configured() const;

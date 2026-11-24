@@ -19,7 +19,8 @@ bool changed(const ThrusterSettings& a, const ThrusterSettings& b)
 {
     return a.enable != b.enable || a.mid != b.mid || a.deadband != b.deadband ||
         different(a.maximum, b.maximum) || different(a.slew, b.slew) || a.heading_enable != b.heading_enable ||
-        a.heading_sign != b.heading_sign || different(a.heading_maximum, b.heading_maximum);
+        a.heading_sign != b.heading_sign || different(a.heading_maximum, b.heading_maximum) ||
+        a.distance_cm != b.distance_cm;
 }
 float span(const ThrusterSettings& s) { return fminf(s.mid - 1000, 2000 - s.mid); }
 }
@@ -29,10 +30,12 @@ void ThrusterControl::update(uint32_t now_ms, const ThrusterSettings& settings, 
 {
     const uint32_t elapsed = now_ms - _last_ms;
     const bool gap = _have_time && elapsed > 100;
-    const bool enabled = settings.enable == 1 && permitted && valid(settings);
+    const bool config_valid = valid(settings);
+    const bool enabled = settings.enable == 1 && permitted && config_valid;
     const bool reset = !_have_time || gap || changed(settings, _settings) || enabled != _enabled || routed != _routed;
     if (reset) {
         _armed = false;
+        _heading_handover = false;
         _manual = 0;
         _revision++;
     }
@@ -46,7 +49,18 @@ void ThrusterControl::update(uint32_t now_ms, const ThrusterSettings& settings, 
     _output = settings.mid >= 1000 && settings.mid <= 2000 ? settings.mid : 1500;
     _input_valid = routed && source_valid && input >= 1000 && input <= 2000 && !gap;
     _neutral = _input_valid && abs(int(input) - settings.mid) <= settings.deadband;
-    if (!valid(settings)) {
+    _reasons = 0;
+    if (settings.enable == 0) { _reasons |= MasterDisabled; }
+    if (!permitted) { _reasons |= FunctionBlocked; }
+    if (!heading_selected()) { _reasons |= HeadingDisabled; }
+    if (!routed) { _reasons |= InputRouteMissing; }
+    if (routed && !_input_valid) { _reasons |= InputInvalid; }
+    if (!config_valid || (heading_selected() &&
+            (settings.mid <= 1000 || settings.mid >= 2000 || settings.heading_maximum <= 0))) {
+        _reasons |= ConfigInvalid;
+    }
+    if (heading_selected() && settings.distance_cm <= 0) { _reasons |= GeometryInvalid; }
+    if (!config_valid) {
         _state = State::Configuration;
         _armed = false;
         _enabled = false;
@@ -58,6 +72,7 @@ void ThrusterControl::update(uint32_t now_ms, const ThrusterSettings& settings, 
         _armed = false;
     } else if (!_armed && !_neutral) {
         _state = State::NeutralWait;
+        _reasons |= WaitNeutral;
     } else {
         _armed = true;
         _state = State::Manual;
@@ -65,16 +80,22 @@ void ThrusterControl::update(uint32_t now_ms, const ThrusterSettings& settings, 
         const float target = _neutral ? 0 : fmaxf(-travel * settings.maximum,
                                                   fminf(travel * settings.maximum, int(input) - settings.mid));
         const float step = settings.slew * travel * dt;
+        if (fabsf(target - _manual) <= step) {
+            _heading_handover = false;
+        }
         _manual += fmaxf(-step, fminf(step, target - _manual));
-        // Neutral is also the baseline for heading capture; no manual tail remains.
-        if (_neutral) {
+        // Ordinary manual neutral stops immediately. A coordinated handover
+        // slews from the last published heading output.
+        if (_neutral && !_heading_handover) {
             _manual = 0;
         }
         _output = uint16_t(settings.mid + lroundf(_manual));
     }
     if (!_armed) {
         _manual = 0;
+        _heading_handover = false;
     }
+    if (manual_override()) { _reasons |= ManualOverride; }
     const bool available = heading_available();
     if (available != _was_available) {
         _revision++;
@@ -91,5 +112,19 @@ void ThrusterControl::apply_heading(float command, bool holding)
         _settings.heading_maximum * span(_settings);
     _output = uint16_t(_settings.mid + lroundf(correction));
     _state = State::Heading;
+}
+
+float ThrusterControl::heading_equivalent() const
+{
+    const float travel = _settings.heading_maximum * span(_settings);
+    return travel > 0 ? fmaxf(-1, fminf(1, _settings.heading_sign * (int(_output) - _settings.mid) / travel)) : 0;
+}
+
+void ThrusterControl::release_heading()
+{
+    if (_state == State::Heading) {
+        _output = _settings.mid; // automatic ownership requires neutral manual input
+        _state = State::Manual;
+    }
 }
 }

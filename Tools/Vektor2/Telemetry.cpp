@@ -1,6 +1,7 @@
 #include "Telemetry.h"
 
 #include "Logic.h"
+#include "VTelemetryPropulsion.h"
 #include "VSP1.h"
 #include "VSP2.h"
 
@@ -33,10 +34,11 @@ bool NamedFloatTelemetry::ready(uint32_t now_ms, int16_t rate_hz)
 
 void VspTelemetry::update(uint32_t now_ms, int16_t rate_hz, const Logic& logic)
 {
-    if (!ready(now_ms, rate_hz)) {
+    if (!logic.vsp_selected() || !ready(now_ms, rate_hz)) {
         return;
     }
 
+    send_float("VSP_AL_ST", logic.vsp_alloc_status());
     const uint16_t vsp1_outputs[] = {
         logic.output(ComponentId::VSP1, 0),
         logic.output(ComponentId::VSP1, 1),
@@ -65,7 +67,22 @@ void VspTelemetry::update(uint32_t now_ms, int16_t rate_hz, const Logic& logic)
         send_float(n == 0 ? "VSP1_VST" : "VSP2_VST", uint8_t(logic.vector_state(n)));
         send_float(n == 0 ? "VSP1_AUTH" : "VSP2_AUTH", logic.vsp_authority(n));
     }
-    logic.vrs.send_telemetry(*this); // no additional messages when VRS is disabled
+    logic.vsp_backend()->vrs.send_telemetry(*this); // no additional messages when VRS is disabled
+}
+
+void VspTelemetry::update_azipods(uint32_t now_ms, int16_t rate_hz, const Logic& logic)
+{
+    if (logic.main_propulsion_type() != MainPropulsionType::Azipod ||
+        !ready(now_ms, rate_hz > 10 ? 10 : rate_hz)) { return; }
+    for (uint8_t n = 0; n < 2; ++n) {
+        const auto id = ComponentId(uint8_t(ComponentId::AZI1) + n);
+        if (!logic.component_selected(id)) { continue; }
+        for (uint8_t field = 0; field < 7; ++field) {
+            VTelemetryCore::Sample sample;
+            const bool valid = VTelemetryCore::read_propulsion_source(280 + 10*n + field, sample, logic);
+            send_float(VTelemetryCore::azipod_named_key(n, field), valid ? sample.number : NAN);
+        }
+    }
 }
 
 void ThrusterTelemetry::update(uint32_t now_ms, int16_t rate_hz, const Logic& logic)
@@ -80,6 +97,8 @@ void ThrusterTelemetry::update(uint32_t now_ms, int16_t rate_hz, const Logic& lo
     send_float("THRSTN_ST", uint8_t(logic.thruster(1).state()));
     send_float("THRBOW_EN", logic.thruster(0).enabled());
     send_float("THRSTN_EN", logic.thruster(1).enabled());
+    send_float("THRBOW_RB", logic.thruster(0).reasons());
+    send_float("THRSTN_RB", logic.thruster(1).reasons());
 }
 
 void NamedFloatTelemetry::send_float(const char* name, float value) const

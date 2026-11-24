@@ -1,4 +1,5 @@
 #include "Logic.h"
+#include <AP_HAL/AP_HAL.h>
 
 #include "VSP1.h"
 #include "VSP2.h"
@@ -60,6 +61,8 @@ static const ComponentDefinition component_definitions[] = {
         1,
         nullptr, // stateful independent actuator is run by Logic::run
     },
+    { ComponentId::AZI1, "AZI1", "AZI1", Components::AZI1::input_count, Components::AZI1::output_count, nullptr },
+    { ComponentId::AZI2, "AZI2", "AZI2", Components::AZI2::input_count, Components::AZI2::output_count, nullptr },
 };
 
 static_assert(sizeof(component_definitions) / sizeof(component_definitions[0]) ==
@@ -103,21 +106,124 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     // @Group: VFN
     // @Path: FunctionParameters.cpp
     AP_SUBGROUPINFO(vfn_params, "VFN", 10, Logic, FunctionParameters),
+    // Append only: indices 1..10 retain their original meanings.
+    // @Param: MAIN_PROP_TYPE
+    // @DisplayName: Main propulsion type
+    // @Description: Select exactly one main propulsion family at boot. Tunnel thrusters are independent. Invalid values inhibit both main families.
+    // @Values: 0:VSP,1:Azipod
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("MAIN_PROP_TYPE", 11, Logic, main_prop_type, 0),
+    // @Param: AZI_CONF
+    // @DisplayName: Azipod vessel layout
+    // @Description: Select installed drives at boot. AFT installs AZI1 port and AZI2 starboard. Tunnel thrusters are independent. Unspecified or unsupported layouts inhibit all azipods.
+    // @Values: 0:Unspecified,1:AFT
+    // @RebootRequired: True
+    // @User: Standard
+    AP_GROUPINFO("AZI_CONF", 12, Logic, azi_conf, 0),
+    // @Group: AZI1_
+    // @Path: ComponentParameters.cpp
+    AP_SUBGROUPINFO(azi1_params, "AZI1_", 13, Logic, AzipodParameterStore),
+    // @Group: AZI2_
+    // @Path: ComponentParameters.cpp
+    AP_SUBGROUPINFO(azi2_params, "AZI2_", 14, Logic, AzipodParameterStore),
+    // @Param: AZI_TEL_HZ
+    // @DisplayName: Azipod named-value telemetry rate
+    // @Description: Rate for each installed azipod MAVLink named float. Zero disables it.
+    // @Units: Hz
+    // @Range: 0 10
+    // @User: Standard
+    AP_GROUPINFO("AZI_TEL_HZ", 15, Logic, azi_tel_hz, 5),
+    // @Param: VRPM_ENABLE
+    // @DisplayName: VSP RPM governor enable
+    // @Description: Each VSP uses its routed RPM_IN in both modes. In governor mode, 1480 us and below commands motor off at 1000 us. At 1500 us the target is RPM_LOW and at 2000 us it is RPM_HIGH.
+    // @Values: 0:Passthrough,1:Governor
+    // @User: Standard
+    AP_GROUPINFO("VRPM_ENABLE", 16, Logic, vrpm_enable, 0),
+
+    // Index 17 previously held VRPM_CH. The governor now uses the RPM_IN route.
+
+    // @Param: VRPM_RPM_LOW
+    // @DisplayName: VSP RPM governor low target
+    // @Description: Shaft RPM target at 1500 us. Set a positive value within the operating range of both shafts. Zero leaves the target range unconfigured.
+    // @Units: RPM
+    // @Range: 0 60000
+    // @User: Standard
+    AP_GROUPINFO("VRPM_RPM_LOW", 18, Logic, vrpm_low, 0),
+
+    // @Param: VRPM_RPM_HIGH
+    // @DisplayName: VSP RPM governor high target
+    // @Description: Shaft RPM target at 2000 us. Set a value at least as high as RPM_LOW.
+    // @Units: RPM
+    // @Range: 0 60000
+    // @User: Standard
+    AP_GROUPINFO("VRPM_RPM_HIGH", 19, Logic, vrpm_high, 0),
+
+    // @Param: VRPM_DB
+    // @DisplayName: VSP RPM governor deadband
+    // @Description: RPM tolerance above and below the target. Each governor holds its output pulse within this tolerance.
+    // @Units: RPM
+    // @Range: 0 1000
+    // @User: Standard
+    AP_GROUPINFO("VRPM_DB", 20, Logic, vrpm_deadband, 2),
+
+    // @Param: VRPM_SLEW_FAST
+    // @DisplayName: VSP RPM governor fast slew rate
+    // @Description: Throttle pulse change in microseconds per second during startup and at RPM errors twice NEAR_RPM or larger. Must be at least SLEW_SLOW.
+    // @Range: 1 100
+    // @User: Standard
+    AP_GROUPINFO("VRPM_SLEW_FAST", 21, Logic, vrpm_fast, 30),
+
+    // @Param: VRPM_SLEW_SLOW
+    // @DisplayName: VSP RPM governor slow slew rate
+    // @Description: Throttle pulse change in microseconds per second at NEAR_RPM error. The rate decreases linearly to zero at the edge of the deadband.
+    // @Range: 1 100
+    // @User: Standard
+    AP_GROUPINFO("VRPM_SLEW_SLOW", 22, Logic, vrpm_slow, 10),
+
+    // @Param: VRPM_NEAR_RPM
+    // @DisplayName: VSP RPM governor slow approach distance
+    // @Description: Absolute RPM error at which the slow slew rate applies. Must be greater than DB. The rate increases linearly to SLEW_FAST at twice this error.
+    // @Units: RPM
+    // @Range: 1 60000
+    // @User: Standard
+    AP_GROUPINFO("VRPM_NEAR_RPM", 23, Logic, vrpm_near, 50),
+
+    // @Param: VRPM_START_MAX
+    // @DisplayName: VSP RPM governor startup pulse limit
+    // @Description: Highest throttle pulse allowed while waiting for the first shaft RPM reading. After ten seconds at the limit without a reading, the drive stops until the pot is lowered to 1480 us or below.
+    // @Units: us
+    // @Range: 1001 1500
+    // @User: Standard
+    AP_GROUPINFO("VRPM_START_MAX", 24, Logic, vrpm_start_max, 1200),
     AP_GROUPEND
 };
 
-void Logic::begin_cycle()
+void Logic::initialize_main_propulsion()
 {
-    _vsp_authority[0] = _vsp_authority[1] = 0;
-    // AHRS has already updated. Snapshot once so neither component execution
-    // order nor call count can advance the shared roll controller twice.
-    // Legacy paired rod corrections cannot share ownership with vector control.
-    // Disable their shared state until both drives return to legacy ownership.
-    const bool vector_owned = vsp1_params.vmode.get() != 0 || vsp2_params.vmode.get() != 0 ||
-        _vectors[0].blocks_assistance() || _vectors[1].blocks_assistance();
-    _roll_enabled = !vector_owned && vrs_params.enabled() && vfn.permits(Functions::Type::Roll);
-    vrs.update(vrs_params, vsp1_params.roll, vsp2_params.roll, _roll_enabled);
-    for (uint8_t component = 0; component < component_count; component++) {
+    if (_main.initialized()) { return; }
+    _main.initialize(main_prop_type.get());
+    if (auto* azi = _main.azi()) {
+        azi->layout = azi_conf.get() == 1 ? AzipodLayout::AFT : AzipodLayout::Unspecified;
+        azi->port.configure(azi1_params.values());
+        azi->starboard.configure(azi2_params.values());
+    }
+}
+
+void Logic::begin_cycle(const VspRpmGovernor::Feedback (&shaft_rpm)[2])
+{
+    if (auto* v = _main.vsp()) {
+        v->shaft_rpm[0] = shaft_rpm[0];
+        v->shaft_rpm[1] = shaft_rpm[1];
+        v->authority[0] = v->authority[1] = 0;
+        v->allocated_rods = false;
+        // AHRS has already updated. Snapshot once, before either VSP runs.
+        const bool vector_owned = v->allocator.active() || v->allocator.rearm() || vsp1_params.vmode.get() != 0 || vsp2_params.vmode.get() != 0 ||
+            v->vectors[0].blocks_assistance() || v->vectors[1].blocks_assistance();
+        v->roll_enabled = !vector_owned && vrs_params.enabled() && vfn.permits(Functions::Type::Roll);
+        v->vrs.update(vrs_params, vsp1_params.roll, vsp2_params.roll, v->roll_enabled);
+    }
+    for (uint8_t component = 0; component < runtime_slot_count; component++) {
         for (uint8_t port = 0; port < max_inputs; port++) {
             _runtime[component].inputs[port] = 0;
             _runtime[component].sources_valid[port] = false;
@@ -139,6 +245,10 @@ const void* Logic::parameter_store(ComponentId id) const
         return &thruster_bow_params;
     case ComponentId::ThrusterStern:
         return &thruster_stern_params;
+    case ComponentId::AZI1:
+        return &azi1_params;
+    case ComponentId::AZI2:
+        return &azi2_params;
     case ComponentId::Count:
         break;
     }
@@ -147,12 +257,12 @@ const void* Logic::parameter_store(ComponentId id) const
 
 void Logic::run(ComponentId id)
 {
-    if (!valid(id)) {
+    if (!component_selected(id)) {
         return;
     }
 
-    const uint8_t index = uint8_t(id);
-    if (id == ComponentId::ThrusterBow || id == ComponentId::ThrusterStern) {
+    const uint8_t index = runtime_slot(id);
+    if (is_tunnel_thruster(id)) {
         const uint8_t n = index - uint8_t(ComponentId::ThrusterBow);
         const auto settings = n == 0 ? thruster_bow_params.control_values() : thruster_stern_params.control_values();
         _thrusters[n].update(AP_HAL::millis(), settings,
@@ -161,14 +271,30 @@ void Logic::run(ComponentId id)
         _runtime[index].outputs[0] = _thrusters[n].output();
         return;
     }
-    finish_vsp(index, prepare_vsp(index));
+    if (is_vsp(id)) {
+        finish_vsp(index, prepare_vsp(index));
+    } else if (is_azipod(id)) {
+        auto& runtime = _runtime[index];
+        auto& azi = *_main.azi();
+        azi.drive(index).run(AP_HAL::millis(), _thruster_route_revision, runtime.inputs, runtime.sources_valid,
+                             (_azi_routes & (1U << index)) != 0,
+                             _azi_rc_valid, runtime.outputs);
+    }
+}
+
+void Logic::calibrate_azipod(ComponentId id, bool selected, uint16_t steering, int8_t motor_percent)
+{
+    if (!is_azipod(id) || !component_selected(id)) { return; }
+    const auto slot = runtime_slot(id);
+    _main.azi()->drive(slot).calibrate(selected, steering, motor_percent,
+                                     (_azi_routes & (1U << slot)) != 0, _runtime[slot].outputs);
 }
 
 bool Logic::prepare_vsp(uint8_t drive)
 {
     auto& runtime = _runtime[drive];
     const auto settings = drive == 0 ? vsp1_params.vector_settings() : vsp2_params.vector_settings();
-    return _vectors[drive].prepare(AP_HAL::millis(), _thruster_route_revision, settings,
+    return _main.vsp()->vectors[drive].prepare(AP_HAL::millis(), _thruster_route_revision, settings,
                                   runtime.inputs[0], runtime.inputs[1],
                                   runtime.sources_valid[0] && runtime.sources_valid[1]);
 }
@@ -176,16 +302,81 @@ bool Logic::prepare_vsp(uint8_t drive)
 void Logic::finish_vsp(uint8_t drive, bool vector_owned)
 {
     auto& runtime = _runtime[drive];
+    auto& vsp = *_main.vsp();
     if (vector_owned) {
-        _vectors[drive].apply(runtime.outputs[0], runtime.outputs[1]);
-        runtime.outputs[2] = runtime.inputs[2]; // RPM remains independent.
-        _vsp_authority[drive] = _vectors[drive].state() == VspVectorControl::State::Active ? Manual : NeutralGuard;
-        return;
+        vsp.vectors[drive].apply(runtime.outputs[0], runtime.outputs[1]);
+        vsp.authority[drive] = vsp.vectors[drive].state() == VspVectorControl::State::Active ? Manual : NeutralGuard;
+    } else {
+        const auto& def = component_definitions[drive];
+        def.loop(runtime.inputs, runtime.outputs, parameter_store(ComponentId(drive)), vsp.vrs.controller());
+        record_vsp_authority(drive);
     }
-    const auto id = ComponentId(drive);
-    const auto& def = component_definitions[drive];
-    def.loop(runtime.inputs, runtime.outputs, parameter_store(id), vrs.controller());
-    record_vsp_authority(drive);
+
+    const VspRpmGovernor::Settings settings = {vrpm_enable.get() == 1, vrpm_low.get(), vrpm_high.get(),
+        vrpm_deadband.get(), vrpm_fast.get(), vrpm_slow.get(), vrpm_near.get(), vrpm_start_max.get()};
+    runtime.outputs[2] = vsp.rpm_governors[drive].update(AP_HAL::millis(), settings,
+        runtime.inputs[2], runtime.sources_valid[2], vsp.shaft_rpm[drive]);
+}
+
+bool Logic::vsp_pair_ready() const
+{
+    const auto* v=_main.vsp();
+    return v && vsp1_params.vmode.get()==1 && vsp2_params.vmode.get()==1 &&
+        v->vectors[0].heading_ready() && v->vectors[1].heading_ready();
+}
+bool Logic::vsp_centered() const
+{
+    const auto* v=_main.vsp();
+    return v && v->vectors[0].centered() && v->vectors[1].centered();
+}
+VspMapper::Vector Logic::vsp_pilot() const
+{
+    const auto* v=_main.vsp();
+    const auto a=v->vectors[0].requested(), b=v->vectors[1].requested();
+    return {(a.forward+b.forward)*0.5f,(a.starboard+b.starboard)*0.5f};
+}
+bool Logic::apply_vsp_allocation(const VspAllocator::Result& result)
+{
+    if (!vsp_pair_ready() || !result.valid) return false;
+    const auto a=VspMapper::map(vsp1_params.mapper_config(),result.vsp1);
+    const auto b=VspMapper::map(vsp2_params.mapper_config(),result.vsp2);
+    if (!a.valid || !b.valid) return false;
+    if (result.bow_allocated) {
+        if (!_thrusters[0].heading_available() || _thrusters[0].reasons()) return false;
+        // Bow heading_sign is also its lateral polarity: + means starboard.
+        apply_thruster_heading(0,result.bow);
+    }
+    _runtime[0].outputs[0]=a.x_us; _runtime[0].outputs[1]=a.y_us;
+    _runtime[1].outputs[0]=b.x_us; _runtime[1].outputs[1]=b.y_us;
+    _main.vsp()->allocated_rods=true;
+    return true;
+}
+void Logic::neutral_vsp_allocation(bool bow)
+{
+    auto* v=_main.vsp(); if (!v) return;
+    const VspMapper::Config c[]={vsp1_params.mapper_config(),vsp2_params.mapper_config()};
+    for (uint8_t n=0;n<2;n++) {
+        _runtime[n].outputs[0]=c[n].x_center>=1000 && c[n].x_center<=2000 ? c[n].x_center : 1500;
+        _runtime[n].outputs[1]=c[n].y_center>=1000 && c[n].y_center<=2000 ? c[n].y_center : 1500;
+        v->authority[n]=NeutralGuard;
+        v->vectors[n].reset_command();
+    }
+    v->allocated_rods=true;
+    if (bow) {
+        _thrusters[0].force_neutral();
+        _runtime[uint8_t(ComponentId::ThrusterBow)].outputs[0]=_thrusters[0].output();
+    }
+}
+void Logic::confirm_vsp_allocation(bool dp)
+{
+    auto* v=_main.vsp(); v->allocator.confirm();
+    const auto& command = v->allocator.command();
+    v->vectors[0].follow_allocation(command.vsp1);
+    v->vectors[1].follow_allocation(command.vsp2);
+    if (command.bow_allocated) {
+        _thrusters[0].follow_heading_output();
+    }
+    v->authority[0]=v->authority[1]=dp ? uint8_t(HeadingAssist|DPAssist) : uint8_t(Manual|HeadingAssist);
 }
 
 void Logic::set_thruster_routes(uint8_t mask, uint32_t revision)
@@ -199,6 +390,18 @@ void Logic::set_thruster_routes(uint8_t mask, uint32_t revision)
     _thruster_routes = mask;
 }
 
+void Logic::apply_thruster_heading(uint8_t n, float command)
+{
+    _thrusters[n].apply_heading(command, true);
+    _runtime[uint8_t(ComponentId::ThrusterBow) + n].outputs[0] = _thrusters[n].output();
+}
+
+void Logic::release_thruster_heading(uint8_t n)
+{
+    _thrusters[n].release_heading();
+    _runtime[uint8_t(ComponentId::ThrusterBow) + n].outputs[0] = _thrusters[n].output();
+}
+
 void Logic::record_vsp_authority(uint8_t drive)
 {
     if (drive >= 2) {
@@ -208,20 +411,21 @@ void Logic::record_vsp_authority(uint8_t drive)
     uint8_t flags = input_valid(id, 0) && input_valid(id, 1) ? Manual : 0;
     // VRS is additive and intermittent: report only this drive's applied,
     // quantized correction, not the global enable/request or the other drive.
-    const auto* roll = vrs.controller();
+    const auto* roll = _main.vsp()->vrs.controller();
     if (roll != nullptr && roll->status(drive).command > 1.0e-6f) {
         flags |= RollAssist;
     }
-    _vsp_authority[drive] = flags;
+    _main.vsp()->authority[drive] = flags;
 }
 
 bool Logic::output_valid(ComponentId id) const
 {
-    if (!valid(id)) {
+    if (!component_selected(id)) {
         return false;
     }
+    if (is_azipod(id)) { return output_valid(id, 0) && output_valid(id, 1); }
     for (uint8_t port = 0; port < definition(id).input_count; port++) {
-        if (!_runtime[uint8_t(id)].sources_valid[port]) {
+        if (!_runtime[runtime_slot(id)].sources_valid[port]) {
             return false;
         }
     }
@@ -230,33 +434,33 @@ bool Logic::output_valid(ComponentId id) const
 
 bool Logic::output_valid(ComponentId id, uint8_t port) const
 {
-    if (!valid(id) || port >= definition(id).output_count) {
+    if (!component_selected(id) || port >= definition(id).output_count) {
         return false;
     }
-    const auto& runtime = _runtime[uint8_t(id)];
+    const auto& runtime = _runtime[runtime_slot(id)];
+    if (is_azipod(id)) { return runtime.outputs[port] >= 1000 && runtime.outputs[port] <= 2000; }
     if (id == ComponentId::VSP1 || id == ComponentId::VSP2) {
-        // VSP rods need both vector/legacy X and Y inputs. RPM_OUT only
-        // requires RPM_IN; do not reject good rods for an unused RPM route.
-        return port == 2 ? runtime.sources_valid[2] :
-               (runtime.sources_valid[0] && runtime.sources_valid[1]);
+        // Governor mode supplies a stop pulse when the RPM_IN source is lost.
+        return port == 2 ? (vrpm_enable.get() == 1 || runtime.sources_valid[2]) :
+               (_main.vsp()->allocated_rods || (runtime.sources_valid[0] && runtime.sources_valid[1]));
     }
     return runtime.sources_valid[0];
 }
 
 bool Logic::input_valid(ComponentId id, uint8_t port) const
 {
-    return valid(id) && port < definition(id).input_count &&
-        _runtime[uint8_t(id)].sources_valid[port];
+    return component_selected(id) && port < definition(id).input_count &&
+        _runtime[runtime_slot(id)].sources_valid[port];
 }
 
 bool Logic::set_input(ComponentId id, uint8_t port, uint16_t value_us, bool source_valid)
 {
-    if (!valid(id)) {
+    if (!component_selected(id)) {
         return false;
     }
 
-    const uint8_t index = uint8_t(id);
-    if (port >= component_definitions[index].input_count) {
+    const uint8_t index = runtime_slot(id);
+    if (port >= definition(id).input_count) {
         return false;
     }
 
@@ -267,12 +471,12 @@ bool Logic::set_input(ComponentId id, uint8_t port, uint16_t value_us, bool sour
 
 uint16_t Logic::input(ComponentId id, uint8_t port) const
 {
-    if (!valid(id)) {
+    if (!component_selected(id)) {
         return 0;
     }
 
-    const uint8_t index = uint8_t(id);
-    if (port >= component_definitions[index].input_count) {
+    const uint8_t index = runtime_slot(id);
+    if (port >= definition(id).input_count) {
         return 0;
     }
     return _runtime[index].inputs[port];
@@ -280,12 +484,12 @@ uint16_t Logic::input(ComponentId id, uint8_t port) const
 
 uint16_t Logic::output(ComponentId id, uint8_t port) const
 {
-    if (!valid(id)) {
+    if (!component_selected(id)) {
         return 0;
     }
 
-    const uint8_t index = uint8_t(id);
-    if (port >= component_definitions[index].output_count) {
+    const uint8_t index = runtime_slot(id);
+    if (port >= definition(id).output_count) {
         return 0;
     }
     return _runtime[index].outputs[port];

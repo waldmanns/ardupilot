@@ -9,7 +9,7 @@ input, failsafe logic or a physical battery monitor.
 ## Architecture: one source catalog, protocol-specific endpoints
 
 ```text
-  GPS / AHRS / RC / VSP / thrusters / RPM / ADC / navigation / VRS / VFN / VSEQ / PWM
+  GPS / AHRS / RC / VSP / AZI / thrusters / RPM / ADC / navigation / VRS / VFN / VSEQ / PWM
                                      |
                        numeric source ID + type + unit
                                      |
@@ -391,6 +391,7 @@ it **does not** block intentionally nonsemantic HoTT mappings.
 | 259 | `DP_CMD_E` | Number | `norm` | `0x02` | 2 B |
 | 260 | `DP_CALC` | Number | `bool` | `0x02` | 2 B |
 | 261 | `HDG_CALC` | Number | `bool` | `0x02` | 2 B |
+| 262 | `VSP_AL_ST` | Number | `mask` | `0x02` | 2 B |
 | 150 | `SEQ1_STATE` | Number | `enum` | `0x02` | 2 B |
 | 151 | `SEQ2_STATE` | Number | `enum` | `0x02` | 2 B |
 | 152 | `SEQ3_STATE` | Number | `enum` | `0x02` | 2 B |
@@ -455,6 +456,63 @@ it **does not** block intentionally nonsemantic HoTT mappings.
 | 229 | `PWM30_OUT` | Number | `us` | `0x02` | 2 B |
 | 230 | `PWM31_OUT` | Number | `us` | `0x02` | 2 B |
 | 231 | `PWM32_OUT` | Number | `us` | `0x02` | 2 B |
+| 270 | `MAIN_PROP_TYPE` | Number | `enum` | `0x02` | 2 B |
+| 271 | `VSP_CONF` | Number | `enum` | `0x02` | 2 B |
+| 272 | `AZI_CONF` | Number | `enum` | `0x02` | 2 B |
+| 280 | `AZI1_AZ_PWM` | Number | `us` | `0x02` | 2 B |
+| 281 | `AZI1_MOT_PWM` | Number | `us` | `0x02` | 2 B |
+| 282 | `AZI1_ANG_CMD` | Number | `deg` | `0x02` | 2 B |
+| 283 | `AZI1_ANG_TGT` | Number | `deg` | `0x02` | 2 B |
+| 284 | `AZI1_MOT_CMD` | Number | `norm` | `0x02` | 2 B |
+| 285 | `AZI1_STATE` | Number | `enum` | `0x02` | 2 B |
+| 286 | `AZI1_RB` | Number | `mask` | `0x02` | 2 B |
+| 290 | `AZI2_AZ_PWM` | Number | `us` | `0x02` | 2 B |
+| 291 | `AZI2_MOT_PWM` | Number | `us` | `0x02` | 2 B |
+| 292 | `AZI2_ANG_CMD` | Number | `deg` | `0x02` | 2 B |
+| 293 | `AZI2_ANG_TGT` | Number | `deg` | `0x02` | 2 B |
+| 294 | `AZI2_MOT_CMD` | Number | `norm` | `0x02` | 2 B |
+| 295 | `AZI2_STATE` | Number | `enum` | `0x02` | 2 B |
+| 296 | `AZI2_RB` | Number | `mask` | `0x02` | 2 B |
+
+### Propulsion-aware sources (AZ2.4)
+
+The source catalog is shared by both vessel families. `270: MAIN_PROP_TYPE`
+reports the constructed backend (0 VSP, 1 AZI, 255 neither), not a pending
+parameter edit. `271: VSP_CONF` reports the existing VSP geometry value only
+in VSP mode. `272: AZI_CONF` reports the latched AZI layout (0 no installed
+pods, 1 AFT) only in AZI mode. VSP geometry retains its existing semantics.
+VSP-only and VRS sources are unavailable on AZI vessels. AZI sources are
+unavailable unless the corresponding drive is installed by the selected layout.
+Tunnel thruster and other common sources retain their existing semantics.
+
+For each installed AZI drive:
+
+- `AZ_PWM` and `MOT_PWM` are logical output commands in microseconds, before
+  physical channel calibration. Use the existing `PWMn_OUT` sources for
+  physical-channel command values.
+- `ANG_CMD` and `ANG_TGT` are signed unwrapped mechanical angles in degrees,
+  relative to the calibrated mechanical zero. Neither is measured position.
+- `MOT_CMD` is the signed normalized controller command (-1..1; 0..1 for
+  forward-only ESCs), not measured thrust or RPM.
+- `STATE`: 0 blocked (invalid calibration, route loss, or output failure),
+  1 startup centering, 2 waiting for neutral / input recovery, 3 ready,
+  4 calibration (normal azipod controllers temporarily suspended).
+  Ready does not imply the motor is running; alignment, reversal dwell,
+  unreachable demand and neutral can still inhibit thrust.
+- `RB`: unsigned 11-bit per-cycle reason mask (see
+  [AZ2.4 diagnostic contract](AZIPODS_AZ2_4_STATUS.md)). Zero means no reported
+  limitation, not necessarily motor running.
+- Blocked drives report state and reason bits but suppress command samples, including after
+  an output publication failure. Uninstalled drives report no samples.
+- i-BUS uses generic numeric type `0x02`: PWM, state and reason masks are unscaled,
+  angles are scaled by 10 (tenths of degrees), motor command by 1000.
+  Negative values use two's complement; transmitter display support varies.
+  HoTT uses the selected destination's normal scale and clipping rules.
+
+No slots, default assignments, UART timing or wire protocols change.
+Existing invalid-sample behavior remains: i-BUS discovery/type replies are
+retained but measurement replies are suppressed; HoTT uses neutral field
+encoding. Assign sources manually with `VTEL_SLTn`.
 
 ## Implementation and verification
 
@@ -463,12 +521,16 @@ it **does not** block intentionally nonsemantic HoTT mappings.
 - `VTelemetryParameters.cpp` registers `VTEL_SLT1..VTEL_SLT65` as normal
   ArduPilot parameters. Slots `62..65` use an `AP_SUBGROUPEXTENSION` because
   the main AP_Param group has a bounded index range.
+- `VTelemetryPropulsion.h` reads active propulsion configuration and AZI
+  commissioning state without allocating controller state.
 - `VTelemetry.cpp` reads Vektor2 subsystem state, refreshes a locked snapshot
   every 100 ms, and serves receiver polls from separate UART tasks. It does
   not alter the 100 Hz propulsion routing or the MAVLink telemetry publisher.
 - `tests/test_vtelemetry.py` compiles the host-only core and exercises slot
   rejection, deliberate numeric mismatches, checksums, GPS coordinate
-  encoding, EAM/GPS/VARIO packets and stale sensor behavior.
+  encoding, EAM/GPS/VARIO packets, signed AZI values and stale sensor behavior.
+- `tests/test_main_propulsion.py` tests the real propulsion reader with the
+  routing integration in both firmware profiles.
 
 Host tests can be run with `python3 tests/test_vtelemetry.py`. **No full
 ArduPilot build or live i-BUS/HoTT receiver test is included in this ZIP**.
@@ -507,3 +569,10 @@ schedule. `DP_TEL_HZ` (0..50 Hz) controls the separate MAVLink
 At high DP telemetry rates the available MAVLink link bandwidth must be
 checked; output is best effort. **Neither transport conveys thrust actually
 produced by the vessel.**
+
+### Coordinated VSP navigation
+
+VTEL source 262 (`VSP_AL_ST`) is the VSP pair allocator status mask.
+Sources 66/67 expose confirmed rod ownership (3=Heading Hold, 18=DP).
+`NAV_RBITS` bit 15 (`0x8000`) indicates VSP readiness failure. See
+[VSP_ALLOCATOR.md](VSP_ALLOCATOR.md) for the complete bit assignments.

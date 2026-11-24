@@ -27,8 +27,9 @@ define HAL_STORAGE_SIZE 32768
 STORAGE_FLASH_PAGE 14
 
 # SERIAL0=USB; SERIAL1=UART7 FLEX; SERIAL2=USART1; SERIAL3=USART3 GNSS;
-# SERIAL4=UART5; SERIAL5=UART8; SERIAL6=USART2 (XIAO add-on).
-SERIAL_ORDER OTG1 UART7 USART1 USART3 UART5 UART8 USART2
+# SERIAL4=UART5; SERIAL5=UART8; SERIAL6=USART2 (XIAO add-on);
+# SERIAL7=UART4 (TX only with BRD_ALT_CONFIG=1).
+SERIAL_ORDER OTG1 UART7 USART1 USART3 UART5 UART8 USART2 UART4
 
 # USB Full Speed Type-C, SWD programming
 PA11 OTG_FS_DM OTG1
@@ -75,8 +76,14 @@ define HAL_DEFAULT_INS_FAST_SAMPLE 1
 
 # MMC5983MA (U3) CS high selects I2C. WARNING: U3 GND pins 9 and 11
 # do not appear connected in this schematic. Fix/verify before relying on it.
-COMPASS MMC5XX3 I2C:0:0x30 false ROTATION_ROLL_180_YAW_270
-define AP_COMPASS_PROBING_ENABLED 1
+# U3 is top-side up with the pin 1-4 edge (above the marking) forward.
+# The MMC5XX3 backend uses RESET polarity: +Y forward, +X right, +Z up.
+COMPASS MMC5XX3 I2C:0:0x30 false ROTATION_ROLL_180_YAW_90
+
+# Auto-detect supported external compasses on the GNSS/I2C connector.
+# The onboard MMC5983MA is probed separately by the COMPASS line above.
+define HAL_PROBE_EXTERNAL_I2C_COMPASSES
+define HAL_SKIP_AUTO_INTERNAL_I2C_PROBE
 
 # DPS310 (U2) I2C2; SDO is tied LOW, so 7-bit I2C address is 0x76.
 BARO DPS310 I2C:1:0x76
@@ -146,6 +153,7 @@ PD13 TIM4_CH2 TIM4 PWM(9) GPIO(58)
 PD12 TIM4_CH1 TIM4 PWM(10) GPIO(59)
 PA1 TIM2_CH2 TIM2 PWM(11) GPIO(60)
 PA0 TIM2_CH1 TIM2 PWM(12) GPIO(61)
+PA0 UART4_TX UART4 ALT(1)
 
 # FLEX_PWM1 has two active-low RPM inputs with external pull-ups.
 PA2 RPM1 INPUT FLOATING GPIO(62)

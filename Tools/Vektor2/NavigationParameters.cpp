@@ -12,7 +12,7 @@ const AP_Param::GroupInfo NavigationParameters::var_info[] = {
 
     // @Param: MODE
     // @DisplayName: Current navigation mode
-    // @Description: Requested navigation mode. When VFN type 5 or 6 is assigned, live RC selection overrides this value in RAM without saving it to flash. Free/Heading/DP calculations only; no automatic propulsion in M3.8.
+    // @Description: Requested navigation mode. When VFN type 5 or 6 is assigned, live RC selection overrides this value in RAM without saving it to flash. Free/Heading/DP request; automatic propulsion requires confirmed actuator ownership.
     // @Values: 0:Manual,1:Heading Hold,2:Dynamic Positioning
     // @User: Standard
     AP_GROUPINFO("MODE", 2, NavigationParameters, mode, 0),
@@ -248,6 +248,61 @@ const AP_Param::GroupInfo NavigationParameters::var_info[] = {
     // @Description: Navigation logging frequency (Hz)
     // @User: Standard
     AP_GROUPINFO("LOG_RATE", 39, NavigationParameters, log_rate, 0),
+
+    // @Param: VSP_EN
+    // @DisplayName: Enable coordinated VSP navigation (0 preserves tunnel-only heading hold)
+    // @Description: Enable coordinated VSP navigation (0 preserves tunnel-only heading hold)
+    // @User: Standard
+    AP_GROUPINFO("VSP_EN", 40, NavigationParameters, vsp_enable, 0),
+
+    // @Param: VSP1_X
+    // @DisplayName: Port VSP forward position in metres
+    // @Description: Port VSP forward position in metres
+    // @User: Standard
+    AP_GROUPINFO("VSP1_X", 41, NavigationParameters, vsp1_x, 0),
+
+    // @Param: VSP1_Y
+    // @DisplayName: Port VSP transverse position in metres (negative)
+    // @Description: Port VSP transverse position in metres (negative)
+    // @User: Standard
+    AP_GROUPINFO("VSP1_Y", 42, NavigationParameters, vsp1_y, 0),
+
+    // @Param: VSP1_F
+    // @DisplayName: Port VSP force capacity at full normalized vector
+    // @Description: Port VSP force capacity at full normalized vector
+    // @User: Standard
+    AP_GROUPINFO("VSP1_F", 43, NavigationParameters, vsp1_force, 0),
+
+    // @Param: VSP2_X
+    // @DisplayName: Starboard VSP forward position in metres
+    // @Description: Starboard VSP forward position in metres
+    // @User: Standard
+    AP_GROUPINFO("VSP2_X", 44, NavigationParameters, vsp2_x, 0),
+
+    // @Param: VSP2_Y
+    // @DisplayName: Starboard VSP transverse position in metres (positive)
+    // @Description: Starboard VSP transverse position in metres (positive)
+    // @User: Standard
+    AP_GROUPINFO("VSP2_Y", 45, NavigationParameters, vsp2_y, 0),
+
+    // @Param: VSP2_F
+    // @DisplayName: Starboard VSP force capacity at full normalized vector
+    // @Description: Starboard VSP force capacity at full normalized vector
+    // @User: Standard
+    AP_GROUPINFO("VSP2_F", 46, NavigationParameters, vsp2_force, 0),
+
+    // @Param: VSP_BOW_F
+    // @DisplayName: AFT bow force capacity at heading maximum; zero excludes bow
+    // @Description: AFT bow force capacity at heading maximum; zero excludes bow
+    // @User: Standard
+    AP_GROUPINFO("VSP_BOW_F", 47, NavigationParameters, vsp_bow_force, 0),
+
+    // @Param: VSP_RPM
+    // @DisplayName: Deprecated VSP RPM threshold
+    // @Description: Retained for compatibility. VSP navigation no longer uses this setting.
+    // @Units: rpm
+    // @User: Standard
+    AP_GROUPINFO("VSP_RPM", 48, NavigationParameters, vsp_min_rpm, 0),
 
     AP_GROUPEND
 };

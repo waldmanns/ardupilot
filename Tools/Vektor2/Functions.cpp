@@ -168,6 +168,7 @@ Functions::NavigationSelection Functions::navigation_selection(bool rc_valid)
         // reading as an extra RC position or a new DP target capture.
         if (pulse < low - nav_transition_guard_us) {
             next_mode = 0; // switch LOW: Free
+            selection.free_selected = true;
         } else if (pulse >= low + nav_transition_guard_us &&
                    pulse < high - nav_transition_guard_us) {
             next_mode = 1; // switch MIDDLE: Heading Hold
@@ -179,6 +180,7 @@ Functions::NavigationSelection Functions::navigation_selection(bool rc_valid)
         // A guard band is NOT a failsafe. Loss of RC or invalid selection
         // always clears the held mode immediately to Free.
         _nav_selected_mode = 0;
+        selection.free_selected = false;
     } else {
         _nav_selected_mode = next_mode;
     }

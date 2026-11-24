@@ -3,6 +3,7 @@
 #include <AP_Param/AP_Param.h>
 
 #include "VSP1.h"
+#include "AzipodControl.h"
 #include "VspMapper.h"
 #include "VspVectorControl.h"
 #include "VSP2.h"
@@ -105,6 +106,25 @@ public:
     RollDriveParameters roll;
 };
 
+// Separate instances share metadata but never calibration/state.
+class AzipodParameterStore {
+public:
+    AzipodParameterStore() { AP_Param::setup_object_defaults(this, var_info); }
+    static const AP_Param::GroupInfo var_info[];
+    Components::AzipodSettings values() const
+    {
+        Components::AzipodSettings s;
+        s.angle_min = angle_min.get(); s.angle_max = angle_max.get(); s.offset = offset.get();
+        s.reversible = reversible.get(); s.reverse_opt = reverse_opt.get(); s.unreachable = unreachable.get();
+        s.deadband = deadband.get(); s.rate = rate.get(); s.hysteresis = hysteresis.get();
+        s.reverse_delay = reverse_delay.get(); s.align = align.get(); s.motor_slew = motor_slew.get();
+        return s;
+    }
+    AP_Int8 reversible, reverse_opt, unreachable;
+    AP_Int16 angle_min, angle_max, offset, deadband, rate, hysteresis, reverse_delay, align;
+    AP_Float motor_slew;
+};
+
 class ThrusterBowParameterStore {
 public:
     ThrusterBowParameterStore() { AP_Param::setup_object_defaults(this, var_info); }
@@ -123,6 +143,7 @@ public:
         s.maximum = maximum.get(); s.slew = slew.get();
         s.heading_enable = heading_enable.get(); s.heading_sign = heading_sign.get();
         s.heading_maximum = heading_maximum.get();
+        s.distance_cm = dst.get();
         return s;
     }
     AP_Int8 enable, heading_enable, heading_sign;
@@ -150,6 +171,7 @@ public:
         s.maximum = maximum.get(); s.slew = slew.get();
         s.heading_enable = heading_enable.get(); s.heading_sign = heading_sign.get();
         s.heading_maximum = heading_maximum.get();
+        s.distance_cm = dst.get();
         return s;
     }
     AP_Int8 enable, heading_enable, heading_sign;

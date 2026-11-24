@@ -21,10 +21,10 @@ public:
 
     // Compact standard-MAVLink parameter representation:
     // SRC: 0 disabled; 1..18 RC1..RC18; 101/102 VSP1 O1/O2;
-    //      103 VSP1 RPM_OUT; 111/112 VSP2 O1/O2; 113 VSP2 RPM_OUT.
+    //      103 VSP1 RPM_OUT; 111/112 VSP2 O1/O2; 113 VSP2 RPM_OUT; 141/142 AZI1 AZ/MOT; 151/152 AZI2 AZ/MOT.
     // DST: 0 disabled; 1..32 PWM1..PWM32; 101/102 VSP1 I1/I2;
     //      103 VSP1 RPM_IN; 111/112 VSP2 I1/I2; 113 VSP2 RPM_IN;
-    //      121/131 bow/stern thruster input; 201..210 VFN1..VFN10 input.
+    //      121/131 bow/stern thruster input; 141/142 AZI1 X/Y; 151/152 AZI2 X/Y; 201..210 VFN1..VFN10 input.
     AP_Int16 source;
     AP_Int16 destination;
 };

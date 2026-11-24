@@ -31,6 +31,7 @@ public:
         bool position_valid = false;
         bool velocity_valid = false;
         bool heading_valid = false;
+        bool heading_command_valid = false; // shared yaw controller readiness
         bool estimator_reset = false;
     };
     struct Output {

@@ -34,7 +34,7 @@ const AP_Param::Info App::var_info[] = {
     GOBJECT(measure_points, "MP_", MeasurePoints),
     // @Param: VRPM_TEL_HZ
     // @DisplayName: Shaft RPM telemetry rate
-    // @Description: Rate for shaft RPM readings and magnet detection states in NAMED_VALUE_FLOAT messages. Zero disables transmission. Requires board-defined RPM inputs. Values above 50 are limited to 50 Hz.
+    // @Description: Rate for shaft RPM, magnet detection and VSP governor status in NAMED_VALUE_FLOAT messages. Zero disables transmission. RPM and magnet readings require board-defined RPM inputs. Values above 50 are limited to 50 Hz.
     // @Units: Hz
     // @Range: 0 50
     // @Increment: 1

@@ -30,6 +30,12 @@ def run():
                 s.wait('SERVO_OUTPUT_RAW', lambda m:
                        (m.servo9_raw,m.servo10_raw,m.servo11_raw,m.servo12_raw) == (x1,y1,x2,y2))
             pwm(1525,1500,1525,1500)  # default legacy
+            for pulse, rod in ((950,1475),(2050,1525)):
+                channels[0] = pulse
+                s.override(channels)
+                pwm(rod,1500,rod,1500)
+            channels[0] = 2000
+            s.override(channels)
             s.named('VSP1_AUTH', lambda v: v == 1)
             s.named('VSP2_AUTH', lambda v: v == 1)
             s.parameter('VSP1_DIR', 1)  # CCW
@@ -50,7 +56,7 @@ def run():
             s.parameter('VSP2_VMODE', 1)
             pwm(1475,1500,1500,1500)
             s.parameter('VRS_ENABLE', 1)
-            s.parameter('VHDG_ENABLE', 1)
+            s.parameter('VNAV_HDG_ENABLE', 1)
             channels[0] = 1500
             s.override(channels)
             s.named('VSP2_VST', lambda v: v == 2)
@@ -60,6 +66,17 @@ def run():
             s.named('VSP1_AUTH', lambda v: v == 1)
             s.named('VSP2_AUTH', lambda v: v == 1)
             s.wait('SERVO_OUTPUT_RAW', lambda m: m.servo13_raw == 1700)  # RPM passthrough
+            for pulse, endpoint, x1, x2, direction in (
+                    (950,1000,1525,1475,180), (2050,2000,1475,1525,0)):
+                channels[0] = channels[2] = pulse
+                s.override(channels)
+                pwm(x1,1500,x2,1500)
+                s.wait('SERVO_OUTPUT_RAW', lambda m: m.servo13_raw == endpoint)
+                s.snapshot(['VSP1_VST', 'VSP1_TDIR', 'VSP1_TMAG'], lambda row:
+                    row['VSP1_VST'] == 2 and abs(row['VSP1_TDIR'] - direction) < 0.1
+                    and row['VSP1_TMAG'] == 1)
+            channels[0], channels[2] = 2000, 1700
+            s.override(channels)
             s.parameter('VSP1_MAP_ANG', 90)
             pwm(1500,1500,1525,1500)
             channels[0] = 1500
@@ -91,13 +108,15 @@ def run():
             s.named('VSP2_VST', lambda v: v == 3)
             s.named('VSP1_AUTH', lambda v: v == 8)
             s.named('VSP2_AUTH', lambda v: v == 8)
-            pwm(1500,1500,1500,1500)
+            # Routing disables PWM on source loss. SITL readback retains its last pulse.
+            s.snapshot(['VSP1_XA', 'VSP1_YA', 'VSP2_XA', 'VSP2_YA'],
+                       lambda row: all(value == 1500 for value in row.values()))
             s.parameter('RC_OVERRIDE_TIME', -1)
             s.override(channels)
             s.named('VSP1_VST', lambda v: v == 1)
             s.named('VSP1_AUTH', lambda v: v == 8)
             pwm(1500,1500,1500,1500)
-            print('PASS: VMODE defaults, independent drives, transitions, rotation, angle, RPM and RC-loss neutral PWM')
+            print('PASS: VMODE, independent drives, rotation, angle, endpoint saturation, RPM and RC-loss recovery')
         except Exception:
             s.log.flush()
             s.log.seek(0)

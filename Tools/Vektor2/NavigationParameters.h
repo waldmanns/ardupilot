@@ -5,7 +5,7 @@
 namespace Vektor2 {
 
 // Parameters for the unified Free / Heading Hold / DP navigation system.
-// Milestone 1 supervises mode readiness only; automatic control is not wired.
+// Controller and explicitly enabled actuator allocation configuration.
 class NavigationParameters {
 public:
     NavigationParameters() { AP_Param::setup_object_defaults(this, var_info); }
@@ -50,6 +50,8 @@ public:
     AP_Int8 failsafe_mode;
     AP_Int8 log_enable;
     AP_Int16 log_rate;
+    AP_Int8 vsp_enable;
+    AP_Float vsp1_x, vsp1_y, vsp1_force, vsp2_x, vsp2_y, vsp2_force, vsp_bow_force, vsp_min_rpm;
 };
 
 } // namespace Vektor2

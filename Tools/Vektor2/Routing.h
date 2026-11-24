@@ -112,7 +112,17 @@ public:
                                   uint16_t min_us = 1000,
                                   uint16_t max_us = 2000);
 
-    void update(const RcInput& rc, Logic& logic, PwmOut& pwm);
+    // Temporary direct commissioning; one owner/pod, never persisted.
+    enum class CalibrationResult : uint8_t { Accepted, Invalid, Busy, Unavailable, NoSession };
+    static constexpr uint32_t calibration_timeout_ms = 1000;
+    CalibrationResult azipod_calibration(uint32_t now, uint8_t system, uint8_t component,
+        uint8_t link, const float (&fields)[7], const Logic& logic, const PwmOut& pwm);
+    void prepare(const RcInput& rc, Logic& logic, const PwmOut& pwm,
+                 const VspRpmGovernor::Feedback (&shaft_rpm)[2]);
+    // Returns the heading owner mask after all of its PWM routes commit.
+    bool vsp_routes_ready(const PwmOut& pwm, bool bow) const;
+    uint8_t publish_outputs(const RcInput& rc, Logic& logic, PwmOut& pwm, uint8_t heading_mask,
+                            bool vsp_auto=false, bool vsp_bow=false, bool vsp_guard=false);
 
     void attach_sequencer(Sequencer& sequencer) { _sequencer = &sequencer; }
     uint32_t sequencer_errors() const { return _sequencer_errors; }
@@ -143,12 +153,20 @@ private:
     void fill_inputs(ComponentId component, const RcInput& rc, Logic& logic) const;
 
     void disable_mask(uint32_t mask, PwmOut& pwm) const;
+    static bool write_routed(const Route& route, PwmOut& pwm, uint16_t source_us);
     void prepare_functions(Logic& logic, const Route* (&routes)[Functions::count]);
     void sample_functions(const RcInput& rc, Logic& logic,
                           const Route* const (&routes)[Functions::count]) const;
 
     void sample_sequencer(const RcInput& rc, const Logic& logic) const;
 
+    uint8_t azipod_ready_mask(const Logic& logic, const PwmOut& pwm) const;
+    struct Calibration {
+        uint32_t last_ms = 0, revision = 0;
+        uint16_t token = 0, steering = 1500;
+        uint8_t system = 0, component = 0, link = 0, pod = 0;
+        int8_t motor = 0;
+    } _calibration;
     Route _routes[capacity] {};
     Sequencer* _sequencer = nullptr;
     uint32_t _sequencer_errors = 0;
@@ -164,6 +182,8 @@ private:
         ComponentId::VSP2,
         ComponentId::ThrusterBow,
         ComponentId::ThrusterStern,
+        ComponentId::AZI1,
+        ComponentId::AZI2,
     };
 };
 

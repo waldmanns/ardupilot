@@ -63,6 +63,13 @@ static void heading_actuator_path()
     stern.update(10, t, false, true, true, 1500);
     stern.apply_heading(0.5f, true);
     assert(stern.output() == 1500 && bow.output() == 1600);
+    bow.follow_heading_output();
+    t.heading_sign = 1;
+    bow.update(10, t, true, true, true, 1500);
+    assert(bow.output() == 1590 && bow.state() == ThrusterControl::State::Manual);
+    assert(fabsf(bow.heading_equivalent() - 0.45f) < 0.001f);
+    bow.update(20, t, true, true, false, 1500);
+    assert(bow.output() == 1500 && bow.state() == ThrusterControl::State::InputLost);
     puts("PASS: thruster actuator yaw signs, limits and readiness gate");
 }
 int main() { manual_and_gates(); heading_actuator_path(); }

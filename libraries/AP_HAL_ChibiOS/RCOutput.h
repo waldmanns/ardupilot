@@ -661,6 +661,7 @@ private:
 
     // find a channel group given a channel number
     struct pwm_group *find_chan(uint8_t chan, uint8_t &group_idx);
+    bool has_pwm_output(uint8_t chan) override;
 
     // push out values to local PWM
     void push_local(void);

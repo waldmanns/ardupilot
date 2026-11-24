@@ -126,13 +126,20 @@ VesselThrustAllocator::Result VesselThrustAllocator::allocate(
     out.vsp1 = {float(u[0]), float(u[1])};
     out.vsp2 = {float(u[2]), float(u[3])};
     out.bow = float(u[4]);
-    out.achieved.surge = float(c1*u[0] + c2*u[2]);
-    out.achieved.sway = float(c1*u[1] + c2*u[3] + cb*u[4]);
-    out.achieved.yaw = float(
-        c1*(g.vsp1.x*u[1] - g.vsp1.y*u[0]) +
-        c2*(g.vsp2.x*u[3] - g.vsp2.y*u[2]) +
-        (use_bow ? g.bow_x*cb*u[4] : 0));
+    out.achieved = achieved(g, out);
     return out;
+}
+
+VesselThrustAllocator::Demand VesselThrustAllocator::achieved(const Geometry& g, const Result& r)
+{
+    const double x1 = double(g.vsp1.force) * r.vsp1.forward;
+    const double y1 = double(g.vsp1.force) * r.vsp1.starboard;
+    const double x2 = double(g.vsp2.force) * r.vsp2.forward;
+    const double y2 = double(g.vsp2.force) * r.vsp2.starboard;
+    const double bow = r.bow_allocated ? double(g.bow_force) * r.bow : 0;
+    const double bow_moment = r.bow_allocated ? g.bow_x * bow : 0;
+    return {float(x1 + x2), float(y1 + y2 + bow),
+            float(g.vsp1.x * y1 - g.vsp1.y * x1 + g.vsp2.x * y2 - g.vsp2.y * x2 + bow_moment)};
 }
 
 } // namespace Vektor2

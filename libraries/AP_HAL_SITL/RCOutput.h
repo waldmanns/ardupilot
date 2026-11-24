@@ -13,6 +13,7 @@ public:
     uint16_t get_freq(uint8_t ch) override;
     void enable_ch(uint8_t ch) override;
     void disable_ch(uint8_t ch) override;
+    bool has_pwm_output(uint8_t ch) override { return ch < SITL_NUM_CHANNELS; }
     void write(uint8_t ch, uint16_t period_us) override;
     uint16_t read(uint8_t ch) override;
     void read(uint16_t* period_us, uint8_t len) override;

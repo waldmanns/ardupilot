@@ -44,6 +44,7 @@ int main()
     NavigationDP::Input in;
     in.actual = {500000000, 140000000}; // 50 N, 14 E
     in.position_valid = in.velocity_valid = in.heading_valid = true;
+    in.heading_command_valid = true;
     in.heading_deg = 0.0f;
     assert(NavigationDP::config_valid(cfg));
     assert(dp.capture(in.actual));
@@ -91,6 +92,13 @@ int main()
     assert(near(dp.output().demand_magnitude, 1.0f));
     assert(near(dp.output().surge, -0.7071068f));
     assert(near(dp.output().sway, -0.7071068f));
+
+    in.heading_command_valid = false;
+    dp.update(in, cfg, 0.01f);
+    assert(dp.output().actual_valid && dp.output().target_valid);
+    assert(!dp.output().valid && near(dp.output().surge, 0) && near(dp.output().sway, 0));
+    assert(!(dp.output().reason_bits & Reason::HeadingInvalid));
+    in.heading_command_valid = true;
 
     // The DP controller emits multi-cause NAV_RBITS-compatible reasons.
     // Invalid inputs must zero demand, never reuse a previous command.

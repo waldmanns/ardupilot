@@ -224,6 +224,7 @@ static void calculations_are_not_actuator_authority()
     in.requested_mode = 2;
     in.enabled = in.heading_enabled = in.dp_enabled = true;
     in.rc_valid = in.heading_valid = in.position_valid = in.velocity_valid = true;
+    in.heading_command_valid = true;
     in.heading_target_valid = in.position_target_valid = true;
     // Regardless of valid controller maths, no output owner exists in M3.8.
     in.output_ready = in.yaw_owned = in.translation_owned = false;

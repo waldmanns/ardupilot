@@ -1,6 +1,7 @@
 #include "VTelemetry.h"
 
 #include "Vektor2.h"
+#include "VTelemetryPropulsion.h"
 
 #include <AP_HAL/AP_HAL.h>
 #include <GCS_MAVLink/GCS.h>
@@ -50,6 +51,9 @@ bool VTelemetry::read_source(uint16_t id, Sample& s, void* context)
         return true;
     default: break;
     }
+    if (id >= 270 && id <= 296) {
+        return read_propulsion_source(id, s, application.logic);
+    }
     if (id >= 20 && id <= 37) {
         const uint8_t channel = uint8_t(id - 20);
         if (!application.rcin.valid() || channel >= application.rcin.channel_count()) { return false; }
@@ -83,10 +87,13 @@ bool VTelemetry::read_source(uint16_t id, Sample& s, void* context)
         s.number = ((id - 60) % 2) == 0 ? estimate.direction_deg : estimate.intensity;
         return true;
     }
+    if (id >= 64 && id <= 67 && !application.logic.vsp_selected()) { return false; }
     if (id >= 64 && id <= 65) { s.number = uint8_t(application.logic.vector_state(id - 64)); return true; }
+    if (id == 262) { if (!application.logic.vsp_selected()) return false; s.number=application.logic.vsp_alloc_status(); return true; }
     if (id >= 66 && id <= 67) { s.number = application.logic.vsp_authority(id - 66); return true; }
     if (id >= 80 && id <= 82) {
-        const auto* vrs = application.logic.vrs.controller();
+        if (!application.logic.vsp_selected()) { return false; }
+        const auto* vrs = application.logic.roll_controller();
         if (id == 80) { s.number = vrs ? uint8_t(vrs->state()) : 0; return true; }
         if (!vrs) { return false; }
         s.number = id == 81 ? vrs->demand() : float(vrs->inhibited());

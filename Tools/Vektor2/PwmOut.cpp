@@ -99,6 +99,37 @@ bool PwmOut::set_rate_hz(uint8_t channel, uint16_t rate_hz)
     return true;
 }
 
+bool PwmOut::configuration_valid(uint8_t channel) const
+{
+    if (hal.rcout == nullptr || channel >= max_pwm_channels) {
+        return false;
+    }
+    const auto& params = channels[channel];
+    return params.min_us.get() >= 500 && params.max_us.get() <= 2500 &&
+           params.min_us.get() < params.max_us.get() &&
+           (params.inverted.get() == 0 || params.inverted.get() == 1);
+}
+
+bool PwmOut::heading_output_ready(uint8_t channel) const
+{
+    return configuration_valid(channel) && hal.rcout->has_pwm_output(channel) &&
+           hal.util->safety_switch_state() != AP_HAL::Util::SAFETY_DISARMED;
+}
+
+void PwmOut::begin_batch()
+{
+    if (hal.rcout != nullptr) {
+        hal.rcout->cork();
+    }
+}
+
+void PwmOut::end_batch()
+{
+    if (hal.rcout != nullptr) {
+        hal.rcout->push();
+    }
+}
+
 bool PwmOut::write_us(uint8_t channel, uint16_t pulse_us)
 {
     if (hal.rcout == nullptr || channel >= max_pwm_channels) {
@@ -109,8 +140,7 @@ bool PwmOut::write_us(uint8_t channel, uint16_t pulse_us)
     const int16_t min_us = params.min_us.get();
     const int16_t max_us = params.max_us.get();
     const int8_t inverted = params.inverted.get();
-    if (min_us < 500 || max_us > 2500 || min_us >= max_us ||
-        (inverted != 0 && inverted != 1)) {
+    if (!configuration_valid(channel)) {
         disable(channel);
         return false;
     }

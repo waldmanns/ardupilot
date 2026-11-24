@@ -29,6 +29,10 @@ static bool read(uint16_t id, Sample& s, void* p)
     if (id == 257) { s.number = -2.1f; return true; }
     if (id == 258) { s.number = .375f; return true; }
     if (id == 259) { s.number = -.4f; return true; }
+    if (id == 282) { s.number = -45.5f; return inputs.gps_valid; }
+    if (id == 284) { s.number = -.375f; return inputs.gps_valid; }
+    if (id == 285) { s.number = 3; return true; }
+    if (id == 286) { s.number = 1536; return true; }
     return false;
 }
 
@@ -62,6 +66,7 @@ int main()
     assert(find_source(259)->ibus_scale == 1000);
     assert(find_source(260)->type == Type::Number);
     assert(find_source(261)->type == Type::Number);
+    assert(find_source(262)->type == Type::Number);
     for (uint8_t i = 0; i < source_count(); i++) {
         const Source* src = source_at(i);
         assert(src != nullptr);
@@ -178,6 +183,37 @@ int main()
     assert(r.ibus_reply(q, resp) == 6 && le16(resp+2) == 375);
     ibus_query(0xA0, 4, q);
     assert(r.ibus_reply(q, resp) == 6 && int16_t(le16(resp+2)) == -400);
+
+    // Propulsion catalog IDs and signed AZI wire values.
+    for (uint16_t id = 270; id <= 272; ++id) { assert(find_source(id)); }
+    for (uint16_t base : {280, 290}) {
+        for (uint16_t off = 0; off < 7; ++off) {
+            const auto* src = find_source(base + off);
+            assert(src && src->type == Type::Number && src->ibus_width == 2);
+            assert(src->ibus_scale == (off == 2 || off == 3 ? 10 : off == 4 ? 1000 : 1));
+        }
+    }
+    std::memset(cfg, 0, sizeof(cfg));
+    cfg[0] = 282; cfg[1] = 284; cfg[2] = 285; cfg[3] = 286;
+    cfg[31] = 282;
+    assert(r.configure(cfg) == 0);
+    inputs.gps_valid = true;
+    r.sample(read, &inputs);
+    ibus_query(0xA0, 1, q);
+    assert(r.ibus_reply(q, resp) == 6 && int16_t(le16(resp+2)) == -455);
+    ibus_query(0xA0, 2, q);
+    assert(r.ibus_reply(q, resp) == 6 && int16_t(le16(resp+2)) == -375);
+    ibus_query(0xA0, 3, q);
+    assert(r.ibus_reply(q, resp) == 6 && le16(resp+2) == 3);
+    ibus_query(0xA0, 4, q);
+    assert(r.ibus_reply(q, resp) == 6 && le16(resp+2) == 1536);
+    inputs.gps_valid = false;
+    r.sample(read, &inputs);
+    ibus_query(0xA0, 1, q);
+    assert(r.ibus_reply(q, resp) == 0);
+    ibus_query(0x80, 1, q);
+    assert(r.ibus_reply(q, resp) == 4);
+    assert(r.hott_frame(0x8E, frame) && frame[24] == 20);
 
     // All slots disabled -> no advertised HoTT modules or i-BUS sensors.
     std::memset(cfg, 0, sizeof(cfg));

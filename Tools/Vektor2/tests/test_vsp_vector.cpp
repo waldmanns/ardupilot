@@ -23,6 +23,15 @@ int main()
     update(2000, 1500); assert(x == 1498 && y == 1500); // 2% per tick
     for (int i=0; i<60; i++) { update(2000,1500); }
     assert(x == 1400 && y == 1500);
+    const auto generation = control.revision();
+    update(2050,1500);
+    assert(x == 1400 && y == 1500 && control.heading_ready());
+    update(1000,1800);
+    const auto endpoint = control.requested();
+    update(950,1800);
+    assert(control.heading_ready() && control.revision() == generation);
+    assert(control.requested().forward == endpoint.forward &&
+           control.requested().starboard == endpoint.starboard);
     update(1500,1500); assert(x == 1500 && y == 1500); // immediate neutral
     update(1500,2000);
     assert(x == 1500 && y == 1498);
@@ -74,6 +83,14 @@ int main()
     shared.prepare(40,0,s,1500,1500,true); shared.apply(x,y,&heading);
     shared.prepare(50,0,s,1500,1500,false);
     assert(!shared.apply(x,y,&heading) && x == 1500 && y == 1500);
+    shared.prepare(60,0,s,1500,1500,true); shared.apply(x,y);
+    shared.follow_allocation(heading);
+    shared.update(70,0,s,1500,1500,true,x,y);
+    assert(x == 1518 && y == 1500); // Free slews from the published allocation
+    shared.update(80,0,s,1500,2000,true,x,y);
+    assert(x > 1500 && y > 1500 && shared.heading_ready());
+    shared.update(90,0,s,1500,1500,false,x,y);
+    assert(x == 1500 && y == 1500); // source loss still stops the handover
     puts("PASS: shared manual/heading map stage, single slew and immediate automatic release");
     puts("PASS: vector ownership, neutral transitions, slew, loss, stalls, route/config edits and mapping");
 }

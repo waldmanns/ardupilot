@@ -24,6 +24,10 @@ public:
                  uint16_t forward_us, uint16_t starboard_us, bool inputs_valid);
     bool apply(uint16_t& x_us, uint16_t& y_us, const VspMapper::Vector* heading = nullptr);
     bool heading_ready() const { return _state == State::Active && !_neutral_cycle; }
+    VspMapper::Vector requested() const { return _requested; }
+    VspMapper::Vector commanded() const { return _command; }
+    void follow_allocation(VspMapper::Vector command) { _command = command; _allocation_handover = true; }
+    void reset_command() { _command = {0, 0}; _allocation_handover = _ready = false; }
     bool centered() const { return _centered; }
     uint32_t revision() const { return _generation; }
     bool blocks_assistance() const { return _state != State::Legacy; }
@@ -40,6 +44,7 @@ private:
     bool _centered = false;
     bool _neutral_cycle = true;
     bool _heading_last = false;
+    bool _allocation_handover = false;
     float _dt = 0;
     VspMapper::Vector _requested {0, 0};
     uint32_t _generation = 0;

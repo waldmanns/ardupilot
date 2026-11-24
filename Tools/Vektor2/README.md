@@ -23,7 +23,7 @@ payload, descriptor protocol or proprietary Vektor serial protocol.
 - standard ArduPilot MAVLink/GCS parameter and telemetry infrastructure
 - SD/filesystem binary logging, MAVFTP and native MAVLink log transfers
 - a fixed 32-slot microsecond routing table
-- routed VSP and thruster components
+- routed VSP, AZI and tunnel thruster components
 - a [sequencer](VSEQ.md) with onboard parameter storage and optional boot playback
 - configurable [VTEL telemetry builder](VTEL.md): typed source catalog, 65
   numeric `VTEL_SLTn` assignments, i-BUS virtual sensors and HoTT EAM/GPS/VARIO
@@ -44,6 +44,8 @@ i-BUS discovery and sensor addresses, HoTT polling and **EAM/GPS/VARIO module
 emulation**, exact slot/source catalogs, default mappings, and unsupported HoTT
 module types such as GAM. Configure `SERIALx_PROTOCOL=49` for i-BUS telemetry
 or `SERIALx_PROTOCOL=27` for HoTT, on a suitable receiver-connected UART.
+The catalog includes the active propulsion family, its layout and AZI commissioning
+commands and reason masks; inactive propulsion sources are unavailable.
 The backend reads a 10 Hz snapshot and handles serial polling outside the
 100 Hz control path. Hardware verification is still required.
 
@@ -141,10 +143,10 @@ EK3_SRC1_VELZ  = 3  (GPS)
 EK3_SRC1_YAW   = 1  (compass yaw, gyro propagation)
 ```
 
-With an installed compass, EKF3 keeps source set 1 and its compass yaw.
-If no compass is detected at startup, Vektor2 selects source set 2 with the
-the same GPS position and velocity sources, synthetic height, and
-`EK3_SRC2_YAW=8` (GSF).
+With a detected compass enabled for yaw, EKF3 starts with source set 1 and
+its compass yaw. When no compass is enabled for yaw at startup, Vektor2
+selects source set 2 with the same GPS position and velocity sources,
+synthetic height, and `EK3_SRC2_YAW=8` (GSF).
 Source set 2 is reserved for this fallback; its active values are restored
 at boot if older firmware saved the unaided values. Both height sources are
 set to synthetic height in RAM at boot, even if older firmware saved GPS
@@ -156,13 +158,6 @@ GPS position. Without a compass or GPS motion, EKF3 can report a valid
 roll/pitch attitude after tilt alignment, but absolute yaw and position
 cannot be observed. A receiver can report a raw 3D fix before EKF3 has a
 fused position.
-
-Compass calibration uses ArduPilot's standard `MAV_CMD_DO_START_MAG_CAL`,
-`MAV_CMD_DO_ACCEPT_MAG_CAL`, and `MAV_CMD_DO_CANCEL_MAG_CAL` handlers. The
-compass is sampled and the calibration task is updated at 10 Hz. Calibration
-requires a detected, healthy compass but does not require a GPS fix. The DCM
-attitude component is included because ArduPilot's compass calibrator uses it
-for attitude samples.
 
 Vektor2 reports the first five GPS1 baud changes and the effective GPS
 settings in `STATUSTEXT`. While no backend is detected, a warning every 15
@@ -192,8 +187,50 @@ and GPS status.
   independently of the u-blox wake-up sequence. Restore the u-blox settings
   afterward.
 
-GPS and EKF settings remain ordinary ArduPilot parameters. Saved compass
-yaw settings are left intact.
+## Compass setup on Vektor Core EVO
+
+The `MatekH743` Vektor2 build uses ArduPilot's `AP_Compass` drivers:
+
+| Compass | Connection | Detection |
+| --- | --- | --- |
+| Onboard MMC5983MA (U3) | I²C1, PB8 SCL / PB9 SDA, address `0x30` | Explicit `MMC5XX3` probe, device ID `1257473` |
+| External I²C compass (for example IST8310 or QMC5883P) | GNSS/I²C connector, PB10 SCL / PB11 SDA, plus module power and ground | Automatic ArduPilot probing on I²C2 |
+| External DroneCAN compass | Configured [DroneCAN port](#can-and-routed-pwm) | Standard ArduPilot DroneCAN discovery |
+
+For the onboard sensor, check continuity from U3 ground pins 9 and 11 to
+board ground. The schematic referenced by the board definition shows those
+pins without a ground connection. The onboard rotation
+(`ROTATION_ROLL_180_YAW_90`) assumes U3 is top-side up with the edge above
+the `5983` marking (pins 1–4) toward the bow. Recalibrate the onboard compass
+after updating from a build that used `ROTATION_ROLL_180_YAW_270`. For an
+external compass, use the connector's I²C lines even if the compass is part
+of a GPS module that also connects to the GPS UART.
+
+1. Set `COMPASS_ENABLE=1`, `COMPASS_DISBLMSK=0` and `EK3_SRC1_YAW=1`, then
+   reboot with the compasses connected. The ground station lists detected
+   compasses by device ID (`COMPASS_DEV_ID`, `COMPASS_DEV_ID2`,
+   `COMPASS_DEV_ID3`). The corresponding `COMPASS_EXTERNAL`,
+   `COMPASS_EXTERN2` and `COMPASS_EXTERN3` fields identify external
+   compasses. If the onboard ID is absent, check U3 wiring or use an external
+   compass.
+2. In the ground station's compass setup, move the chosen compass to
+   priority 1 (`COMPASS_PRIO1_ID`), set `COMPASS_USE=1` and, for a single
+   heading source, set `COMPASS_USE2=0` and `COMPASS_USE3=0`. Reboot after
+   changing priority. Set the external compass orientation to match its
+   installation if it differs from the detected default. Compasses disabled
+   for yaw remain visible and continue reporting samples.
+3. Run onboard compass calibration through the ground station, accept the
+   result and reboot. On the bench, turn the vessel through the cardinal
+   headings and confirm that the indicated heading follows the bow. Check
+   that heading stays consistent when rolling or pitching the vessel.
+
+Vektor2 updates the compass frontend and its calibration task at 10 Hz.
+Calibration uses ArduPilot's `MAV_CMD_DO_START_MAG_CAL`,
+`MAV_CMD_DO_ACCEPT_MAG_CAL` and `MAV_CMD_DO_CANCEL_MAG_CAL` handlers and
+requires a healthy compass. With the default `COMPASS_OPTIONS=0`, you can
+calibrate before GPS acquires a fix. In the MAVLink inspector, the
+magnetometer fields in `RAW_IMU`, `SCALED_IMU2` and `SCALED_IMU3` show
+samples for compass priorities 1, 2 and 3, respectively.
 
 ## Serial ports
 
@@ -259,7 +296,8 @@ one magnet pulse per revolution. It reports zero until it measures a full
 revolution and after pulses stop.
 
 `VRPM_TEL_HZ` defaults to `0`, which disables transmission. Set it to 1–50 Hz
-to publish MAVLink `NAMED_VALUE_FLOAT` messages at that rate per input.
+to publish each RPM, magnet and governor status value at that rate as a MAVLink
+`NAMED_VALUE_FLOAT` message.
 Changes take effect without rebooting.
 
 | MAVLink key | MCU pin | Value |
@@ -271,6 +309,59 @@ Changes take effect without rebooting.
 
 Each `VRPMx_IRQ` value is `1` while its input is low (magnet detected) and `0`
 while it is high. The input level is sampled at the telemetry rate.
+
+### VSP RPM governor
+
+VSP1 uses RPM1 (PA2) and VSP2 uses RPM2 (PA3). Route the knob or switch to
+`RPM_IN` (destination `103` for VSP1 or `113` for VSP2). Both drives use the
+same RPM range and tuning. An RC channel can feed both routes for a shared
+command, or each drive can have its own command.
+
+| Parameter | Setting |
+| --- | --- |
+| `VRPM_ENABLE` | `0` (default) passes each `RPM_IN` directly to `RPM_OUT`. `1` uses that input as the governor command. |
+| `VRPM_RPM_LOW` | Target shaft RPM at 1500 µs. Set a positive value. |
+| `VRPM_RPM_HIGH` | Target shaft RPM at 2000 µs. Set a value at least as high as `VRPM_RPM_LOW`. |
+| `VRPM_DB` | Deadband on either side of the target in RPM. The default is ±2 RPM. |
+| `VRPM_SLEW_FAST` | Throttle rate at large RPM errors and during startup. Default 30 µs/s. |
+| `VRPM_SLEW_SLOW` | Throttle rate at the near-target boundary. Default 10 µs/s. Set it no higher than `VRPM_SLEW_FAST`. |
+| `VRPM_NEAR_RPM` | Error where the slow rate applies. Default 50 RPM. Set it above `VRPM_DB`. |
+| `VRPM_START_MAX` | Throttle limit before the first valid RPM reading. Default 1200 µs. |
+
+In governor mode, 1480 µs and below outputs 1000 µs to stop the motor.
+1481–1500 µs selects the low RPM target. From 1500 to 2000 µs the target
+changes linearly from low to high. With endpoints of 200 and 400 RPM,
+1750 µs requests 300 RPM.
+
+The throttle rate tapers linearly from the slow rate at `VRPM_NEAR_RPM` to
+zero at the deadband. Farther out it blends to the fast rate at twice
+`VRPM_NEAR_RPM`. Inside the deadband the drive holds its throttle pulse.
+Higher logical throttle pulses must increase shaft speed.
+
+From a stopped shaft, the drive ramps up to `VRPM_START_MAX` while it waits
+for a valid reading. If it spends ten seconds at that limit without feedback,
+or if it loses feedback while regulating, it commands 1000 µs. Lower the
+knob to 1480 µs or below to rearm that drive. A missing RPM input route or an
+unavailable RPM sensor also commands a stop. Shaft RPM measurements continue
+with `VRPM_TEL_HZ=0`.
+
+With VSP propulsion selected, `VRPM1_STAT` and `VRPM2_STAT` report the
+governor bitmask for VSP1 and VSP2 at `VRPM_TEL_HZ`. Decode the float value
+as an unsigned integer.
+
+| Bit | Value | Meaning when set |
+| --- | --- | --- |
+| 0 | 1 | Governor enabled by `VRPM_ENABLE`. |
+| 1 | 2 | This drive has a valid routed `RPM_IN` control pulse. |
+| 2 | 4 | The control pulse requests RPM hold (above 1480 µs). |
+| 3 | 8 | This drive has valid shaft RPM feedback. |
+| 4 | 16 | This drive has a valid routed `RPM_IN` pulse. |
+| 5 | 32 | The governor is controlling this drive's `RPM_OUT`. |
+| 6 | 64 | Active and within the RPM deadband. |
+| 7 | 128 | Active and the output pulse is at a throttle endpoint (1000 or 2000 µs). |
+| 8 | 256 | The governor settings are valid. |
+| 9 | 512 | Starting the shaft while waiting for RPM feedback. |
+| 10 | 1024 | Stopped after a fault. Lower `RPM_IN` to 1480 µs or below to rearm. |
 
 ## RC input
 
@@ -398,6 +489,11 @@ main outputs follow the connector's mirrored physical order. `1_2`
 | 11 | PA1 | TIM2_CH2 |
 | 12 | PA0 | TIM2_CH1 |
 
+`BRD_ALT_CONFIG=0` selects PWM12 on PA0. To use that pin as a TX-only UART4,
+set `BRD_ALT_CONFIG=1`, set `SERIAL7_PROTOCOL` and `SERIAL7_BAUD` for the
+connected device, and reboot. PWM12 is unavailable on the connector in this
+mode.
+
 On the FLEX header, PWM13 through PWM16 are on PA6, PA7, PB0 and PB1.
 PA2 and PA3 are shaft RPM inputs.
 For direct RC passthrough, set `RTn_SRC=n` and `RTn_DST=n` for each channel.
@@ -443,13 +539,29 @@ can override this default.
 
 ## Logic components
 
-Two fixed components are present:
+Six stable component IDs are registered. `MAIN_PROP_TYPE` selects one main
+propulsion family at boot (0 = VSP, default; 1 = AZI). Only the selected
+runtime backend is constructed; both tunnel thrusters remain independent.
+`AZI_CONF=1` selects twin aft azipods (AZI1 port, AZI2 starboard). AZ2 adds
+manual independent azipod control using limited-angle position servos and
+forward-only or reversible ESCs. Outputs require valid boot calibration,
+a supported layout and paired local PWM routes. The layout alone selects
+installed azipods; there are no per-pod enable parameters. Read
+[AZIPODS_AZ2_HANDOVER.md](AZIPODS_AZ2_HANDOVER.md) before commissioning;
+[AZIPODS_AZ1_HANDOVER.md](AZIPODS_AZ1_HANDOVER.md) records the original architecture.
+AZ2.3 adds a temporary visual steering/propeller test through `MAV_CMD_USER_3`.
+See [AZIPODS_AZ2_3_HANDOVER.md](AZIPODS_AZ2_3_HANDOVER.md) and the exact
+[client widget specification](AZIPODS_AZ2_3_CLIENT.md). AZ2.4 adds per-drive
+reason bits and periodic MAVLink diagnostics (`AZI_TEL_HZ`, default 5 Hz,
+0 disables, capped at 10 Hz). See [AZ2.4 firmware and client diagnostic contract](AZIPODS_AZ2_4_STATUS.md).
 
 ```text
 VSP1: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP1
 VSP2: 3 inputs (IN1, IN2, RPM_IN), 3 outputs (OUT1, OUT2, RPM_OUT), prefix VSP2
 ThrusterBow: 1 input, 1 output, prefix THR_BOW
 ThrusterStern: 1 input, 1 output, prefix THR_STN
+AZI1: 2 inputs (X_IN, Y_IN), 2 outputs (AZ_OUT, MOT_OUT), prefix AZI1
+AZI2: 2 inputs (X_IN, Y_IN), 2 outputs (AZ_OUT, MOT_OUT), prefix AZI2
 ```
 
 All routed values are `uint16_t` microseconds.
@@ -460,7 +572,8 @@ and migration from the old passthrough behavior.
 
 Each VSP builds a small stack-allocated `Limiter` from its current
 parameters on every cycle, then uses `mapCoordinates()` for the first two
-outputs. `RPM_IN` passes directly to `RPM_OUT`. Coordinate results are clamped
+outputs. The RPM command follows the [VSP RPM governor settings](#vsp-rpm-governor).
+Coordinate results are clamped
 to the `uint16_t` output range before routing. The default `LIM=25` constrains
 coordinates to a radius of 25 microseconds around `(1500, 1500)`.
 
@@ -623,7 +736,10 @@ RT32_SRC
 RT32_DST
 ```
 
-A route is inactive if either value is `0`.
+A route is inactive if either value is `0`. Routes to an unselected main
+propulsion component are not executed; routes from it have invalid sources.
+Dormant routes retain their destination claims and participate in graph
+validation. There is one common RT table, not separate saved route profiles.
 
 Source encoding:
 
@@ -637,6 +753,8 @@ Source encoding:
 113      VSP2 RPM_OUT
 121      ThrusterBow output
 131      ThrusterStern output
+141/142  AZI1 azimuth/motor output (direct PWM only in AZ2)
+151/152  AZI2 azimuth/motor output (direct PWM only in AZ2)
 ```
 
 Destination encoding:
@@ -651,6 +769,8 @@ Destination encoding:
 113      VSP2 RPM_IN
 121      ThrusterBow input
 131      ThrusterStern input
+141/142  AZI1 X/Y input
+151/152  AZI2 X/Y input
 ```
 
 Examples:
@@ -828,3 +948,10 @@ controller ownership, slew parameters and state telemetry.
 `VSP1_AUTH` / `VSP2_AUTH` report the current rod command sources as an integer
 bitmask in NAMED_VALUE_FLOAT. See [VspAuthority.md](VspAuthority.md) for manual,
 heading, VRS and neutral-guard flags and their combinations.
+
+## Coordinated VSP navigation (opt-in)
+
+See [VSP_ALLOCATOR.md](VSP_ALLOCATOR.md) for AFT/VWT Heading Hold, Full DP,
+geometry, readiness, status bits, output rollback and commissioning.
+With `VNAV_VSP_EN=0`, manual control and tunnel Heading Hold remain available.
+In VWT layout, only the stern tunnel can participate in tunnel Heading Hold.

@@ -16,6 +16,8 @@ public:
 
 private:
     void handle_message(const mavlink_message_t& msg) override;
+    void handle_azipod_calibration(const mavlink_message_t& msg, uint8_t system, uint8_t component,
+                                   const float (&fields)[7]);
     void handle_sequencer_command(const mavlink_message_t& msg, uint16_t command,
                                   uint8_t system, uint8_t component, const float (&fields)[7]);
     void send_sequencer_ack(uint16_t command, uint8_t system, uint8_t component,

@@ -59,6 +59,8 @@ public:
      * or a mask of channels */
     virtual void     enable_ch(uint8_t chan) = 0;
     virtual void     disable_ch(uint8_t chan) = 0;
+    // Whether this channel has an available local PWM hardware path.
+    virtual bool     has_pwm_output(uint8_t chan) { return false; }
 
     /*
      * Output a single channel, possibly grouped with previous writes if
