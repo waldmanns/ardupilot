@@ -28,7 +28,8 @@ public:
         float fast_us_per_s;
         float slow_us_per_s;
         float near_rpm;
-        int16_t start_max_us;
+        int16_t start_us;
+        float start_timeout_s;
     };
 
     struct Feedback {
@@ -45,7 +46,7 @@ private:
 
     float _throttle_us = 0;
     uint32_t _last_ms = 0;
-    uint32_t _last_below_start_limit_ms = 0;
+    uint32_t _start_ms = 0;
     uint16_t _status = 0;
     State _state = State::Stopped;
 };

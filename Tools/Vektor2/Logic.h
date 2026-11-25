@@ -92,7 +92,8 @@ public:
     AP_Float vrpm_fast;
     AP_Float vrpm_slow;
     AP_Float vrpm_near;
-    AP_Int16 vrpm_start_max;
+    AP_Int16 vrpm_start_us;
+    AP_Float vrpm_start_timeout;
     FunctionParameters vfn_params;
     Functions vfn;
 

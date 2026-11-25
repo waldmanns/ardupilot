@@ -169,7 +169,7 @@ const AP_Param::GroupInfo Logic::var_info[] = {
 
     // @Param: VRPM_SLEW_FAST
     // @DisplayName: VSP RPM governor fast slew rate
-    // @Description: Throttle pulse change in microseconds per second during startup and at RPM errors twice NEAR_RPM or larger. Must be at least SLEW_SLOW.
+    // @Description: Throttle pulse change in microseconds per second at RPM errors twice NEAR_RPM or larger. Must be at least SLEW_SLOW.
     // @Range: 1 100
     // @User: Standard
     AP_GROUPINFO("VRPM_SLEW_FAST", 21, Logic, vrpm_fast, 30),
@@ -190,12 +190,20 @@ const AP_Param::GroupInfo Logic::var_info[] = {
     AP_GROUPINFO("VRPM_NEAR_RPM", 23, Logic, vrpm_near, 50),
 
     // @Param: VRPM_START_MAX
-    // @DisplayName: VSP RPM governor startup pulse limit
-    // @Description: Highest throttle pulse allowed while waiting for the first shaft RPM reading. After ten seconds at the limit without a reading, the drive stops until the pot is lowered to 1480 us or below.
+    // @DisplayName: VSP RPM governor startup pulse
+    // @Description: Fixed PWM command sent immediately when the pot passes 1480 us and shaft RPM is unavailable. Held until the first valid reading or START_TMO expires.
     // @Units: us
     // @Range: 1001 1500
     // @User: Standard
-    AP_GROUPINFO("VRPM_START_MAX", 24, Logic, vrpm_start_max, 1200),
+    AP_GROUPINFO("VRPM_START_MAX", 24, Logic, vrpm_start_us, 1200),
+
+    // @Param: VRPM_START_TMO
+    // @DisplayName: VSP RPM governor startup timeout
+    // @Description: Seconds to hold the startup pulse while waiting for shaft RPM. At timeout the drive sends 1000 us until the pot is lowered to 1480 us or below.
+    // @Units: s
+    // @Range: 0.1 60
+    // @User: Standard
+    AP_GROUPINFO("VRPM_START_TMO", 25, Logic, vrpm_start_timeout, 10),
     AP_GROUPEND
 };
 
@@ -313,7 +321,8 @@ void Logic::finish_vsp(uint8_t drive, bool vector_owned)
     }
 
     const VspRpmGovernor::Settings settings = {vrpm_enable.get() == 1, vrpm_low.get(), vrpm_high.get(),
-        vrpm_deadband.get(), vrpm_fast.get(), vrpm_slow.get(), vrpm_near.get(), vrpm_start_max.get()};
+        vrpm_deadband.get(), vrpm_fast.get(), vrpm_slow.get(), vrpm_near.get(),
+        vrpm_start_us.get(), vrpm_start_timeout.get()};
     runtime.outputs[2] = vsp.rpm_governors[drive].update(AP_HAL::millis(), settings,
         runtime.inputs[2], runtime.sources_valid[2], vsp.shaft_rpm[drive]);
 }

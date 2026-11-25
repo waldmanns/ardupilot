@@ -323,10 +323,11 @@ command, or each drive can have its own command.
 | `VRPM_RPM_LOW` | Target shaft RPM at 1500 µs. Set a positive value. |
 | `VRPM_RPM_HIGH` | Target shaft RPM at 2000 µs. Set a value at least as high as `VRPM_RPM_LOW`. |
 | `VRPM_DB` | Deadband on either side of the target in RPM. The default is ±2 RPM. |
-| `VRPM_SLEW_FAST` | Throttle rate at large RPM errors and during startup. Default 30 µs/s. |
+| `VRPM_SLEW_FAST` | Throttle rate at large RPM errors. Default 30 µs/s. |
 | `VRPM_SLEW_SLOW` | Throttle rate at the near-target boundary. Default 10 µs/s. Set it no higher than `VRPM_SLEW_FAST`. |
 | `VRPM_NEAR_RPM` | Error where the slow rate applies. Default 50 RPM. Set it above `VRPM_DB`. |
-| `VRPM_START_MAX` | Throttle limit before the first valid RPM reading. Default 1200 µs. |
+| `VRPM_START_MAX` | Fixed spin-up pulse applied immediately. Default 1200 µs. |
+| `VRPM_START_TMO` | Maximum time to hold the spin-up pulse, in seconds. Default 10 s. |
 
 In governor mode, 1480 µs and below outputs 1000 µs to stop the motor.
 1481–1500 µs selects the low RPM target. From 1500 to 2000 µs the target
@@ -338,12 +339,13 @@ zero at the deadband. Farther out it blends to the fast rate at twice
 `VRPM_NEAR_RPM`. Inside the deadband the drive holds its throttle pulse.
 Higher logical throttle pulses must increase shaft speed.
 
-From a stopped shaft, the drive ramps up to `VRPM_START_MAX` while it waits
-for a valid reading. If it spends ten seconds at that limit without feedback,
-or if it loses feedback while regulating, it commands 1000 µs. Lower the
-knob to 1480 µs or below to rearm that drive. A missing RPM input route or an
-unavailable RPM sensor also commands a stop. Shaft RPM measurements continue
-with `VRPM_TEL_HZ=0`.
+If the pot passes 1480 µs before valid shaft RPM is available, the drive sends
+`VRPM_START_MAX` immediately. It holds that pulse while waiting for feedback.
+Once a valid reading arrives, the governor starts slewing from the current
+output toward the target RPM. If `VRPM_START_TMO` expires first, or if feedback
+is lost while regulating, the drive commands 1000 µs. Lower the knob to 1480 µs
+or below to rearm. A missing RPM input route or an unavailable RPM sensor also
+commands a stop. Shaft RPM measurements continue with `VRPM_TEL_HZ=0`.
 
 With VSP propulsion selected, `VRPM1_STAT` and `VRPM2_STAT` report the
 governor bitmask for VSP1 and VSP2 at `VRPM_TEL_HZ`. Decode the float value

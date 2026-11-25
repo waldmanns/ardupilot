@@ -560,7 +560,11 @@ void App::update_navigation_status(uint32_t now_ms)
         const float max_moment = yaw_limit > 0 ? std::fmin(yaw_limit, thrusters.arm_m) : thrusters.arm_m;
         const float desired_effort = nav_heading.output().yaw_demand * max_moment / thrusters.arm_m;
         const float step = thrusters.slew * float(elapsed_ms) * 0.001f;
+#if APJ_BOARD_ID == 124 // revo-mini: AP_HAL deliberately disables double fmax
+        _heading_effort += fmaxf(-step, std::fmin(step, desired_effort - _heading_effort));
+#else
         _heading_effort += std::fmax(-step, std::fmin(step, desired_effort - _heading_effort));
+#endif
         heading_mask = thrusters.selected;
         for (uint8_t i = 0; i < 2; i++) {
             if (heading_mask & (1U << i)) {

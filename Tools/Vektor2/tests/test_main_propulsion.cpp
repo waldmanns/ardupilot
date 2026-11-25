@@ -470,21 +470,23 @@ static void vsp_rpm_governor_test()
     assert(logic.vsp_rpm_status(1) == (engaged | Governor::InDeadband));
     check(1750, 1750, 100, 200, 1000, 1008); // feedback recovery needs a low pot
     check(1480, 1480, 0, 0, 1000, 1000);
-    check(1500, 1480, 0, 0, 1000, 1000);
-    check(1500, 1480, 0, 0, 1004, 1000);
+    check(1481, 1480, 0, 0, 1200, 1000); // immediate startup pulse
+    check(2000, 1480, 0, 0, 1200, 1000); // pot changes the target, not the startup pulse
     assert(logic.vsp_rpm_status(0) == ((engaged & ~(Governor::FeedbackValid | Governor::Active)) | Governor::Starting));
-    check(1500, 1480, 100, 0, 1004, 1000); // closed-loop handoff holds the startup pulse
+    check(1500, 1480, 50, 0, 1200, 1000); // closed-loop handoff holds the startup pulse
+    check(1500, 1480, 50, 0, 1202, 1000); // feedback now controls the approach
 
-    logic.vrpm_start_max.set(1010);
+    logic.vrpm_start_us.set(1250);
+    logic.vrpm_start_timeout.set(0.3f);
     check(1480, 1480, 0, 0, 1000, 1000);
-    check(1500, 1480, 0, 0, 1000, 1000);
-    check(1500, 1480, 0, 0, 1004, 1000);
-    check(1500, 1480, 0, 0, 1008, 1000);
-    check(1500, 1480, 0, 0, 1010, 1000);
-    check(1500, 1480, 0, 0, 1010, 1000);
-    now_ms += 10000;
-    check(1500, 1480, 0, 0, 1000, 1000);
+    check(1500, 1480, 0, 0, 1250, 1000);
+    check(1500, 1480, 0, 0, 1250, 1000);
+    check(1500, 1480, 0, 0, 1250, 1000);
+    check(1500, 1480, 0, 0, 1000, 1000); // timeout measured from engagement
     assert((logic.vsp_rpm_status(0) & (Governor::Inhibited | Governor::Starting)) == Governor::Inhibited);
+    check(1500, 1480, 100, 0, 1000, 1000); // late feedback cannot restart the drive
+    check(1480, 1480, 0, 0, 1000, 1000);
+    check(1500, 1480, 0, 0, 1250, 1000);
 
     logic.vrpm_high.set(0);
     check(2000, 2000, 100, 300, 1000, 1000);
